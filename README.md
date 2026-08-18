@@ -8,7 +8,7 @@
 | --- | --- |
 | 앱 | Next.js (App Router) |
 | 언어 | TypeScript |
-| 이미지 | Gemini (나노바나나) |
+| 이미지 | OpenAI (gpt-image / Responses API) |
 | 텍스트 | OpenAI |
 | DB·스토리지 | Supabase |
 
@@ -28,8 +28,8 @@ cuttoon-copilot/
 │      └─ generate/            이미지 생성 (maxDuration=300)  B①
 ├─ lib/
 │  ├─ llm/                     브레인스토밍 3턴 · 캡션         A①
-│  ├─ gemini/
-│  │   ├─ generate.ts          컷 생성 (chats 세션 관리)      B①
+│  ├─ openai/
+│  │   ├─ generate.ts          컷 생성 (멀티턴 세션 관리)      B①
 │  │   ├─ extract.ts           레퍼런스 VLM 추출              B②
 │  │   └─ provider.ts          ImageProvider 인터페이스        B①
 │  ├─ render/                  텍스트 레이어 합성 · ZIP        B③
@@ -50,8 +50,8 @@ cuttoon-copilot/
 | `app/(studio)/` | A② |
 | `app/api/preset/`, `app/api/session/` | A③ |
 | `lib/llm/`, `spec/` | A① |
-| `app/api/generate/`, `lib/gemini/generate.ts` | B① |
-| `lib/gemini/extract.ts` | B② |
+| `app/api/generate/`, `lib/openai/generate.ts` | B① |
+| `lib/openai/extract.ts` | B② |
 | `lib/render/` | B③ |
 
 ## 브랜치
