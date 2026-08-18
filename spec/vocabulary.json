@@ -1,0 +1,12 @@
+{
+  "vocabulary_version": "0-provisional",
+  "expression": ["neutral","smile","laugh","tired","worried","surprised","determined","relieved"],
+  "pose": ["stand","sit","slump","point","arms_up","walk","stretch","lie_down"],
+  "shot_type": ["closeup","bust","waist","full","wide"],
+  "camera_angle": ["eye","high","low"],
+  "time_of_day": ["morning","noon","evening","night"],
+  "bubble_type": ["rounded","rect","cloud"],
+  "position": ["top_left","top_right","bottom_left","bottom_right","center"],
+  "reserved_zone": ["top","bottom","left","right"],
+  "narrative_beat": ["hook","problem","solution","cta","question","fact","benefit","before","turning","after"]
+}

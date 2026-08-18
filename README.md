@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 컷툰 제작 AI 코파일럿
 
-## Getting Started
+리브라이블리 기업 연계 프로젝트. 4컷 컷툰 생성 코파일럿.
 
-First, run the development server:
+## 스택
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+| 영역 | 선택 |
+| --- | --- |
+| 앱 | Next.js (App Router) |
+| 언어 | TypeScript |
+| 이미지 | Gemini (나노바나나) |
+| 텍스트 | OpenAI |
+| DB·스토리지 | Supabase |
+
+## 폴더 소유권
+
+| 폴더 | 담당 |
+| --- | --- |
+| `app/(studio)/` | A② |
+| `app/api/preset/`, `app/api/session/` | A③ |
+| `lib/llm/`, `spec/` | A① |
+| `app/api/generate/`, `lib/gemini/generate.ts` | B① |
+| `lib/gemini/extract.ts` | B② |
+| `lib/render/` | B③ |
+
+## 브랜치
+
+1인 1브랜치: `feat/a1` `feat/a2` `feat/a3` `feat/b1` `feat/b2` `feat/b3`
+
+## git 규칙
+
+1. main 직접 push 금지, PR로만
+2. 빌드 확인 후 머지, 조금씩 자주
+3. 되감기(rebase·force-push)는 본인 브랜치만, main은 그대로
+4. DB 구조 변경은 A③만
+5. `.env`와 API 키 올리지 않기
+6. 발표 전날 태그 하나 찍고 멈추기, 이후 수정 시 태그 새로
+
+## 로컬 실행
+
 ```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+npm install
+npm run dev
+```
