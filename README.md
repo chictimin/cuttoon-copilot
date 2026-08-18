@@ -12,6 +12,37 @@
 | 텍스트 | OpenAI |
 | DB·스토리지 | Supabase |
 
+## 폴더 구조
+
+```
+cuttoon-copilot/
+├─ app/
+│  ├─ (studio)/                화면 전체                      A②
+│  │   ├─ page.tsx             프로젝트 목록
+│  │   ├─ onboarding/          온보딩 + 프리셋 생성 ← A/B 접점
+│  │   ├─ session/[id]/        소재 입력 → 3안 → 4컷 완성
+│  │   └─ editor/[id]/         대사 수정 · 드래그 · 되돌리기
+│  └─ api/
+│      ├─ preset/              프리셋 CRUD                    A③
+│      ├─ session/             세션 관리 · Export             A③
+│      └─ generate/            이미지 생성 (maxDuration=300)  B①
+├─ lib/
+│  ├─ llm/                     브레인스토밍 3턴 · 캡션         A①
+│  ├─ gemini/
+│  │   ├─ generate.ts          컷 생성 (chats 세션 관리)      B①
+│  │   ├─ extract.ts           레퍼런스 VLM 추출              B②
+│  │   └─ provider.ts          ImageProvider 인터페이스        B①
+│  ├─ render/                  텍스트 레이어 합성 · ZIP        B③
+│  └─ db/                      Supabase 클라이언트 · 쿼리      A③
+├─ spec/                       계약 (변경은 A① 승인)          A①
+│  ├─ preset.schema.json
+│  ├─ storyboard.schema.json
+│  ├─ vocabulary.json          계약 ⑤ 어휘 사전
+│  └─ samples/                 샘플 응답 JSON + 이미지
+└─ public/
+   └─ demo-cache/              발표용 캐시 폴백
+```
+
 ## 폴더 소유권
 
 | 폴더 | 담당 |
