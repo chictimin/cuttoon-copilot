@@ -1,0 +1,27 @@
+{
+  "counterpart_characters_version": "1.0",
+  "description": "지도사(preset.assets.character_sheet)가 컷마다 마주해서 대화하는 상대역 후보 풀. preset.schema.json은 건드리지 않고(이미 병합된 계약) spec/ 안에 새 데이터 파일로만 추가함 — A①(spec/) 소유 영역 안에서 해결.",
+  "selection": "random",
+  "characters": [
+    {
+      "id": "bear_grumpy",
+      "asset": "asset://characters/counterparts/bear-grumpy.png",
+      "description": "팔짱 낀 무뚝뚝한 표정의 흰 곰, 파란 폴로셔츠"
+    },
+    {
+      "id": "rabbit_wink",
+      "asset": "asset://characters/counterparts/rabbit-wink.png",
+      "description": "윙크하는 회색 귀 토끼/고양이, 파란 폴로셔츠"
+    },
+    {
+      "id": "duck_drinks",
+      "asset": "asset://characters/counterparts/duck-drinks.png",
+      "description": "음료 두 잔을 든 오리, 파란 폴로셔츠"
+    },
+    {
+      "id": "bear_clipboard",
+      "asset": "asset://characters/counterparts/bear-clipboard.png",
+      "description": "클립보드에 메모하는 크림색 곰, 파란 폴로셔츠"
+    }
+  ]
+}
