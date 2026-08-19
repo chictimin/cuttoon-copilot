@@ -1,7 +1,8 @@
 import { generateCharacterSheet, generateCut } from '@/lib/openai/generate'
 
 // POST /api/generate
-// body: { kind: 'character_sheet', preset } | { kind: 'cut', storyboard, preset, referenceAssets }
+// body: { kind: 'character_sheet', preset }
+//     | { kind: 'cut', storyboard, preset, referenceAssets, continueFrom? }
 export async function POST(request: Request) {
   let body: unknown
   try {
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
   if (typeof body !== 'object' || body === null) {
     return Response.json({ error: '본문은 객체여야 합니다' }, { status: 400 })
   }
-  const { kind, preset, storyboard, referenceAssets } = body as Record<string, unknown>
+  const { kind, preset, storyboard, referenceAssets, continueFrom } = body as Record<string, unknown>
 
   if (!preset) {
     return Response.json({ error: 'preset이 필요합니다' }, { status: 400 })
@@ -34,6 +35,9 @@ export async function POST(request: Request) {
             storyboard,
             preset,
             referenceAssets: Array.isArray(referenceAssets) ? referenceAssets : [],
+            // 체이닝 토큰. 문자열이 아니면 넘기지 않는다 — 첫 컷은 이어받을
+            // 대상이 없어 생략되는 것이 정상이다.
+            continueFrom: typeof continueFrom === 'string' ? continueFrom : undefined,
           }),
         })
       default:
