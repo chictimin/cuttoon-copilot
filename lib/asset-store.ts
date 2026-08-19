@@ -67,7 +67,8 @@ export async function uploadAsset(
 }
 
 /**
- * Supabase Storage에서 파일을 다운로드한다.
+ * Supabase Storage에서 공개 URL을 반환한다.
+ * list()로 실제 저장된 파일을 먼저 확인한 후 URL을 생성한다.
  */
 export async function getAssetUrl(assetUri: string): Promise<string | null> {
   if (!assetUri.startsWith("asset://")) {
@@ -76,19 +77,20 @@ export async function getAssetUrl(assetUri: string): Promise<string | null> {
 
   const assetId = assetUri.replace("asset://", "");
 
-  // 가능한 확장자 시도
-  const extensions = ["png", "jpg", "jpeg", "gif", "webp", "svg", "pdf", "txt", "json"];
+  // 실제 저장된 파일 찾기
+  const { data: files, error: listError } = await supabase.storage
+    .from(BUCKET_NAME)
+    .list("", { search: assetId });
 
-  for (const ext of extensions) {
-    const fileName = `${assetId}.${ext}`;
-    const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(fileName);
-
-    if (data?.publicUrl) {
-      return data.publicUrl;
-    }
+  if (listError || !files || files.length === 0) {
+    return null;
   }
 
-  return null;
+  // 첫 번째 매칭 파일의 공개 URL 생성
+  const fileName = files[0].name;
+  const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(fileName);
+
+  return data?.publicUrl ?? null;
 }
 
 /**
