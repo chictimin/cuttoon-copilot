@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 
-const client = new OpenAI({ apiKey: process.env.API_KEY });
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // --- 브랜드 에셋 ---
 
@@ -141,16 +141,15 @@ export async function generateCharacterSheet(
   const prompt = buildCharacterPrompt(preset);
 
   const response = await client.images.generate({
-    model: "dall-e-3",
+    model: "gpt-image-1",
     prompt,
     n: 1,
     size: "1024x1024",
-    response_format: "b64_json",
   });
 
   const data = response.data[0];
   return {
     imageBase64: data.b64_json!,
-    revisedPrompt: data.revised_prompt ?? "",
+    revisedPrompt: prompt,
   };
 }
