@@ -81,13 +81,13 @@ cuttoon-copilot/
 | 8. 브레인스토밍 3턴 | 없음 (`lib/llm`은 A①, 라우트는 A③) | mock | 미구현 |
 | 9. 표지컷 3안 | 없음 | mock | 미구현 |
 | 10. 4컷 생성 | `POST /api/generate` + 계약 스텁 | mock | 미구현 |
-| 11. 대사 수정 · 드래그 | — | 있음(mock) | 반쪽 |
-| 12. v2 저장 · 되돌리기 | `/api/session` `/version` `/revert` | 미연결 | 미연결 |
+| 11. 대사 수정 · 드래그 | — | 있음 | 완료 |
+| 12. v2 저장 · 되돌리기 | `/api/session` `/version` `/revert` | 연결됨 | 완료 |
 | 13. Export ZIP | `lib/render/`가 빈 폴더 | 없음 | 미착수 |
 
 알아둘 것 세 가지다.
 
-**화면에서 실제 API를 부르는 곳은 온보딩 하나뿐이다.** `OnboardingFlow.tsx`의 `fetch("/api/preset")`가 전부고, 세션·에디터·목록은 mock이나 placeholder다. API가 있어도 화면이 안 붙으면 새로고침에서 사라진다.
+**화면에서 실제 API를 부르는 곳이 늘었다(PR #46).** 온보딩(`/api/preset`)에 이어 세션 저장(`POST /api/session`)·에디터 조회·저장·되돌리기(`GET /api/session`, `POST /api/session/version`, `POST /api/session/revert`)가 실제 API로 연결됐다. 다만 세션 화면의 브레인스토밍·표지컷·4컷 생성(8·9·10번)은 여전히 mock이다 — 저장·조회만 실제고 그 앞 단계 생성은 아직 아니다.
 
 **이미지 생성에 실제 모델 호출이 아직 없다.** 라우트와 인터페이스는 들어왔지만(PR #26) `generateCharacterSheet`·`generateCut`이 `asset://stub/...`을 돌려주는 스텁이다. 8·9·10번이 전부 여기 걸려 있어서, 실제 호출이 붙기 전까지 P2도 P3도 시작할 수 없다.
 
