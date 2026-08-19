@@ -1,2 +1,155 @@
-// TODO: B②
-export {}
+import OpenAI from "openai";
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
+
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// --- 브랜드 에셋 ---
+
+export interface BrandConfig {
+  brand_name: string;
+  product_name: string;
+  palette: string[];
+  characters: { id: string; file: string; label: string }[];
+  logo: { symbol: string; horizontal: string; product: string };
+}
+
+const BRAND_DIR = join(process.cwd(), "public/brand");
+
+export function loadBrandConfig(): BrandConfig | null {
+  const configPath = join(BRAND_DIR, "brand.json");
+  if (!existsSync(configPath)) return null;
+  return JSON.parse(readFileSync(configPath, "utf-8"));
+}
+
+export function loadBrandCharacterBuffers(): Buffer[] {
+  const brand = loadBrandConfig();
+  if (!brand) return [];
+  return brand.characters
+    .map((c) => {
+      const filePath = join(BRAND_DIR, c.file);
+      return existsSync(filePath) ? readFileSync(filePath) : null;
+    })
+    .filter((buf): buf is Buffer => buf !== null);
+}
+
+export interface StyleResult {
+  line_weight: "thin" | "medium" | "thick";
+  saturation: "pastel" | "vivid" | "muted";
+  character_ratio: "2head" | "2.5head" | "3head" | "realistic";
+  background_density: "none" | "low" | "medium" | "high";
+  bubble_style: "rounded" | "rect" | "cloud";
+  palette: string[];
+}
+
+const SYSTEM_PROMPT = `당신은 컷툰 스타일 분석가입니다. 첨부된 레퍼런스 이미지를 분석해서 아래 항목을 정확히 하나씩만 골라 JSON으로 답하세요.
+
+- line_weight: thin | medium | thick (선 굵기)
+- saturation: pastel | vivid | muted (전체 채도감)
+- character_ratio: 2head | 2.5head | 3head | realistic (2head/2.5head/3head는 두신 비율이 과장된 카툰체, realistic은 실제 인체 비율에 가까운 경우)
+- background_density: none | low | medium | high (배경 디테일 정도)
+- bubble_style: rounded | rect | cloud (말풍선 모양)
+- palette: 이 이미지에서 대표적인 색상 4~6개를 HEX 코드로
+
+반드시 이 필드만 포함한 JSON 하나로만 답하세요. 설명 문장은 쓰지 마세요.`;
+
+export async function extractStyle(refs: Buffer[]): Promise<StyleResult> {
+  const imageMessages = refs.map((buf) => ({
+    type: "image_url" as const,
+    image_url: {
+      url: `data:image/png;base64,${buf.toString("base64")}`,
+    },
+  }));
+
+  const response = await client.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "이 이미지의 스타일을 분석해주세요." },
+          ...imageMessages,
+        ],
+      },
+    ],
+    response_format: { type: "json_object" },
+    max_tokens: 300,
+  });
+
+  const raw = response.choices[0].message.content ?? "{}";
+  return JSON.parse(raw) as StyleResult;
+}
+
+// --- generateCharacterSheet ---
+
+export interface PresetInput {
+  style: StyleResult & { keywords: string[] };
+  context: {
+    industry: string[];
+    age_band: string[];
+    life_stage: string[];
+    main_subjects: string[];
+  };
+}
+
+export interface CharacterSheetResult {
+  imageBase64: string;
+  revisedPrompt: string;
+}
+
+function buildCharacterPrompt(preset: PresetInput): string {
+  const s = preset.style;
+  const c = preset.context;
+
+  const paletteStr = s.palette.join(", ");
+  const keywordsStr = s.keywords.length > 0 ? s.keywords.join(", ") : "default comic style";
+  const industryStr = c.industry.length > 0 ? c.industry.join(", ") : "general";
+  const ageStr = c.age_band.length > 0 ? c.age_band.join(", ") : "all ages";
+  const lifeStr = c.life_stage.length > 0 ? c.life_stage.join(", ") : "general";
+
+  return `Character reference sheet for a webtoon/comic series.
+
+Style: ${s.line_weight} line weight, ${s.saturation} colors, ${s.character_ratio} body proportions.
+Color palette: ${paletteStr}.
+Style keywords: ${keywordsStr}.
+
+Character context: A person typical of the ${industryStr} field, targeting ${ageStr} age group, ${lifeStr} life stage.
+
+Draw the character in THREE poses on a single white-background sheet:
+1. Front view, neutral expression, standing
+2. 3/4 view, smiling
+3. Side view, walking
+
+No speech bubbles. No text. Clean reference sheet layout with clear separation between poses.`;
+}
+
+export async function generateCharacterSheet(
+  preset: PresetInput
+): Promise<CharacterSheetResult> {
+  const brand = loadBrandConfig();
+  if (brand && brand.characters.length > 0) {
+    const firstChar = brand.characters[0];
+    const filePath = join(BRAND_DIR, firstChar.file);
+    const buf = readFileSync(filePath);
+    return {
+      imageBase64: buf.toString("base64"),
+      revisedPrompt: `Brand character: ${firstChar.label}`,
+    };
+  }
+
+  const prompt = buildCharacterPrompt(preset);
+
+  const response = await client.images.generate({
+    model: "gpt-image-1",
+    prompt,
+    n: 1,
+    size: "1024x1024",
+  });
+
+  const data = response.data[0];
+  return {
+    imageBase64: data.b64_json!,
+    revisedPrompt: prompt,
+  };
+}
