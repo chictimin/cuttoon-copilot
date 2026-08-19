@@ -71,29 +71,31 @@ cuttoon-copilot/
 
 | 단계 | 로직·API | 화면 | 상태 |
 | --- | --- | --- | --- |
-| 1. 레퍼런스 업로드 | 없음 | 있음 | 막힘 |
+| 1. 레퍼런스 업로드 | `POST /api/upload` · `lib/asset-store.ts` | mock 사용 | 미연결 |
 | 2. 스타일 추출 | `lib/openai/extract.ts` (실제 호출) | mock 사용 | 반쪽 |
 | 3. 프리셋 자동 확정 | `lib/llm/preset-guard.ts` | 있음 | 완료 |
 | 4. 프리셋 저장 | `GET·POST /api/preset` | 연결됨 | 완료 |
 | 5. 캐릭터 시트 표시 | — | 있음 | 완료 |
-| 6. 프로젝트 목록 | `GET /api/preset` (id 없이) | placeholder | 미연결 |
+| 6. 프로젝트 목록 | `GET /api/preset` (id 없이) | 연결됨 | 완료 |
 | 7. 소재 입력 | — | 있음 | 있음 |
 | 8. 브레인스토밍 3턴 | 없음 | mock | 미구현 |
-| 9. 표지컷 3안 | 없음 | mock | 미구현 |
+| 9. 표지컷 3안 | `generateCoverVariants` 계약 + 스텁 | mock | 미구현 |
 | 10. 4컷 생성 | `POST /api/generate` + 계약 스텁 | mock | 미구현 |
 | 11. 대사 수정 · 드래그 | — | 있음 | 완료 |
 | 12. v2 저장 · 되돌리기 | `/api/session` `/version` `/revert` | 연결됨 | 완료 |
-| 13. Export ZIP | `lib/render/` 구현 완료(대사 합성 + ZIP) | 없음 | 반쪽 |
+| 13. Export ZIP | `lib/render/` 완료, 호출할 라우트 없음 | 없음 | 반쪽 |
 
 알아둘 것 세 가지다.
 
-**화면에서 실제 API를 부르는 곳이 늘었다(PR #46).** 온보딩(`/api/preset`)에 이어 세션 저장(`POST /api/session`)·에디터 조회·저장·되돌리기(`GET /api/session`, `POST /api/session/version`, `POST /api/session/revert`)가 실제 API로 연결됐다. 다만 세션 화면의 브레인스토밍·표지컷·4컷 생성(8·9·10번)은 여전히 mock이다 — 저장·조회만 실제고 그 앞 단계 생성은 아직 아니다.
+**저장·조회 계열은 화면까지 이어졌습니다.** 프로젝트 목록(`GET /api/preset`), 프리셋 저장(`POST /api/preset`), 세션 저장(`POST /api/session`), 에디터의 조회·버전 저장·되돌리기가 모두 실제 API를 부릅니다.
 
-**이미지 생성에 실제 모델 호출이 아직 없다.** 라우트와 인터페이스는 들어왔지만(PR #26) `generateCharacterSheet`·`generateCut`이 `asset://stub/...`을 돌려주는 스텁이다. 8·9·10번이 전부 여기 걸려 있어서, 실제 호출이 붙기 전까지 P2도 P3도 시작할 수 없다.
+**생성 계열은 아직 전부 mock입니다.** 레퍼런스 업로드(1번), 스타일 추출(2번), 브레인스토밍(8번), 표지컷 3안(9번), 4컷 생성(10번)이 여기 해당합니다. 1번은 `POST /api/upload`와 `lib/asset-store.ts`가 main에 있는데 화면이 아직 `mock-style-analysis.ts`를 쓰고 있어서 "미연결"입니다.
 
-**P0 게이트를 아직 검증하지 못했다.** `PRD.md` 7절이 "P0의 두 게이트가 가장 중요한 판단점"이라고 못 박았는데(캐릭터 4컷 동일성 / 말풍선 억제), 검증할 코드 자체가 없는 상태다.
+**이미지 생성에 실제 모델 호출이 아직 없습니다.** 라우트와 `ImageProvider` 계약은 들어왔지만(PR #26·#61) `generateCharacterSheet`·`generateCoverVariants`·`generateCut`이 모두 `asset://stub/...`을 돌려주는 스텁입니다. 9·10번이 여기 걸려 있어서, 실제 호출이 붙기 전까지 P2를 통과할 수 없습니다.
 
-이 표는 손으로 갱신한다. 단계를 완료하는 PR을 올릴 때 같이 고친다.
+**P0 게이트를 아직 검증하지 못했습니다.** `PRD.md` 7절이 "P0의 두 게이트가 가장 중요한 판단점"이라고 못 박았는데(캐릭터 4컷 동일성 / 말풍선 억제), 검증할 실제 생성 코드가 없는 상태입니다.
+
+이 표는 손으로 갱신합니다. 단계를 완료하는 PR을 올릴 때 함께 고쳐주세요.
 
 ## 브랜치
 
