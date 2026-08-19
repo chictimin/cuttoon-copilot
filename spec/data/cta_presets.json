@@ -1,0 +1,54 @@
+{
+  "cta_presets_version": "1.0",
+  "fallback_id": "consult_request",
+  "presets": [
+    {
+      "id": "consult_request",
+      "label": "상담 신청 유도",
+      "template": "지금 상담 신청하기",
+      "interests": ["lead_generation", "sales_conversion"]
+    },
+    {
+      "id": "signup_apply",
+      "label": "수강/모집 신청 유도",
+      "template": "지금 바로 신청하기",
+      "interests": ["recruiting", "sales_conversion"]
+    },
+    {
+      "id": "profile_link_learn_more",
+      "label": "프로필 링크 안내",
+      "template": "프로필 링크에서 자세히 알아보기",
+      "interests": ["info_education", "trust_building"]
+    },
+    {
+      "id": "follow_prompt",
+      "label": "팔로우 유도",
+      "template": "다음 이야기가 궁금하다면 팔로우",
+      "interests": ["brand_awareness"]
+    },
+    {
+      "id": "event_rsvp",
+      "label": "이벤트 참가 신청",
+      "template": "지금 이벤트 참가 신청하기",
+      "interests": ["event_promotion"]
+    },
+    {
+      "id": "product_learn_more",
+      "label": "제품/서비스 더 알아보기",
+      "template": "더 알아보기",
+      "interests": ["product_showcase"]
+    },
+    {
+      "id": "save_share",
+      "label": "저장·공유 유도",
+      "template": "저장해두고 다음에 다시 보기",
+      "interests": ["brand_awareness", "trust_building"]
+    },
+    {
+      "id": "dm_contact",
+      "label": "DM 문의 유도",
+      "template": "궁금한 점은 DM으로 문의하기",
+      "interests": ["lead_generation", "info_education"]
+    }
+  ]
+}
