@@ -116,3 +116,26 @@ cuttoon-copilot/
 npm install
 npm run dev
 ```
+
+`.env`는 저장소에 들어 있으므로(위 git 규칙 5번) 따로 만들 필요는 없다.
+
+### Supabase 셋업
+
+새 Supabase 프로젝트로 갈아타거나 처음 셋업할 때는 아래 둘 다 필요하다. 테이블만 만들고 버킷을 빠뜨리면 업로드와 이미지 읽기가 통째로 실패한다(`Bucket not found`, issue #67).
+
+1. **테이블** — `lib/db/schema.sql`을 Supabase SQL Editor에서 실행
+2. **Storage 버킷** — `assets` 버킷을 **public으로** 생성
+
+버킷을 public으로 두는 이유는 `lib/asset-store.ts`의 `getAssetUrl()`이 `getPublicUrl()`을 쓰기 때문이다. private으로 만들면 이미지 URL이 전부 깨진다.
+
+대시보드에서 만들거나(Storage → New bucket → 이름 `assets`, Public 체크), 서비스롤 키로 한 줄이면 된다.
+
+```
+npx tsx -e "
+import {createClient} from '@supabase/supabase-js';
+const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+s.storage.createBucket('assets', { public: true }).then(r => console.log(r.data ?? r.error));
+"
+```
+
+파일 크기·mime 제한은 아직 걸지 않았다 — 값 확정은 issue #68에서 논의 중이다.
