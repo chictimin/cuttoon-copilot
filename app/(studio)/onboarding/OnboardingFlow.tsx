@@ -36,7 +36,6 @@ export default function OnboardingFlow() {
   const [isDragging, setIsDragging] = useState(false);
   const [confirmedName, setConfirmedName] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [userKeywords, setUserKeywords] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function runAnalysis(count: number) {
@@ -83,7 +82,6 @@ export default function OnboardingFlow() {
   }
 
   function handleConfirmKeywords(keywords: string[]) {
-    setUserKeywords(keywords);
     const merged = mergeStyleValues(null, keywords);
     const analysisResult: StyleAnalysisResult = {
       style: {
@@ -149,9 +147,10 @@ export default function OnboardingFlow() {
         return;
       }
 
-      const { presetId } = await res.json();
-      // 세션 화면이 어느 프리셋으로 시작할지 알아야 해서 id만 남긴다.
+      const { presetId, projectId } = await res.json();
+      // 세션 화면(POST /api/session)이 둘 다 필요하다 (issue #41).
       window.sessionStorage.setItem("cuttoon:preset-id", presetId);
+      window.sessionStorage.setItem("cuttoon:project-id", projectId);
       setConfirmedName(preset.project_name);
       setStep("confirmed");
     } catch {

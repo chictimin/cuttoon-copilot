@@ -1,14 +1,8 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { assertStoryboardRuntimeInvariants } from "@/lib/llm/storyboard-guard";
 import type { CaptionPosition, Storyboard } from "../../session/[id]/storyboard-types";
-
-// sessionStorage는 탭 안에서만 유효하고 storage 이벤트도 안 쏘므로 구독할 게 없다 —
-// useSyncExternalStore는 여기서 순전히 "서버에선 null, 하이드레이션 후 실제 값"을
-// 안전하게 읽기 위한 용도로만 쓴다 (useEffect+setState로 하면 새 lint 규칙
-// react-hooks/set-state-in-effect에 걸린다).
-const noopSubscribe = () => () => {};
 
 const POSITION_STYLE: Record<CaptionPosition, React.CSSProperties> = {
   top_left: { top: 8, left: 8 },
@@ -36,42 +30,86 @@ function clone(storyboard: Storyboard): Storyboard {
   return JSON.parse(JSON.stringify(storyboard));
 }
 
-export default function EditorFlow({ sessionId }: { sessionId: string }) {
-  const storageKey = `cuttoon:session:${sessionId}`;
-  const raw = useSyncExternalStore(
-    noopSubscribe,
-    () => window.sessionStorage.getItem(storageKey),
-    () => null
-  );
-  const saved = raw ? (JSON.parse(raw) as Storyboard) : null;
+type Phase = "loading" | "not_found" | "load_error" | "ready";
 
+interface SavedState {
+  version: number;
+  storyboard: Storyboard;
+}
+
+export default function EditorFlow({ sessionId }: { sessionId: string }) {
+  const [phase, setPhase] = useState<Phase>("loading");
+  const [saved, setSaved] = useState<SavedState | null>(null);
   const [draft, setDraft] = useState<Storyboard | null>(null);
-  const [initializedFor, setInitializedFor] = useState<string | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [draftCaption, setDraftCaption] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [reverting, setReverting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
-  // saved가 하이드레이션 이후 처음 도착했을 때(또는 sessionId가 바뀌었을 때) 딱 한 번
-  // draft를 초기화한다. 렌더 중 조건부 setState — effect가 아니라서 위 lint 규칙에
-  // 걸리지 않고, 매 렌더 setState되는 것도 initializedFor 가드로 막는다.
-  if (saved && initializedFor !== storageKey) {
-    setDraft(clone(saved));
-    setInitializedFor(storageKey);
-    setEditingIndex(null);
-  }
+  useEffect(() => {
+    let cancelled = false;
 
-  if (!saved || !draft) {
+    (async () => {
+      try {
+        const res = await fetch(`/api/session?id=${encodeURIComponent(sessionId)}`);
+        if (cancelled) return;
+
+        if (res.status === 404) {
+          setPhase("not_found");
+          return;
+        }
+        if (!res.ok) {
+          setPhase("load_error");
+          return;
+        }
+
+        const data = await res.json();
+        if (cancelled) return;
+
+        setSaved({ version: data.version, storyboard: data.storyboard });
+        setDraft(clone(data.storyboard));
+        setPhase("ready");
+      } catch {
+        if (!cancelled) setPhase("load_error");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  if (phase === "loading") {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-2 p-8 text-center">
-        <h1 className="text-xl font-semibold">아직 완성된 스토리보드가 없어요</h1>
-        <p className="text-sm text-zinc-500">
-          세션 화면에서 4컷을 먼저 완성해주세요
-        </p>
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-zinc-200 border-t-zinc-700" />
+        <p className="text-sm text-zinc-500">불러오는 중...</p>
       </main>
     );
   }
 
-  const isDirty = JSON.stringify(draft) !== JSON.stringify(saved);
+  if (phase === "not_found") {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-2 p-8 text-center">
+        <h1 className="text-xl font-semibold">아직 완성된 스토리보드가 없어요</h1>
+        <p className="text-sm text-zinc-500">세션 화면에서 4컷을 먼저 완성해주세요</p>
+      </main>
+    );
+  }
+
+  if (phase === "load_error" || !saved || !draft) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-2 p-8 text-center">
+        <h1 className="text-xl font-semibold">불러오지 못했어요</h1>
+        <p className="text-sm text-zinc-500">잠시 후 새로고침해주세요</p>
+      </main>
+    );
+  }
+
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(saved.storyboard);
+  const canRevert = saved.version > 1;
 
   function updatePosition(index: number, position: CaptionPosition) {
     setDraft((prev) => {
@@ -97,19 +135,70 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
     });
   }
 
-  function handleRevert() {
-    if (!saved) return;
-    setDraft(clone(saved));
-    setEditingIndex(null);
+  async function handleSave() {
+    if (!draft) return;
+
+    try {
+      assertStoryboardRuntimeInvariants(draft.cuts);
+    } catch {
+      setActionError("스토리보드에 문제가 있어요");
+      return;
+    }
+
+    setActionError(null);
+    setSaving(true);
+    try {
+      const res = await fetch("/api/session/version", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, storyboard: draft }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setActionError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+        return;
+      }
+
+      const data = await res.json();
+      setSaved({ version: data.version, storyboard: draft });
+      setSavedAt(new Date().toLocaleTimeString());
+    } catch {
+      setActionError("저장에 실패했어요. 다시 시도해주세요");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handleSave() {
-    if (!draft) return;
-    assertStoryboardRuntimeInvariants(draft.cuts);
-    window.sessionStorage.setItem(storageKey, JSON.stringify(draft));
-    // sessionStorage에 쓰면 useSyncExternalStore가 다음 렌더(바로 아래 setSavedAt으로
-    // 트리거됨)에서 알아서 새 값을 읽어오므로 saved를 직접 갱신할 필요 없다.
-    setSavedAt(new Date().toLocaleTimeString());
+  async function handleRevert() {
+    setActionError(null);
+    setReverting(true);
+    try {
+      const res = await fetch("/api/session/revert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+
+      if (res.status === 409) {
+        setActionError("되돌릴 이전 버전이 없어요");
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setActionError(body?.error ?? "되돌리기에 실패했어요. 다시 시도해주세요");
+        return;
+      }
+
+      const data = await res.json();
+      setSaved({ version: data.version, storyboard: data.storyboard });
+      setDraft(clone(data.storyboard));
+      setEditingIndex(null);
+    } catch {
+      setActionError("되돌리기에 실패했어요. 다시 시도해주세요");
+    } finally {
+      setReverting(false);
+    }
   }
 
   return (
@@ -120,6 +209,12 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
           대사를 고치거나, 말풍선을 원하는 자리로 끌어다 놓으세요
         </p>
       </div>
+
+      {actionError && (
+        <p className="w-full max-w-md rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">
+          {actionError}
+        </p>
+      )}
 
       <div className="grid w-full max-w-4xl grid-cols-1 gap-4 sm:grid-cols-2">
         {draft.cuts.map((cut, i) => (
@@ -194,18 +289,18 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         <button
           type="button"
           onClick={handleRevert}
-          disabled={!isDirty}
+          disabled={!canRevert || saving || reverting}
           className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
         >
-          되돌리기
+          {reverting ? "되돌리는 중…" : "되돌리기"}
         </button>
         <button
           type="button"
           onClick={handleSave}
-          disabled={!isDirty}
+          disabled={!isDirty || saving || reverting}
           className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-40"
         >
-          저장
+          {saving ? "저장 중…" : "저장"}
         </button>
         {!isDirty && savedAt && (
           <span className="text-xs text-zinc-400">{savedAt}에 저장됨</span>
