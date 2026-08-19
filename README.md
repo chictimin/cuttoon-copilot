@@ -82,7 +82,7 @@ cuttoon-copilot/
 | 10. 4컷 생성 | `POST /api/generate` + 계약 스텁 | mock | 미구현 |
 | 11. 대사 수정 · 드래그 | — | 있음(mock) | 반쪽 |
 | 12. v2 저장 · 되돌리기 | `/api/session` `/version` `/revert` | 미연결 | 미연결 |
-| 13. Export ZIP | `lib/render/`가 빈 폴더 | 없음 | 미착수 |
+| 13. Export ZIP | `lib/render/` 구현 완료(대사 합성 + ZIP) | 없음 | 반쪽 |
 
 알아둘 것 세 가지다.
 
