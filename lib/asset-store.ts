@@ -22,6 +22,29 @@ export interface AssetUploadResult {
   originalName: string;
 }
 
+// issue #68/#72: 업로드 제한값. 버킷 설정(#68)과 라우트 검증(#72)이 같은 값을
+// 쓰도록 여기 한 곳에 둔다 — 값이 바뀌면 여기만 고치면 된다.
+// uploadAsset()을 부르는 곳이 app/api/upload/route.ts 하나뿐이고, 실제로
+// 올라오는 건 레퍼런스 이미지뿐이라 이미지 3종으로 제한한다 (pdf/txt/json은
+// getMimeType()에 매핑만 돼 있을 뿐 쓰는 곳이 없음 — #68 확인 결과).
+export const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+export const ALLOWED_UPLOAD_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
+
+export type UploadValidationError = { code: "too_large" | "unsupported_type"; message: string };
+
+/**
+ * 업로드 전 크기·타입을 확인한다. 문제 없으면 null을 반환한다.
+ */
+export function validateUpload(file: File): UploadValidationError | null {
+  if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+    return { code: "too_large", message: "이미지는 10MB까지 올릴 수 있습니다" };
+  }
+  if (!ALLOWED_UPLOAD_MIME_TYPES.includes(file.type as (typeof ALLOWED_UPLOAD_MIME_TYPES)[number])) {
+    return { code: "unsupported_type", message: "PNG · JPG · WebP 이미지만 올릴 수 있습니다" };
+  }
+  return null;
+}
+
 function getMimeType(ext: string): string {
   const mimeTypes: Record<string, string> = {
     png: "image/png",

@@ -120,7 +120,11 @@ function tailSvg(position: Position, x: number, y: number, w: number, h: number)
 }
 
 function captionSvg(caption: Caption, canvasW: number, canvasH: number): string {
-  const box = POSITION_BOX[caption.position];
+  // storyboard.schema.json의 enum 5개 밖의 값이 저장 시점 검증을 뚫고 들어올 수 있다
+  // (app/api/session/validate.ts는 아직 필드별 enum까지는 안 봄, #70). lib/render/는
+  // 라이브러리 계층이라 호출자가 무엇을 넘기든 예외로 죽지 않는 편이 맞다고 보고
+  // center로 폴백한다.
+  const box = POSITION_BOX[caption.position] ?? POSITION_BOX.center;
   const x = box.x * canvasW;
   const maxWidth = box.w * canvasW;
   const maxHeight = canvasH * 0.3;
