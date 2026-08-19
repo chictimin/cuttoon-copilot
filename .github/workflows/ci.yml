@@ -1,13 +1,15 @@
-name: spec
+name: ci
 
 on: [pull_request]
 
 jobs:
-  spec:
+  typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
       - run: npm ci
-      - run: npm run spec:sync-check
+      - run: npm run build
+      - run: npx tsc --noEmit
+      - run: npm run lint
