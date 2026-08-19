@@ -133,14 +133,16 @@ export function assertValidCtaPresetsFile(
   }
 }
 
-let cache: CtaPresetsFile | null = null;
+// 모듈 로드 시점에 한 번 검증해서 fail-fast로 만든다. 지연 로딩으로 두면 preset-guard의
+// assertValidPreset() 안에서 처음 로드가 일어나고, cta_presets.json이 깨져 있을 때 던져지는
+// CtaPresetsValidationError를 isValidPreset()의 catch가 삼켜 "프리셋이 잘못됐다"로 오진된다 —
+// 실제 원인은 프리셋이 아니라 프리셋 목록 파일인데도.
+assertValidCtaPresetsFile(ctaPresetsRaw);
+const ctaPresets: CtaPresetsFile = ctaPresetsRaw;
 
-/** spec/data/cta_presets.json을 읽고 검증한 뒤 반환. 실패하면 던짐(앱 시작 시 바로 걸리는 게 목표). */
+/** spec/data/cta_presets.json을 읽고 검증한 결과를 반환 (검증은 모듈 로드 시점에 이미 끝남). */
 export function loadCtaPresets(): CtaPresetsFile {
-  if (cache) return cache;
-  assertValidCtaPresetsFile(ctaPresetsRaw);
-  cache = ctaPresetsRaw;
-  return cache;
+  return ctaPresets;
 }
 
 /**
