@@ -15,6 +15,7 @@ const PADDING = 24;
 const LINE_HEIGHT = 1.3;
 const FONT_MAX = 40;
 const FONT_MIN = 22;
+const BUBBLE_OPACITY = 0.85; // 인선님 피드백(2026-08-19): 말풍선이 완전 불투명하면 답답해 보여서 살짝 비치게
 
 const POSITION_BOX: Record<Position, { x: number; y: number; w: number }> = {
   top_left: { x: 0.04, y: 0.04, w: 0.44 },
@@ -90,7 +91,7 @@ function fitText(text: string, maxWidth: number, maxHeight: number) {
 }
 
 function bubbleShapeSvg(bubbleType: BubbleType, x: number, y: number, w: number, h: number): string {
-  const stroke = `stroke="black" stroke-width="3" fill="white"`;
+  const stroke = `stroke="black" stroke-width="3" fill="white" fill-opacity="${BUBBLE_OPACITY}"`;
   if (bubbleType === "rect") {
     return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" ry="6" ${stroke}/>`;
   }
@@ -113,10 +114,10 @@ function tailSvg(position: Position, x: number, y: number, w: number, h: number)
   if (position === "center") return "";
   if (isUpper) {
     const tipY = y + h + h * 0.22;
-    return `<polygon points="${cx - 16},${y + h - 4} ${cx + 16},${y + h - 4} ${cx},${tipY}" fill="white" stroke="black" stroke-width="3"/>`;
+    return `<polygon points="${cx - 16},${y + h - 4} ${cx + 16},${y + h - 4} ${cx},${tipY}" fill="white" fill-opacity="${BUBBLE_OPACITY}" stroke="black" stroke-width="3"/>`;
   }
   const tipY = y - h * 0.22;
-  return `<polygon points="${cx - 16},${y + 4} ${cx + 16},${y + 4} ${cx},${tipY}" fill="white" stroke="black" stroke-width="3"/>`;
+  return `<polygon points="${cx - 16},${y + 4} ${cx + 16},${y + 4} ${cx},${tipY}" fill="white" fill-opacity="${BUBBLE_OPACITY}" stroke="black" stroke-width="3"/>`;
 }
 
 function captionSvg(caption: Caption, canvasW: number, canvasH: number): string {
