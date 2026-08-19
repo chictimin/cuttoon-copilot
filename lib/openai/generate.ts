@@ -20,7 +20,13 @@ export const generateCharacterSheet: ImageProvider['generateCharacterSheet'] = a
 
 export const generateCut: ImageProvider['generateCut'] = async (input) => {
   void input
-  return { asset: 'asset://stub/cut', ...OUTPUT_SIZE, stub: true }
+  return {
+    asset: 'asset://stub/cut',
+    ...OUTPUT_SIZE,
+    // 다음 컷이 continueFrom 으로 넘길 토큰. 스텁이므로 고정값이다 (#60).
+    continuationToken: 'stub-continuation',
+    stub: true,
+  }
 }
 
 // 표지 3안. 독립 호출이므로 체이닝 토큰을 받지 않는다 (PRD 6절).
