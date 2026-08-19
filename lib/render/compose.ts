@@ -17,11 +17,20 @@ const FONT_MAX = 40;
 const FONT_MIN = 22;
 const BUBBLE_OPACITY = 0.85; // 인선님 피드백(2026-08-19): 말풍선이 완전 불투명하면 답답해 보여서 살짝 비치게
 
+// 구석 자리는 일부러 캔버스 경계를 살짝 넘어가게 뒀다 — 인선님 피드백(2026-08-19):
+// "화면을 나가도 된다, 그림에 반 걸치고 화면 밖으로 반 걸치고" — 실제 웹툰에서 흔히
+// 쓰는 방식이고, 인물(보통 화면 중앙 쪽)에서 멀어지니 얼굴을 덜 가리는 효과도 같이 있다.
+// composeCut의 SVG 오버레이가 캔버스 크기 그대로라 경계 밖으로 나간 부분은 자동으로 잘린다.
+// (말풍선 도형 자체는 텍스트 박스보다 위아래로 28% 더 커서, 이 값이 0이어도 이미
+// 타원 테두리가 살짝 넘어간다 — 텍스트는 안전하게 안쪽에 두면서 도형만 자연스럽게
+// 걸치게 하려고 오프셋을 크게 잡지 않았다.)
+// bottom_* 는 아래쪽 구석에 두되, 인선님 피드백("꼬리만 가지 말고 말풍선 전체를
+// 당겨줘")에 따라 예전(y: 0.66)보다 인물 쪽(화면 중앙)에 확실히 더 가깝게 뒀다.
 const POSITION_BOX: Record<Position, { x: number; y: number; w: number }> = {
-  top_left: { x: 0.04, y: 0.04, w: 0.44 },
-  top_right: { x: 0.52, y: 0.04, w: 0.44 },
-  bottom_left: { x: 0.04, y: 0.62, w: 0.44 },
-  bottom_right: { x: 0.52, y: 0.62, w: 0.44 },
+  top_left: { x: -0.03, y: 0.0, w: 0.44 },
+  top_right: { x: 0.59, y: 0.0, w: 0.44 },
+  bottom_left: { x: 0.0, y: 0.46, w: 0.44 },
+  bottom_right: { x: 0.56, y: 0.46, w: 0.44 },
   center: { x: 0.22, y: 0.38, w: 0.56 },
 };
 
@@ -90,34 +99,116 @@ function fitText(text: string, maxWidth: number, maxHeight: number) {
   return { fontSize: FONT_MIN, lines: wrapText(text, FONT_MIN, maxWidth - PADDING * 2) };
 }
 
-function bubbleShapeSvg(bubbleType: BubbleType, x: number, y: number, w: number, h: number): string {
-  const stroke = `stroke="black" stroke-width="3" fill="white" fill-opacity="${BUBBLE_OPACITY}"`;
-  if (bubbleType === "rect") {
-    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" ry="6" ${stroke}/>`;
-  }
-  if (bubbleType === "cloud") {
-    // 단순화 버전: 둥근 사각형 + 위쪽 가장자리에 작은 원 몇 개로 구름 느낌만 낸다.
-    const bumps = [0.15, 0.35, 0.55, 0.75].map((f) => {
-      const cx = x + w * f;
-      const r = h * 0.14;
-      return `<circle cx="${cx}" cy="${y}" r="${r}" ${stroke}/>`;
-    }).join("");
-    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" ry="${h / 2}" ${stroke}/>${bumps}`;
-  }
-  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="28" ry="28" ${stroke}/>`;
+const FILL = `fill="white" fill-opacity="${BUBBLE_OPACITY}"`;
+const STROKE = `stroke="black" stroke-width="3" stroke-linejoin="round"`;
+
+// 몸통과 꼬리를 반드시 "하나의 도형"(polygon 하나)으로 그린다 — 따로 그려서 겹치면,
+// 반투명 채우기 때문에 아래에 깔린 도형의 테두리 선이 위 도형을 통해 비쳐 보여서
+// 두 개의 별도 모양처럼 보인다(인선님 피드백 2026-08-19: "원형하고 하나처럼 보여야
+// 되는데 2개처럼 보이자나" — 반투명 도형을 두 번 겹쳐 그리면 항상 생기는 문제라,
+// 애초에 이음매 없는 폐곡선 하나로 만드는 것 말고는 해결 방법이 없다).
+//
+// 꼬리 방향/길이: 인물 얼굴 좌표를 실제로는 모른다(스키마에 없음) — 대신 "인물은 보통
+// 화면 중앙 쪽에 있다"는 가정으로 캔버스 중심 쪽을 향해 가늘고 길게 뻗는다.
+function tailGeometry(canvasW: number, canvasH: number, cx: number, cy: number) {
+  // 정중앙보다 살짝 위쪽을 조준한다 — 클로즈업/바스트샷에서 얼굴(특히 입)이 보통
+  // 화면 세로 중앙보다 조금 위에 오기 때문(인선님 피드백: "입하고 좀 더 가깝게").
+  const targetX = canvasW / 2;
+  const targetY = canvasH * 0.42;
+  const angle = Math.atan2(targetY - cy, targetX - cx);
+  const reach = 0.85; // 목표점 쪽으로 그 거리의 85%까지 — 더 바짝 붙이되 완전히 덮진 않게
+  const tip: [number, number] = [cx + (targetX - cx) * reach, cy + (targetY - cy) * reach];
+  return { angle, tip };
 }
 
-function tailSvg(position: Position, x: number, y: number, w: number, h: number): string {
-  // 위쪽 자리 말풍선은 꼬리가 아래(그림 쪽)를 향하고, 아래쪽 자리는 위(그림 쪽)를 향한다.
-  const isUpper = position === "top_left" || position === "top_right";
-  const cx = x + w / 2;
-  if (position === "center") return "";
-  if (isUpper) {
-    const tipY = y + h + h * 0.22;
-    return `<polygon points="${cx - 16},${y + h - 4} ${cx + 16},${y + h - 4} ${cx},${tipY}" fill="white" fill-opacity="${BUBBLE_OPACITY}" stroke="black" stroke-width="3"/>`;
+// 타원 테두리 중 꼬리가 나갈 좁은 구간만 갈라서 뾰족한 끝(tip)을 끼워 넣은, 하나로
+// 이어진 폐곡선. instacut 참고자료의 아이디어(그림/텍스트는 재사용 안 함, 수학만 참고).
+function ellipsePath(cx: number, cy: number, rx: number, ry: number, tail: { angle: number; tip: [number, number] } | null): string {
+  if (!tail) {
+    const steps = 64;
+    const pts = Array.from({ length: steps }, (_, i) => {
+      const a = (2 * Math.PI * i) / steps;
+      return `${cx + rx * Math.cos(a)},${cy + ry * Math.sin(a)}`;
+    });
+    return `<polygon points="${pts.join(" ")}" ${FILL} ${STROKE}/>`;
   }
-  const tipY = y - h * 0.22;
-  return `<polygon points="${cx - 16},${y + 4} ${cx + 16},${y + 4} ${cx},${tipY}" fill="white" fill-opacity="${BUBBLE_OPACITY}" stroke="black" stroke-width="3"/>`;
+  const rootHalf = 0.05; // 아주 좁게 — 꼬리 뿌리가 가늘어야 한다
+  const steps = 60;
+  const span = 2 * Math.PI - 2 * rootHalf;
+  const pts: string[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = tail.angle + rootHalf + (span * i) / steps;
+    pts.push(`${cx + rx * Math.cos(a)},${cy + ry * Math.sin(a)}`);
+  }
+  pts.push(`${tail.tip[0]},${tail.tip[1]}`);
+  return `<polygon points="${pts.join(" ")}" ${FILL} ${STROKE}/>`;
+}
+
+// 사각형(rect/cloud 바탕)도 같은 원리 — 중심에서 꼬리 방향으로 쏜 광선이 변과 만나는
+// 지점을 찾아 그 자리만 갈라서 꼬리를 끼운다.
+function rectPath(x: number, y: number, w: number, h: number, rx: number, tail: { angle: number; tip: [number, number] } | null): string {
+  const corners: [number, number][] = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  if (!tail) {
+    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" ry="${rx}" ${FILL} ${STROKE}/>`;
+  }
+
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const dx = Math.cos(tail.angle);
+  const dy = Math.sin(tail.angle);
+  const hw = w / 2;
+  const hh = h / 2;
+  const tX = dx !== 0 ? hw / Math.abs(dx) : Infinity;
+  const tY = dy !== 0 ? hh / Math.abs(dy) : Infinity;
+  const t = Math.min(tX, tY);
+  const exitX = cx + dx * t;
+  const exitY = cy + dy * t;
+  const onVerticalEdge = tX < tY; // 좌/우 변에서 나감 -> 세로 방향이 그 변의 접선
+  const spread = Math.min(w, h) * 0.045;
+  const tangent: [number, number] = onVerticalEdge ? [0, 1] : [1, 0];
+  const p1: [number, number] = [exitX + tangent[0] * spread, exitY + tangent[1] * spread];
+  const p2: [number, number] = [exitX - tangent[0] * spread, exitY - tangent[1] * spread];
+
+  // 사각형 꼭짓점을 순서대로 훑다가, exit 지점이 속한 변에서 p2 -> tip -> p1로 갈라 끼운다.
+  const pts: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    const [ax, ay] = corners[i];
+    const [bx, by] = corners[(i + 1) % 4];
+    pts.push(`${ax},${ay}`);
+    const onThisEdge = Math.min(ax, bx) - 0.01 <= exitX && exitX <= Math.max(ax, bx) + 0.01
+      && Math.min(ay, by) - 0.01 <= exitY && exitY <= Math.max(ay, by) + 0.01;
+    if (onThisEdge) {
+      pts.push(`${p2[0]},${p2[1]}`, `${tail.tip[0]},${tail.tip[1]}`, `${p1[0]},${p1[1]}`);
+    }
+  }
+  return `<polygon points="${pts.join(" ")}" ${FILL} ${STROKE}/>`;
+}
+
+function bubbleShapeSvg(
+  bubbleType: BubbleType, x: number, y: number, w: number, h: number,
+  position: Position, canvasW: number, canvasH: number,
+): string {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const tail = position === "center" ? null : tailGeometry(canvasW, canvasH, cx, cy);
+
+  if (bubbleType === "rect") {
+    return rectPath(x, y, w, h, 6, tail);
+  }
+  if (bubbleType === "cloud") {
+    // 단순화 버전: 둥근 사각형(꼬리 포함, 한 도형) + 위쪽 가장자리에 작은 원 몇 개로 구름 느낌만 낸다.
+    const base = rectPath(x, y, w, h, h / 2, tail);
+    const bumps = [0.15, 0.35, 0.55, 0.75].map((f) => {
+      const bx = x + w * f;
+      const r = h * 0.14;
+      return `<circle cx="${bx}" cy="${y}" r="${r}" ${FILL} ${STROKE}/>`;
+    }).join("");
+    return `${base}${bumps}`;
+  }
+  // rounded: 사각형이 아니라 실제 웹툰처럼 타원으로 — 텍스트 박스보다 넉넉하게 감싼다
+  const rx = (w / 2) * 1.12;
+  const ry = (h / 2) * 1.28;
+  return ellipsePath(cx, cy, rx, ry, tail);
 }
 
 function captionSvg(caption: Caption, canvasW: number, canvasH: number): string {
@@ -131,17 +222,16 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number): string 
   const bubbleH = textH + PADDING * 2;
   const y = box.y * canvasH;
 
-  const shape = bubbleShapeSvg(caption.bubble_type, x, y, maxWidth, bubbleH);
-  const tail = tailSvg(caption.position, x, y, maxWidth, bubbleH);
+  const shape = bubbleShapeSvg(caption.bubble_type, x, y, maxWidth, bubbleH, caption.position, canvasW, canvasH);
 
   const cx = x + maxWidth / 2;
   const firstLineY = y + PADDING + fontSize * 0.85;
   const tspans = lines
     .map((line, i) => `<tspan x="${cx}" y="${firstLineY + i * fontSize * LINE_HEIGHT}">${escapeXml(line)}</tspan>`)
     .join("");
-  const text = `<text text-anchor="middle" font-family="${FONT_FAMILY}" font-size="${fontSize}" fill="black">${tspans}</text>`;
+  const text = `<text text-anchor="middle" font-family="${FONT_FAMILY}" font-size="${fontSize}" font-weight="bold" fill="black">${tspans}</text>`;
 
-  return `${shape}${tail}${text}`;
+  return `${shape}${text}`;
 }
 
 export async function composeCut(imageBuffer: Buffer, captions: Caption[]): Promise<Buffer> {
