@@ -1,9 +1,17 @@
-import type { StyleExtractionResult } from "@/lib/llm/style-merge";
-
 /**
  * 사용자가 업로드한 참고 이미지들에서 스타일을 추출한다.
  * GPT-4o Vision API를 사용하여 이미지 분석.
  */
+
+export interface StyleExtractionResult {
+  line_weight: "thin" | "medium" | "thick";
+  saturation: "pastel" | "vivid" | "muted";
+  character_ratio: "2head" | "2.5head" | "3head" | "realistic";
+  background_density: "none" | "low" | "medium" | "high";
+  bubble_style: "rounded" | "rect" | "cloud";
+  palette: string[];
+}
+
 export async function extractStyle(imageBuffers: Buffer[]): Promise<StyleExtractionResult> {
   if (imageBuffers.length === 0) {
     throw new Error("분석할 이미지가 없습니다");
