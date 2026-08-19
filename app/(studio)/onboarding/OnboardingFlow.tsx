@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { assertValidPreset, type Preset } from "@/lib/llm/preset-guard";
+import { mergeStyleValues } from "@/lib/llm/style-merge";
 import {
   analyzeStyle,
   CHARACTER_SHEET_PREVIEW,
@@ -9,7 +10,7 @@ import {
 } from "./mock-style-analysis";
 import DetailsStep, { type DetailsFormValue } from "./DetailsStep";
 
-type Step = "upload" | "analyzing" | "result" | "details" | "confirmed";
+type Step = "upload" | "analyzing" | "result" | "keywords" | "details" | "confirmed";
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png"];
 const MAX_FILES = 5;
@@ -35,6 +36,7 @@ export default function OnboardingFlow() {
   const [isDragging, setIsDragging] = useState(false);
   const [confirmedName, setConfirmedName] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [userKeywords, setUserKeywords] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function runAnalysis(count: number) {
@@ -72,6 +74,26 @@ export default function OnboardingFlow() {
   }
 
   function handleConfirmStyle() {
+    setStep("details");
+  }
+
+  function handleSkipReference() {
+    setReferenceCount(0);
+    setStep("keywords");
+  }
+
+  function handleConfirmKeywords(keywords: string[]) {
+    setUserKeywords(keywords);
+    const merged = mergeStyleValues(null, keywords);
+    const analysisResult: StyleAnalysisResult = {
+      style: {
+        keywords,
+        ...merged,
+      },
+      characterSheetAsset: "asset://default-character-sheet",
+      styleRefAssets: [],
+    };
+    setAnalysis(analysisResult);
     setStep("details");
   }
 
@@ -149,6 +171,7 @@ export default function OnboardingFlow() {
           fileInputRef={fileInputRef}
           onDragStateChange={setIsDragging}
           onFilesSelected={handleFilesSelected}
+          onSkipReference={handleSkipReference}
         />
       )}
       {step === "analyzing" && <AnalyzingStep />}
@@ -159,6 +182,9 @@ export default function OnboardingFlow() {
           onRetry={handleRetry}
           onConfirm={handleConfirmStyle}
         />
+      )}
+      {step === "keywords" && (
+        <KeywordsStep onConfirm={handleConfirmKeywords} />
       )}
       {step === "details" && (
         <DetailsStep onConfirm={handleConfirmDetails} error={error} saving={saving} />
@@ -181,12 +207,14 @@ function UploadStep({
   fileInputRef,
   onDragStateChange,
   onFilesSelected,
+  onSkipReference,
 }: {
   error: string | null;
   isDragging: boolean;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onDragStateChange: (dragging: boolean) => void;
   onFilesSelected: (files: FileList | File[]) => void;
+  onSkipReference: () => void;
 }) {
   return (
     <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
@@ -236,6 +264,14 @@ function UploadStep({
           }}
         />
       </label>
+
+      <button
+        type="button"
+        onClick={onSkipReference}
+        className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+      >
+        레퍼런스 건너뛰기
+      </button>
     </div>
   );
 }
@@ -335,6 +371,46 @@ function ResultStep({
           이걸로 할게
         </button>
       </div>
+    </div>
+  );
+}
+
+function KeywordsStep({
+  onConfirm,
+}: {
+  onConfirm: (keywords: string[]) => void;
+}) {
+  const [input, setInput] = useState("");
+
+  return (
+    <div className="flex w-full max-w-xl flex-col items-center gap-4">
+      <h1 className="text-xl font-semibold">
+        스타일을 설명해주세요
+      </h1>
+      <p className="text-sm text-zinc-500">
+        쉼표로 구분된 단어들을 입력하세요
+      </p>
+
+      <textarea
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder="예: pastel, 2head, rounded, vivid"
+        className="w-full rounded-md border border-zinc-300 p-3 text-sm"
+        rows={4}
+      />
+
+      <button
+        type="button"
+        onClick={() => {
+          const keywords = input.split(",").map(k => k.trim()).filter(k => k);
+          if (keywords.length > 0) {
+            onConfirm(keywords);
+          }
+        }}
+        className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+      >
+        계속
+      </button>
     </div>
   );
 }

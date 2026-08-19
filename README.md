@@ -35,6 +35,7 @@ cuttoon-copilot/
 │  └─ api/
 │      ├─ preset/              프리셋 CRUD                    A③
 │      ├─ session/             세션 관리 · Export             A③
+│      ├─ brainstorm/          브레인스토밍 3턴 (lib/llm 호출) A③
 │      └─ generate/            이미지 생성 (maxDuration=300)  B①
 ├─ lib/
 │  ├─ llm/                     브레인스토밍 3턴 · 캡션         A①
@@ -58,11 +59,41 @@ cuttoon-copilot/
 | 폴더 | 담당 |
 | --- | --- |
 | `app/(studio)/` | A② |
-| `app/api/preset/`, `app/api/session/` | A③ (chictimin) |
+| `app/api/preset/`, `app/api/session/`, `app/api/brainstorm/` | A③ (chictimin) |
 | `lib/llm/`, `spec/` | A① (dabi) |
 | `app/api/generate/`, `lib/openai/generate.ts` | B① |
 | `lib/openai/extract.ts` | B② |
 | `lib/render/` | B③ |
+
+## 구현 현황
+
+골든 패스 각 단계가 지금 어디까지 됐는지. **2026-08-19 기준, main에 머지된 것만** 센다 — 열려 있는 PR은 포함하지 않는다.
+
+| 단계 | 로직·API | 화면 | 상태 |
+| --- | --- | --- | --- |
+| 1. 레퍼런스 업로드 | 없음 | 있음 | 막힘 |
+| 2. 스타일 추출 | `lib/openai/extract.ts` (실제 호출) | mock 사용 | 반쪽 |
+| 3. 프리셋 자동 확정 | `lib/llm/preset-guard.ts` | 있음 | 완료 |
+| 4. 프리셋 저장 | `GET·POST /api/preset` | 연결됨 | 완료 |
+| 5. 캐릭터 시트 표시 | — | 있음 | 완료 |
+| 6. 프로젝트 목록 | `GET /api/preset` (id 없이) | placeholder | 미연결 |
+| 7. 소재 입력 | — | 있음 | 있음 |
+| 8. 브레인스토밍 3턴 | 없음 (`lib/llm`은 A①, 라우트는 A③) | mock | 미구현 |
+| 9. 표지컷 3안 | 없음 | mock | 미구현 |
+| 10. 4컷 생성 | `POST /api/generate` + 계약 스텁 | mock | 미구현 |
+| 11. 대사 수정 · 드래그 | — | 있음(mock) | 반쪽 |
+| 12. v2 저장 · 되돌리기 | `/api/session` `/version` `/revert` | 미연결 | 미연결 |
+| 13. Export ZIP | `lib/render/`가 빈 폴더 | 없음 | 미착수 |
+
+알아둘 것 세 가지다.
+
+**화면에서 실제 API를 부르는 곳은 온보딩 하나뿐이다.** `OnboardingFlow.tsx`의 `fetch("/api/preset")`가 전부고, 세션·에디터·목록은 mock이나 placeholder다. API가 있어도 화면이 안 붙으면 새로고침에서 사라진다.
+
+**이미지 생성에 실제 모델 호출이 아직 없다.** 라우트와 인터페이스는 들어왔지만(PR #26) `generateCharacterSheet`·`generateCut`이 `asset://stub/...`을 돌려주는 스텁이다. 8·9·10번이 전부 여기 걸려 있어서, 실제 호출이 붙기 전까지 P2도 P3도 시작할 수 없다.
+
+**P0 게이트를 아직 검증하지 못했다.** `PRD.md` 7절이 "P0의 두 게이트가 가장 중요한 판단점"이라고 못 박았는데(캐릭터 4컷 동일성 / 말풍선 억제), 검증할 코드 자체가 없는 상태다.
+
+이 표는 손으로 갱신한다. 단계를 완료하는 PR을 올릴 때 같이 고친다.
 
 ## 브랜치
 
