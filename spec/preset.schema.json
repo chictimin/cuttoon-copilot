@@ -102,7 +102,7 @@
         "cta_format": {
           "type": "string",
           "minLength": 1,
-          "description": "마지막 컷 CTA의 프로젝트 기본값. 세션에서 다른 값으로 덮어쓸 수 있고, 덮어쓰지 않으면 이 값이 주입된다. 값 목록은 코드가 아니라 JSON 데이터 파일(cta_presets.json, 미작성)로 분리 예정 — 목록 확정 전까지 자유 문자열"
+          "description": "마지막 컷 CTA의 프로젝트 기본값. 세션에서 다른 값으로 덮어쓸 수 있고, 덮어쓰지 않으면 이 값이 주입된다. spec/data/cta_presets.json에 정의된 preset 중 하나의 id를 저장한다 (예: 'consult_request'). 자유 문자열 타입은 유지하되(스키마 레벨 enum 아님), 값은 항상 cta_presets.json의 presets[].id 중 하나와 일치해야 한다 — presets 목록이 계속 늘어날 수 있어 JSON Schema enum으로 고정하지 않음 (issue #4)"
         }
       }
     },
