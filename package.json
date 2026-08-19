@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "spec:docs": "pipx run --spec json-schema-for-humans generate-schema-doc --config template_name=md spec/preset.schema.json spec/docs/preset.md",
+    "spec:sync-check": "node spec/sync-check.mjs"
   },
   "dependencies": {
     "next": "16.3.1",
