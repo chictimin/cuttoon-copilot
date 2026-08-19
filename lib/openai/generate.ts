@@ -19,12 +19,16 @@ export const generateCharacterSheet: ImageProvider['generateCharacterSheet'] = a
 }
 
 export const generateCut: ImageProvider['generateCut'] = async (input) => {
-  void input
   return {
     asset: 'asset://stub/cut',
     ...OUTPUT_SIZE,
     // 다음 컷이 continueFrom 으로 넘길 토큰. 스텁이므로 고정값이다 (#60).
     continuationToken: 'stub-continuation',
+    // 받은 체이닝 토큰을 그대로 되돌려준다. 라우트가 continueFrom 을 실제로
+    // 전달하는지 스모크 테스트가 확인할 수 있어야 한다 — #75 는 라우트가 그
+    // 필드를 읽지 않는데도 200 이 나와서 통과로 오독된 사고였다.
+    // 실제 모델 호출을 붙일 때 이 필드는 사라진다.
+    receivedContinueFrom: input.continueFrom ?? null,
     stub: true,
   }
 }

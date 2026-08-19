@@ -26,6 +26,20 @@ const cases = [
     200,
     (r) => assert.match(r.result.asset, /^asset:\/\//),
   ],
+  [
+    // #75 회귀 방지: 라우트가 continueFrom 을 읽어 generateCut 에 넘기는지.
+    // 스텁이 받은 값을 되돌려주므로 전달 여부를 응답으로 확인할 수 있다.
+    "cut + continueFrom 전달",
+    json('{"kind":"cut","preset":{},"storyboard":{},"continueFrom":"tok-abc"}'),
+    200,
+    (r) => assert.equal(r.result.receivedContinueFrom, "tok-abc"),
+  ],
+  [
+    "cut, continueFrom 없음 (첫 컷)",
+    json('{"kind":"cut","preset":{},"storyboard":{}}'),
+    200,
+    (r) => assert.equal(r.result.receivedContinueFrom, null),
+  ],
   ["preset 없음", json('{"kind":"cut"}'), 400, (r) => assert.ok(r.error)],
   ["kind 불명", json('{"kind":"nope","preset":{}}'), 400, (r) => assert.ok(r.error)],
   ["깨진 JSON", json("{oops"), 400, (r) => assert.ok(r.error)],
