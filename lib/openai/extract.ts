@@ -105,9 +105,12 @@ export async function generateCharacterSheet(
     size: "1024x1024",
   });
 
-  const data = response.data[0];
+  const data = response.data?.[0];
+  if (!data?.b64_json) {
+    throw new Error("gpt-image-1 응답에 이미지 데이터가 없음");
+  }
   return {
-    imageBase64: data.b64_json!,
+    imageBase64: data.b64_json,
     revisedPrompt: prompt,
   };
 }
