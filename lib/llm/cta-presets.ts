@@ -53,6 +53,15 @@ const VALID_INTERESTS = getEnumAt(presetSchema, [
   "items",
 ]);
 
+// getEnumAt이 경로를 못 찾으면 조용히 []를 반환하는데, 그 상태로 두면 나중에 "값이 유효하지
+// 않음" 에러가 나면서 마치 데이터가 잘못된 것처럼 보인다 — 실제 원인은 스키마 경로 오류다.
+// 모듈 로드 시점에 fail-fast로 잡아서 진단이 어긋나지 않게 한다.
+if (VALID_INTERESTS.length === 0) {
+  throw new Error(
+    "preset.schema.json에서 context.interests enum을 못 읽음 — 스키마 경로 확인 필요"
+  );
+}
+
 export class CtaPresetsValidationError extends Error {}
 
 /**

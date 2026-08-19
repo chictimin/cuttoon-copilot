@@ -30,7 +30,7 @@
       "type": "array",
       "minItems": 4,
       "maxItems": 4,
-      "description": "4컷 고정. narrative_beat는 vocabulary.json의 10개 태그 중 자유롭게 골라 이 컷툰만의 흐름을 짠다 (기승전결처럼 고정된 4단계 순서를 강제하지 않음). 다만 'cta' 비트는 정확히 1컷에 있어야 한다 — preset.rules.cta_format이 항상 존재하는 이유가 이것.",
+      "description": "4컷 고정. narrative_beat는 vocabulary.json의 10개 태그 중 자유롭게 골라 이 컷툰만의 흐름을 짠다 (기승전결처럼 고정된 4단계 순서를 강제하지 않음). 다만 'cta' 비트는 정확히 1컷에 있어야 하고(preset.rules.cta_format이 항상 존재하는 이유), 그 위치는 4번 컷(마지막)으로 고정한다 — CTA는 서사 비트가 아니라 마지막 컷의 고정 역할이라는 게 프로젝트 전제(리뷰 결정, $defs.cut.allOf 참고). cut_index 유일성(1~4 각 1회)은 스키마가 아니라 storyboard-guard.ts의 런타임 체크로 강제한다 — 배열 요소가 객체라 uniqueItems로 못 잡음.",
       "items": { "$ref": "#/$defs/cut" },
       "contains": { "properties": { "narrative_beat": { "const": "cta" } } },
       "minContains": 1,
@@ -144,6 +144,11 @@
           "if": { "properties": { "narrative_beat": { "const": "cta" } } },
           "then": { "required": ["cta_override"] },
           "else": { "properties": { "cta_override": { "const": null } } }
+        },
+        {
+          "if": { "properties": { "narrative_beat": { "const": "cta" } } },
+          "then": { "properties": { "cut_index": { "const": 4 } } },
+          "description": "CTA는 서사 비트가 아니라 마지막 컷의 고정 역할이라는 게 프로젝트 전제라서(레포 문서가 CTA를 항상 '마지막 컷'으로 다룸), 위치를 4번으로 고정한다 (리뷰 결정)."
         }
       ]
     }

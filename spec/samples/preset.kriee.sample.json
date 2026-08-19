@@ -17,7 +17,7 @@
   },
   "rules": {
     "forbidden": ["무서운 표정", "사실적(실사) 렌더링"],
-    "cta_format": "프로필 링크로 신청/문의"
+    "cta_format": "profile_link_learn_more"
   },
   "context": {
     "industry": ["헬스케어", "시니어 피트니스 교육"],

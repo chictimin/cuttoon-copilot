@@ -1,11 +1,18 @@
 // issue #5: 프리셋 전체 타입가드 (필수 필드 · 패턴 · enum). ajv 없이 손으로 짠 가드.
 // enum 값 목록은 preset.schema.json에서 직접 읽어온다 — 여기 하드코딩된 건 TS 타입(컴파일 타임
 // 전용, 런타임엔 사라짐)뿐이고, 이건 스키마가 바뀌면 사람이 같이 고쳐야 한다는 걸 뜻한다.
-// (vocabulary.json ↔ storyboard.schema.json과 같은 종류의 수동 동기화 리스크 — spec/sync-check.js
+// (vocabulary.json ↔ storyboard.schema.json과 같은 종류의 수동 동기화 리스크 — spec/sync-check.mjs
 // 참고. 이 파일의 타입도 그 스크립트 점검 대상에 넣는 걸 고려할 것.)
+//
+// 검증 범위: 최상위 6개 키의 additionalProperties만 재현한다. assets/style/rules/context
+// 서브객체 4곳에도 스키마엔 additionalProperties:false가 걸려 있지만 여기선 안 잡는다(예:
+// style.line_width처럼 오타난 필드가 이 가드는 통과함). uniqueItems(스키마 9곳)도 미검증.
+// 가드의 목적이 LLM 출력의 큰 형태 오류를 잡는 것이라 오타 필드까지는 지금 급하지 않다고 판단.
 
 import presetSchema from "@/spec/preset.schema.json";
+import { isValidCtaId, type Interest } from "./cta-presets";
 
+export type { Interest };
 export type LineWeight = "thin" | "medium" | "thick";
 export type Saturation = "pastel" | "vivid" | "muted";
 export type CharacterRatio = "2head" | "2.5head" | "3head" | "realistic";
@@ -19,15 +26,6 @@ export type LifeStage =
   | "parent"
   | "business_owner"
   | "retired";
-export type Interest =
-  | "brand_awareness"
-  | "trust_building"
-  | "product_showcase"
-  | "sales_conversion"
-  | "event_promotion"
-  | "info_education"
-  | "lead_generation"
-  | "recruiting";
 
 export interface Preset {
   preset_version: "1.1";
@@ -95,6 +93,15 @@ const VALID = {
   interests: getEnumAt(["properties", "context", "properties", "interests", "items"]),
 };
 
+// getEnumAt이 경로를 못 찾으면 []를 반환하는데, 그대로 두면 나중에 "값이 유효하지 않음"
+// 에러가 나면서 마치 데이터가 잘못된 것처럼 보인다 — 실제 원인은 스키마 경로 오류일 수 있다.
+// 모듈 로드 시점에 fail-fast로 잡아 진단이 어긋나지 않게 한다.
+for (const [key, values] of Object.entries(VALID)) {
+  if (values.length === 0) {
+    throw new Error(`preset.schema.json에서 ${key} enum을 못 읽음 — 스키마 경로 확인 필요`);
+  }
+}
+
 export class PresetValidationError extends Error {}
 
 function fail(message: string): never {
@@ -107,7 +114,8 @@ function isStringArray(value: unknown): value is string[] {
 
 /**
  * preset.schema.json v1.1을 그대로 옮긴 손 타입가드.
- * additionalProperties:false까지 재현 — 정의 안 된 필드가 있으면 던진다.
+ * 최상위 additionalProperties만 재현(정의 안 된 최상위 필드는 던짐) — 서브객체
+ * additionalProperties·uniqueItems는 파일 상단 주석 참고, 미검증.
  */
 export function assertValidPreset(data: unknown): asserts data is Preset {
   if (typeof data !== "object" || data === null) fail("preset이 객체가 아님");
@@ -175,6 +183,9 @@ export function assertValidPreset(data: unknown): asserts data is Preset {
   if (!isStringArray(rules.forbidden)) fail("rules.forbidden은 문자열 배열이어야 함");
   if (typeof rules.cta_format !== "string" || rules.cta_format.length < 1) {
     fail("rules.cta_format 누락");
+  }
+  if (!isValidCtaId(rules.cta_format as string)) {
+    fail(`rules.cta_format "${String(rules.cta_format)}"가 cta_presets.json의 preset id가 아님`);
   }
 
   // context
