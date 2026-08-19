@@ -33,7 +33,22 @@ export async function savePreset(preset: Preset): Promise<SavedPreset> {
     .select("id")
     .single();
 
-  if (presetError) throw new Error(`프리셋 저장 실패: ${presetError.message}`);
+  if (presetError) {
+    // Supabase JS에는 트랜잭션이 없다. 프리셋 저장이 실패하면 방금 만든 프로젝트
+    // 행이 프리셋 없는 고아로 남으므로 되돌린다. 이 삭제까지 실패하면 고아가
+    // 남지만, 그때는 원래 에러를 덮지 않고 로그로만 남긴다.
+    const { error: rollbackError } = await getDb()
+      .from("projects")
+      .delete()
+      .eq("id", project.id);
+    if (rollbackError) {
+      console.error(
+        `[savePreset] 프로젝트 롤백 실패 (고아 행 ${project.id}):`,
+        rollbackError.message
+      );
+    }
+    throw new Error(`프리셋 저장 실패: ${presetError.message}`);
+  }
 
   return { presetId: row.id, projectId: project.id, preset };
 }
