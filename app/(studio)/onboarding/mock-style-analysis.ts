@@ -22,7 +22,7 @@ export async function analyzeStyle(files: File[]): Promise<StyleAnalysisResult> 
 
   // Mock 데이터 반환
   return {
-    characterSheetAsset: CHARACTER_SHEET_PREVIEW,
+    characterSheetAsset: "asset://stub/character-sheet",
     styleRefAssets: files.map((_, i) => `asset://ref-${i}`),
     style: {
       keywords: [],
