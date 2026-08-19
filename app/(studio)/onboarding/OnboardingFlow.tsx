@@ -29,7 +29,7 @@ function validateFiles(files: File[]): { valid: File[]; error: string | null } {
 
 export default function OnboardingFlow() {
   const [step, setStep] = useState<Step>("upload");
-  const [referenceCount, setReferenceCount] = useState(0);
+  const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
   const [analysis, setAnalysis] = useState<StyleAnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -37,11 +37,11 @@ export default function OnboardingFlow() {
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function runAnalysis(count: number) {
+  async function runAnalysis(files: File[]) {
     setError(null);
     setStep("analyzing");
     try {
-      const result = await analyzeStyle(count);
+      const result = await analyzeStyle(files);
       setAnalysis(result);
       setStep("result");
     } catch {
@@ -62,13 +62,13 @@ export default function OnboardingFlow() {
       return;
     }
 
-    setReferenceCount(valid.length);
-    void runAnalysis(valid.length);
+    setReferenceFiles(valid);
+    void runAnalysis(valid);
   }
 
   function handleRetry() {
-    if (referenceCount === 0) return;
-    void runAnalysis(referenceCount);
+    if (referenceFiles.length === 0) return;
+    void runAnalysis(referenceFiles);
   }
 
   function handleConfirmStyle() {
