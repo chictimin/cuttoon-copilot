@@ -30,6 +30,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [coverVariants, setCoverVariants] = useState<GeneratedCut[] | null>(null);
   const [editingCutIndex, setEditingCutIndex] = useState<number | null>(null);
   const [draftCaption, setDraftCaption] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   function recordAnswer(value: string) {
     const key = BRAINSTORM_TURNS[turnIndex].key;
@@ -123,14 +125,53 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     });
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!storyboard) return;
-    assertStoryboardRuntimeInvariants(storyboard.cuts);
-    window.sessionStorage.setItem(
-      `cuttoon:session:${sessionId}`,
-      JSON.stringify(storyboard)
-    );
-    setStep("saved");
+
+    try {
+      assertStoryboardRuntimeInvariants(storyboard.cuts);
+    } catch {
+      setSaveError("스토리보드에 문제가 있어요. 처음부터 다시 시도해주세요");
+      return;
+    }
+
+    // 온보딩(POST /api/preset)이 남겨둔 값 — 세션 생성에 둘 다 필요하다 (issue #41).
+    const projectId = window.sessionStorage.getItem("cuttoon:project-id");
+    const presetId = window.sessionStorage.getItem("cuttoon:preset-id");
+    if (!projectId || !presetId) {
+      setSaveError("먼저 온보딩에서 프로젝트를 만들어주세요");
+      return;
+    }
+
+    setSaveError(null);
+    setSaving(true);
+    try {
+      const res = await fetch("/api/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, presetId, storyboard }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setSaveError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+        return;
+      }
+
+      const { sessionId: savedId } = await res.json();
+      // URL의 id는 세션이 생기기 전 임시값이었을 수 있으니 실제 id로 맞춘다 —
+      // 에디터 화면이 이 id로 세션을 조회한다. history API로 바꾸는 이유는
+      // useRouter().replace()가 이 라우트를 다시 서버에서 그려서 컴포넌트를
+      // 리마운트시키고 "저장됨" 화면을 보여주기 전에 상태를 초기화해버리기 때문.
+      if (savedId !== sessionId) {
+        window.history.replaceState(null, "", `/session/${savedId}`);
+      }
+      setStep("saved");
+    } catch {
+      setSaveError("저장에 실패했어요. 다시 시도해주세요");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -252,6 +293,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       {step === "cuts" && storyboard && (
         <div className="flex w-full max-w-4xl flex-col items-center gap-6">
           <h1 className="text-xl font-semibold">4컷이 완성됐어요</h1>
+          {saveError && (
+            <p className="w-full max-w-md rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">
+              {saveError}
+            </p>
+          )}
           <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
             {storyboard.cuts.map((cut, i) => (
               <div key={cut.cut_index} className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
@@ -303,9 +349,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           <button
             type="button"
             onClick={handleSave}
-            className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
+            disabled={saving}
+            className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
           >
-            저장
+            {saving ? "저장 중…" : "저장"}
           </button>
         </div>
       )}
