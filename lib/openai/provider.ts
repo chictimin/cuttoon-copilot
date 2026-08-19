@@ -1,7 +1,33 @@
 // spec/ 계약: ImageProvider 어댑터. 구현은 B①.
+import type { StyleResult } from './extract'
+
+export type ReservedZone = 'top' | 'bottom' | 'left' | 'right'
+
+// PRD 5절 계약 ④: 생성 이미지 애셋 + 메타(width/height/reserved_zone).
+// 스키마 → 타입 파생 도구가 레포에 없어 손으로 작성함 — spec/storyboard.schema.json의
+// reserved_zone enum과 갈라지지 않도록 변경 시 같이 맞출 것 (#71).
+export interface GeneratedImageResult {
+  asset: string
+  width: number
+  height: number
+  // 생성 시 실제로 비운 가장자리. compose.ts(B③)가 아직 이 값을 읽지 않으므로
+  // (#70에서 소비 여부 결정) 강제하지 않고 optional로 둔다.
+  reserved_zone?: ReservedZone
+  // 다음 컷 체이닝 토큰. PR #63 제안 이름 — provider 고유 개념(예:
+  // previous_response_id)을 그대로 노출하지 않는다는 PRD 6절 조건을 따름.
+  // 최종 이름·형태는 #18에서 확정되며, 그때 이 필드도 함께 갱신한다.
+  continuationToken?: string
+  // 스텁이 받은 continueFrom을 그대로 되돌려 라우트가 실제로 그 값을 읽어
+  // 넘기는지 스모크 테스트로 확인할 수 있게 하는 진단용 필드 (#75 사고 재발
+  // 방지). 실제 모델 호출을 붙이면 이 필드는 사라진다.
+  receivedContinueFrom?: string | null
+  // #60 규칙: 스텁 응답임을 나타내는 플래그. 실제 구현은 이 필드를 넣지 않는다.
+  stub?: true
+}
+
 export interface ImageProvider {
-  extractStyle(refs: Buffer[]): Promise<unknown>
-  generateCharacterSheet(preset: unknown): Promise<unknown>
+  extractStyle(refs: Buffer[]): Promise<StyleResult>
+  generateCharacterSheet(preset: unknown): Promise<GeneratedImageResult>
 
   // 표지 3안: 독립 호출. 세션에 누적하면 2안이 1안에 끌려가 서로 비슷해진다
   // (PRD 6절). 체이닝 토큰을 받지 않는 것으로 독립성을 계약에 드러낸다.
@@ -11,7 +37,7 @@ export interface ImageProvider {
     preset: unknown
     referenceAssets: unknown[]
     count: 3
-  }): Promise<unknown[]>
+  }): Promise<GeneratedImageResult[]>
 
   // 표지 이후 컷: 이전 컷을 이어받는 체이닝 경로.
   //
@@ -27,5 +53,5 @@ export interface ImageProvider {
     preset: unknown
     referenceAssets: unknown[]
     continueFrom?: string
-  }): Promise<unknown>
+  }): Promise<GeneratedImageResult>
 }
