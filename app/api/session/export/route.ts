@@ -1,5 +1,5 @@
 import { exportCuts } from "@/lib/render/export";
-import type { Cut } from "@/lib/render/types";
+import type { BubbleType, Cut, Position } from "@/lib/render/types";
 import { getSession } from "@/lib/db/sessions";
 
 /**
@@ -52,8 +52,28 @@ export async function GET(request: Request) {
   if (result.included.length) headers.set("X-Export-Included", result.included.join(","));
   if (skipped.length) headers.set("X-Export-Skipped", skipped.join(","));
 
-  return new Response(new Uint8Array(result.zip), { headers });
+  // Buffer를 그대로 넘기면 BodyInit 타입에 안 맞는다. 3-arg 생성자는 같은 메모리를
+  // 가리키는 뷰라 복사가 없다 — new Uint8Array(buf)는 전체를 복사한다.
+  // buffer의 타입이 ArrayBufferLike(SharedArrayBuffer 포함)라 BodyInit과 안 맞는다.
+  // Node의 Buffer가 SharedArrayBuffer를 쓰는 경로는 없으므로 좁혀서 넘긴다.
+  const body = new Uint8Array(
+    result.zip.buffer as ArrayBuffer,
+    result.zip.byteOffset,
+    result.zip.byteLength
+  );
+  return new Response(body, { headers });
 }
+
+// storyboard.schema.json의 caption enum과 같은 값이다. lib/render/types.ts는 타입만
+// 내보내므로(런타임 값이 없다) 여기에 배열로 둔다.
+const BUBBLE_TYPES: BubbleType[] = ["rounded", "rect", "cloud"];
+const POSITIONS: Position[] = [
+  "top_left",
+  "top_right",
+  "bottom_left",
+  "bottom_right",
+  "center",
+];
 
 /**
  * session_versions.storyboard(jsonb)의 cuts를 lib/render/가 받는 Cut[]로 좁힌다.
@@ -62,6 +82,14 @@ export async function GET(request: Request) {
  * 않다(스키마 소유권이 A①이라 최상위 required만 타입으로 잡아둔 상태). 실물 jsonb에는
  * 있으므로 여기서 런타임으로 확인한다. 모양이 깨진 컷은 예외를 던지지 않고 malformed로
  * 빼둔다 — 컷 하나가 망가졌다고 Export 전체가 죽으면 안 되기 때문이다.
+ *
+ * caption의 enum까지 보는 이유는 lib/render/compose.ts가 POSITION_BOX[position]을
+ * 폴백 없이 인덱싱하기 때문이다 — enum 밖 값이면 undefined.x를 읽어 예외가 나고,
+ * 그러면 "컷 하나가 깨져도 나머지는 내보낸다"는 위 의도가 이 경로에서 무너진다
+ * (bubble_type은 크래시 없이 rounded로 폴백된다). 저장 시점에 이 두 필드를 보는
+ * 곳이 없어서(app/api/session/validate.ts 주석 참조) 지금은 여기가 유일한 검증
+ * 지점이다. A①이 정식 타입가드를 내면 이 좁히기는 그쪽으로 넘긴다.
+ * compose.ts 쪽 방어는 lib/render/ 소유자(B③)에게 별도로 넘겼다.
  */
 function toRenderCuts(rawCuts: unknown): { cuts: Cut[]; malformed: number[] } {
   const cuts: Cut[] = [];
@@ -71,9 +99,12 @@ function toRenderCuts(rawCuts: unknown): { cuts: Cut[]; malformed: number[] } {
 
   rawCuts.forEach((raw, i) => {
     const cut = raw as Partial<Cut> | null;
+    // cut_index가 없는 컷은 저장 경로로는 들어올 수 없다 — lib/llm/storyboard-guard.ts의
+    // assertUniqueCutIndices가 1..N을 강제한다. DB를 직접 건드린 데이터에만 쓰이는
+    // 최후 방어선이라, 번호를 못 찾으면 배열 순서로 대신 알린다.
     const index = typeof cut?.cut_index === "number" ? cut.cut_index : i + 1;
 
-    if (!cut || typeof cut.cut_index !== "number" || typeof cut.caption?.text !== "string") {
+    if (!cut || typeof cut.cut_index !== "number" || !isRenderableCaption(cut.caption)) {
       malformed.push(index);
       return;
     }
@@ -86,6 +117,17 @@ function toRenderCuts(rawCuts: unknown): { cuts: Cut[]; malformed: number[] } {
   });
 
   return { cuts, malformed };
+}
+
+/** compose.ts가 그릴 수 있는 caption인지 — text가 있고 enum 두 개가 유효한지. */
+function isRenderableCaption(caption: unknown): caption is Cut["caption"] {
+  if (typeof caption !== "object" || caption === null) return false;
+  const c = caption as Record<string, unknown>;
+  return (
+    typeof c.text === "string" &&
+    BUBBLE_TYPES.includes(c.bubble_type as BubbleType) &&
+    POSITIONS.includes(c.position as Position)
+  );
 }
 
 /**
