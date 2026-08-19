@@ -73,3 +73,59 @@ export async function getPreset(presetId: string): Promise<SavedPreset | null> {
     preset: joined ? { ...preset, project_name: joined.name } : preset,
   };
 }
+
+export interface ProjectSummary {
+  projectId: string;
+  projectName: string;
+  presetId: string | null;
+  presetVersion: string | null;
+  sessionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 프로젝트 목록. 목록 화면이 jsonb를 파싱하지 않아도 되도록 요약만 내려준다
+ * (issue #7에서 projects.name을 정본으로 둔 이유와 같다).
+ *
+ * 프리셋 문서 본문은 넣지 않는다 — 목록에 필요 없고, 프로젝트가 늘어나면 응답이
+ * 그만큼 커진다. 상세가 필요하면 GET /api/preset?id= 로 따로 읽는다.
+ *
+ * 스키마상 프로젝트 하나에 프리셋이 여러 개 달릴 수 있지만(presets.project_id),
+ * savePreset은 프로젝트당 하나만 만든다. 나중에 프리셋을 갱신하는 경로가 생기면
+ * 여러 개가 될 수 있으므로 가장 최근 것 하나를 고른다.
+ */
+export async function listProjects(): Promise<ProjectSummary[]> {
+  const { data, error } = await getDb()
+    .from("projects")
+    .select("id, name, created_at, updated_at, presets(id, version, created_at), sessions(count)")
+    .order("updated_at", { ascending: false });
+
+  if (error) throw new Error(`프로젝트 목록 조회 실패: ${error.message}`);
+  if (!data) return [];
+
+  return data.map((row) => {
+    const presets = (row.presets ?? []) as Array<{
+      id: string;
+      version: string;
+      created_at: string;
+    }>;
+    // created_at 내림차순으로 골라 가장 최근 프리셋을 쓴다.
+    const latest = presets
+      .slice()
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+
+    // sessions(count)는 [{ count: n }] 형태로 온다. 세션이 없으면 빈 배열이다.
+    const counts = (row.sessions ?? []) as Array<{ count: number }>;
+
+    return {
+      projectId: row.id,
+      projectName: row.name,
+      presetId: latest?.id ?? null,
+      presetVersion: latest?.version ?? null,
+      sessionCount: counts[0]?.count ?? 0,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  });
+}

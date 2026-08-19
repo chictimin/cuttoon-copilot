@@ -1,5 +1,5 @@
 import { assertValidPreset } from "@/lib/llm/preset-guard";
-import { getPreset, savePreset } from "@/lib/db/presets";
+import { getPreset, listProjects, savePreset } from "@/lib/db/presets";
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -31,7 +31,17 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get("id");
-  if (!id) return Response.json({ error: "id 쿼리 필요" }, { status: 400 });
+
+  // id가 없으면 프로젝트 목록을 준다. 목록 화면이 쓰는 경로이고, 프로젝트 하나에
+  // 프리셋 하나가 붙는 구조라 별도 라우트를 두지 않았다.
+  if (!id) {
+    try {
+      return Response.json({ projects: await listProjects() });
+    } catch (e) {
+      console.error("[GET /api/preset] 목록 조회 실패:", e);
+      return Response.json({ error: "프로젝트 목록 조회에 실패했습니다" }, { status: 500 });
+    }
+  }
 
   try {
     const found = await getPreset(id);
