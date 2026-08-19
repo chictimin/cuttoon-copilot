@@ -1,37 +1,6 @@
 import OpenAI from "openai";
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// --- 브랜드 에셋 ---
-
-export interface BrandConfig {
-  brand_name: string;
-  product_name: string;
-  palette: string[];
-  characters: { id: string; file: string; label: string }[];
-  logo: { symbol: string; horizontal: string; product: string };
-}
-
-const BRAND_DIR = join(process.cwd(), "public/brand");
-
-export function loadBrandConfig(): BrandConfig | null {
-  const configPath = join(BRAND_DIR, "brand.json");
-  if (!existsSync(configPath)) return null;
-  return JSON.parse(readFileSync(configPath, "utf-8"));
-}
-
-export function loadBrandCharacterBuffers(): Buffer[] {
-  const brand = loadBrandConfig();
-  if (!brand) return [];
-  return brand.characters
-    .map((c) => {
-      const filePath = join(BRAND_DIR, c.file);
-      return existsSync(filePath) ? readFileSync(filePath) : null;
-    })
-    .filter((buf): buf is Buffer => buf !== null);
-}
 
 export interface StyleResult {
   line_weight: "thin" | "medium" | "thick";
@@ -127,17 +96,6 @@ No speech bubbles. No text. Clean reference sheet layout with clear separation b
 export async function generateCharacterSheet(
   preset: PresetInput
 ): Promise<CharacterSheetResult> {
-  const brand = loadBrandConfig();
-  if (brand && brand.characters.length > 0) {
-    const firstChar = brand.characters[0];
-    const filePath = join(BRAND_DIR, firstChar.file);
-    const buf = readFileSync(filePath);
-    return {
-      imageBase64: buf.toString("base64"),
-      revisedPrompt: `Brand character: ${firstChar.label}`,
-    };
-  }
-
   const prompt = buildCharacterPrompt(preset);
 
   const response = await client.images.generate({
@@ -147,9 +105,12 @@ export async function generateCharacterSheet(
     size: "1024x1024",
   });
 
-  const data = response.data[0];
+  const data = response.data?.[0];
+  if (!data?.b64_json) {
+    throw new Error("gpt-image-1 응답에 이미지 데이터가 없음");
+  }
   return {
-    imageBase64: data.b64_json!,
+    imageBase64: data.b64_json,
     revisedPrompt: prompt,
   };
 }
