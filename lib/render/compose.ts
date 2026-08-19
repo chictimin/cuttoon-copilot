@@ -1,14 +1,14 @@
-// 대사 말풍선을 그림 위에 실제로 구워 넣는다(ZIP 내보내기용) — position/bubbleType은
-// 이미 spec/vocabulary.json에 확정된 값이라 storyboard.schema.json이 아직 없어도
-// 안전하게 구현할 수 있다. instacut(양진형님 공유 참고자료)의 "말풍선 자리 배치 +
-// 시선 흐름" 아이디어를 Next.js/sharp 조합으로 옮긴 것 — 파이썬 코드 자체는 재사용 안 함.
+// 대사 말풍선을 그림 위에 실제로 구워 넣는다(ZIP 내보내기용) — caption.bubble_type/position은
+// storyboard.schema.json(A①, 2026-08-19 확정)이 그대로 확정한 필드다.
+// instacut(양진형님 공유 참고자료)의 "말풍선 자리 배치 + 시선 흐름" 아이디어를
+// Next.js/sharp 조합으로 옮긴 것 — 파이썬 코드 자체는 재사용 안 함.
 //
 // 주의(프로덕션 배포 시 확인 필요): 리눅스 서버에는 기본적으로 한글 폰트가 없을 수 있다.
 // 지금은 이 컴퓨터(Windows, Malgun Gothic)에서 방식만 검증하는 단계 — 실제 배포 전에는
 // 폰트를 프로젝트에 직접 포함시키거나 서버에 한글 폰트를 설치해야 한다.
 
 import sharp from "sharp";
-import type { BubbleType, CaptionInput, Position } from "./types";
+import type { BubbleType, Caption, Position } from "./types";
 
 const FONT_FAMILY = "'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif";
 const PADDING = 24;
@@ -119,7 +119,7 @@ function tailSvg(position: Position, x: number, y: number, w: number, h: number)
   return `<polygon points="${cx - 16},${y + 4} ${cx + 16},${y + 4} ${cx},${tipY}" fill="white" stroke="black" stroke-width="3"/>`;
 }
 
-function captionSvg(caption: CaptionInput, canvasW: number, canvasH: number): string {
+function captionSvg(caption: Caption, canvasW: number, canvasH: number): string {
   const box = POSITION_BOX[caption.position];
   const x = box.x * canvasW;
   const maxWidth = box.w * canvasW;
@@ -130,7 +130,7 @@ function captionSvg(caption: CaptionInput, canvasW: number, canvasH: number): st
   const bubbleH = textH + PADDING * 2;
   const y = box.y * canvasH;
 
-  const shape = bubbleShapeSvg(caption.bubbleType, x, y, maxWidth, bubbleH);
+  const shape = bubbleShapeSvg(caption.bubble_type, x, y, maxWidth, bubbleH);
   const tail = tailSvg(caption.position, x, y, maxWidth, bubbleH);
 
   const cx = x + maxWidth / 2;
@@ -143,7 +143,7 @@ function captionSvg(caption: CaptionInput, canvasW: number, canvasH: number): st
   return `${shape}${tail}${text}`;
 }
 
-export async function composeCut(imageBuffer: Buffer, captions: CaptionInput[]): Promise<Buffer> {
+export async function composeCut(imageBuffer: Buffer, captions: Caption[]): Promise<Buffer> {
   const image = sharp(imageBuffer);
   const meta = await image.metadata();
   const canvasW = meta.width ?? 1080;
