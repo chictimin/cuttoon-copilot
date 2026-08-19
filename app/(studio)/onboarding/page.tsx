@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+
 // 임시 스켈레톤. spec/preset.schema.json v1.1 중 "사용자가 실제로 입력·선택하는 필드"만 둔다.
 // 상태·제출 로직 없음. input name은 스키마 경로를 그대로 쓴다.
 //
@@ -36,6 +40,24 @@ const LIFE_STAGE = [
   ["retired", "은퇴"],
 ];
 
+interface ExtractedStyle {
+  line_weight: string;
+  saturation: string;
+  character_ratio: string;
+  background_density: string;
+  bubble_style: string;
+  palette: string[];
+}
+
+const STYLE_LABELS: Record<string, string> = {
+  line_weight: "선 굵기",
+  saturation: "채도감",
+  character_ratio: "캐릭터 비율",
+  background_density: "배경 디테일",
+  bubble_style: "말풍선 모양",
+  palette: "색상 팔레트",
+};
+
 function CheckboxGroup({ name, options }: { name: string; options: string[][] }) {
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1">
@@ -50,6 +72,31 @@ function CheckboxGroup({ name, options }: { name: string; options: string[][] })
 }
 
 export default function OnboardingPage() {
+  const [extractedStyle, setExtractedStyle] = useState<ExtractedStyle | null>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
+
+  const handleExtract = async () => {
+    setIsExtracting(true);
+    // TODO: 실제 API 호출로 교체
+    // 지금은 더미 데이터
+    setTimeout(() => {
+      setExtractedStyle({
+        line_weight: "medium",
+        saturation: "pastel",
+        character_ratio: "2.5head",
+        background_density: "low",
+        bubble_style: "rounded",
+        palette: ["#4A90E2", "#50C878", "#FFD700", "#FF6B6B"],
+      });
+      setIsExtracting(false);
+    }, 1000);
+  };
+
+  const handleRetry = () => {
+    setExtractedStyle(null);
+    handleExtract();
+  };
+
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-6 p-8">
       <div>
@@ -137,6 +184,54 @@ export default function OnboardingPage() {
               입력하면 합쳐서 씁니다.
             </p>
           </div>
+
+          {/* 스타일 추출 결과 표시 */}
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={handleExtract}
+              disabled={isExtracting}
+              className="border border-blue-500 bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600 disabled:bg-zinc-300"
+            >
+              {isExtracting ? "추출 중..." : "그림체 추출하기"}
+            </button>
+          </div>
+
+          {extractedStyle && (
+            <div className="mt-4 rounded border border-zinc-200 bg-zinc-50 p-4">
+              <h3 className="mb-2 text-sm font-semibold">추출된 스타일</h3>
+              <dl className="grid grid-cols-2 gap-2 text-sm">
+                {Object.entries(STYLE_LABELS).map(([key, label]) => (
+                  <div key={key}>
+                    <dt className="text-zinc-500">{label}</dt>
+                    <dd className="font-medium">
+                      {key === "palette" ? (
+                        <div className="flex gap-1">
+                          {extractedStyle.palette.map((color, i) => (
+                            <div
+                              key={i}
+                              className="size-4 rounded-full border"
+                              style={{ backgroundColor: color }}
+                              title={color}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        String(extractedStyle[key as keyof ExtractedStyle])
+                      )}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <button
+                type="button"
+                onClick={handleRetry}
+                className="mt-3 border border-zinc-300 px-3 py-1 text-xs hover:bg-zinc-100"
+              >
+                다시 뽑기
+              </button>
+            </div>
+          )}
         </fieldset>
 
         <fieldset className="flex flex-col gap-3 border border-zinc-300 p-4">
