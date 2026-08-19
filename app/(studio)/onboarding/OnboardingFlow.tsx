@@ -34,6 +34,7 @@ export default function OnboardingFlow() {
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [confirmedName, setConfirmedName] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function runAnalysis(count: number) {
@@ -74,7 +75,7 @@ export default function OnboardingFlow() {
     setStep("details");
   }
 
-  function handleConfirmDetails(details: DetailsFormValue) {
+  async function handleConfirmDetails(details: DetailsFormValue) {
     if (!analysis) return;
 
     const preset: Preset = {
@@ -102,10 +103,31 @@ export default function OnboardingFlow() {
     // 스키마와 실제로 맞는지 마지막에 한 번 더 확인 (조립 실수 방지)
     assertValidPreset(preset);
 
-    // TODO(A③): app/api/preset 연동 전까지 임시로 세션에 저장.
-    window.sessionStorage.setItem("cuttoon:onboarding-preset", JSON.stringify(preset));
-    setConfirmedName(preset.project_name);
-    setStep("confirmed");
+    setError(null);
+    setSaving(true);
+    try {
+      const res = await fetch("/api/preset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preset),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+        return;
+      }
+
+      const { presetId } = await res.json();
+      // 세션 화면이 어느 프리셋으로 시작할지 알아야 해서 id만 남긴다.
+      window.sessionStorage.setItem("cuttoon:preset-id", presetId);
+      setConfirmedName(preset.project_name);
+      setStep("confirmed");
+    } catch {
+      setError("저장에 실패했어요. 다시 시도해주세요");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -123,7 +145,9 @@ export default function OnboardingFlow() {
       {step === "result" && analysis && (
         <ResultStep analysis={analysis} onRetry={handleRetry} onConfirm={handleConfirmStyle} />
       )}
-      {step === "details" && <DetailsStep onConfirm={handleConfirmDetails} />}
+      {step === "details" && (
+        <DetailsStep onConfirm={handleConfirmDetails} error={error} saving={saving} />
+      )}
       {step === "confirmed" && (
         <div className="flex flex-col items-center gap-2 text-center">
           <h1 className="text-xl font-semibold">프리셋이 저장되었습니다</h1>
