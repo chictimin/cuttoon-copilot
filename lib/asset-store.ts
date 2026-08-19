@@ -1,80 +1,119 @@
-import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync } from "fs";
-import { join } from "path";
+import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 
-const ASSET_DIR = join(process.cwd(), "public/assets");
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// 디렉토리가 없으면 생성
-if (!existsSync(ASSET_DIR)) {
-  mkdirSync(ASSET_DIR, { recursive: true });
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error("Supabase 환경 변수 누락: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY");
 }
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+const BUCKET_NAME = "assets";
 
 /**
  * issue #3: 업로드 파일을 asset:// 참조로 변환하는 계층
- * 로컬 스토리지를 사용하는 구현
+ * Supabase Storage를 사용하는 구현
  */
 
 export interface AssetUploadResult {
-  assetUri: string; // asset://<id> 형태
-  filePath: string;
+  assetUri: string;
+  path: string;
   originalName: string;
 }
 
+function getMimeType(ext: string): string {
+  const mimeTypes: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+    pdf: "application/pdf",
+    txt: "text/plain",
+    json: "application/json",
+  };
+  return mimeTypes[ext.toLowerCase()] || "application/octet-stream";
+}
+
 /**
- * 파일을 업로드하고 asset:// URI를 반환한다.
- * @param fileBuffer - 업로드된 파일의 버퍼
- * @param originalName - 원본 파일명
- * @param mimeType - 파일 MIME 타입
+ * 파일을 Supabase Storage에 업로드하고 asset:// URI를 반환한다.
  */
-export function uploadAsset(
+export async function uploadAsset(
   fileBuffer: Buffer,
   originalName: string
-): AssetUploadResult {
+): Promise<AssetUploadResult> {
   const assetId = randomUUID();
   const ext = originalName.split(".").pop() ?? "bin";
   const fileName = `${assetId}.${ext}`;
-  const filePath = join(ASSET_DIR, fileName);
 
-  writeFileSync(filePath, fileBuffer);
+  const { error } = await supabase.storage
+    .from(BUCKET_NAME)
+    .upload(fileName, fileBuffer, {
+      contentType: getMimeType(ext),
+      upsert: false,
+    });
+
+  if (error) {
+    throw new Error(`Supabase 업로드 실패: ${error.message}`);
+  }
 
   return {
     assetUri: `asset://${assetId}`,
-    filePath,
+    path: `${BUCKET_NAME}/${fileName}`,
     originalName,
   };
 }
 
 /**
- * asset:// URI에서 실제 파일 경로를 가져온다.
- * @param assetUri - asset://<id> 또는 asset://<id>.<ext> 형태
+ * Supabase Storage에서 파일을 다운로드한다.
  */
-export function resolveAssetPath(assetUri: string): string | null {
+export async function getAssetUrl(assetUri: string): Promise<string | null> {
   if (!assetUri.startsWith("asset://")) {
     return null;
   }
 
   const assetId = assetUri.replace("asset://", "");
 
-  // 디렉토리에서 해당 ID로 시작하는 파일 찾기
-  const files = existsSync(ASSET_DIR) ? readdirSync(ASSET_DIR) : [];
-  const match = files.find((f: string) => f.startsWith(assetId));
+  // 가능한 확장자 시도
+  const extensions = ["png", "jpg", "jpeg", "gif", "webp", "svg", "pdf", "txt", "json"];
 
-  if (!match) {
-    return null;
+  for (const ext of extensions) {
+    const fileName = `${assetId}.${ext}`;
+    const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(fileName);
+
+    if (data?.publicUrl) {
+      return data.publicUrl;
+    }
   }
 
-  return join(ASSET_DIR, match);
+  return null;
 }
 
 /**
- * asset:// URI로 파일을 읽는다.
+ * Supabase Storage에서 파일을 읽는다.
  */
-export function readAsset(assetUri: string): Buffer | null {
-  const filePath = resolveAssetPath(assetUri);
-  if (!filePath || !existsSync(filePath)) {
+export async function readAsset(assetUri: string): Promise<Buffer | null> {
+  if (!assetUri.startsWith("asset://")) {
     return null;
   }
-  return readFileSync(filePath);
+
+  const assetId = assetUri.replace("asset://", "");
+  const extensions = ["png", "jpg", "jpeg", "gif", "webp", "svg", "pdf", "txt", "json"];
+
+  for (const ext of extensions) {
+    const fileName = `${assetId}.${ext}`;
+    const { data, error } = await supabase.storage
+      .from(BUCKET_NAME)
+      .download(fileName);
+
+    if (!error && data) {
+      return Buffer.from(await data.arrayBuffer());
+    }
+  }
+
+  return null;
 }
 
 /**
