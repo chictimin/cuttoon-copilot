@@ -107,6 +107,7 @@
 | `next` · `react` · `react-dom` | 전역 | 앱 프레임워크 |
 | `openai` | `lib/openai/` | 스타일 추출 · 이미지 생성 |
 | `@supabase/supabase-js` | `lib/db/` | DB 클라이언트 |
+| `server-only` | `lib/db/` | 서버 전용 모듈이 클라이언트 번들에 섞이면 빌드를 실패시킨다 |
 
 버전은 `package.json`이 정본이므로 여기 적지 않는다 — 두 곳에 적으면 갈라진다.
 
