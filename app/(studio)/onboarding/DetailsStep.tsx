@@ -92,8 +92,12 @@ function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
 
 export default function DetailsStep({
   onConfirm,
+  error,
+  saving,
 }: {
   onConfirm: (value: DetailsFormValue) => void;
+  error?: string | null;
+  saving?: boolean;
 }) {
   const [projectName, setProjectName] = useState("");
   const [industryText, setIndustryText] = useState("");
@@ -238,12 +242,15 @@ export default function DetailsStep({
         )}
       </div>
 
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
       <button
         type="button"
         onClick={handleSubmit}
-        className="self-start rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
+        disabled={saving}
+        className="self-start rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
       >
-        프리셋 확정
+        {saving ? "저장 중…" : "프리셋 확정"}
       </button>
     </div>
   );
