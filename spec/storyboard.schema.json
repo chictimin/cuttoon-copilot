@@ -1,3 +1,156 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cuttoon-copilot.local/spec/storyboard.schema.json",
+  "title": "Storyboard",
+  "description": "세션(컷툰 한 편) 단위 확정값. preset.schema.json이 명시적으로 storyboard 소유라 규정한 것만 담는다 — 등장 캐릭터(누가 preset.assets.character_sheet 풀에서 나오는지), 서사 전개, 소재, 대사, 컷별 연출. preset처럼 DB 행 자체의 id·생성시각은 스키마에 넣지 않고 저장소 컬럼이 담당한다(예: Supabase sessions 테이블의 id/created_at). 4컷 고정, vocabulary.json의 값 집합을 그대로 재사용한다.",
+  "type": "object",
+  "required": ["storyboard_version", "subject", "cast", "cuts"],
+  "additionalProperties": false,
+  "properties": {
+    "storyboard_version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "description": "이 컷툰 한 편의 실제 소재 한 줄. preset.context.main_subjects는 프로젝트가 반복해서 다루는 주제군일 뿐이고, 실제 소재는 여기서 받는다 (preset.schema.json 주석 원문)"
+    },
+    "cast": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "description": "타협 불가: 등장 캐릭터 1~2명, 그중 주인공(protagonist) 정확히 1명 — preset.schema.json이 '세션 단위이므로 storyboard에서 강제'라고 명시한 제약을 여기서 실제로 강제한다 (contains).",
+      "items": { "$ref": "#/$defs/castMember" },
+      "contains": { "properties": { "role": { "const": "protagonist" } } },
+      "minContains": 1,
+      "maxContains": 1
+    },
+    "cuts": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "description": "4컷 고정. narrative_beat는 vocabulary.json의 10개 태그 중 자유롭게 골라 이 컷툰만의 흐름을 짠다 (기승전결처럼 고정된 4단계 순서를 강제하지 않음). 다만 'cta' 비트는 정확히 1컷에 있어야 하고(preset.rules.cta_format이 항상 존재하는 이유), 그 위치는 4번 컷(마지막)으로 고정한다 — CTA는 서사 비트가 아니라 마지막 컷의 고정 역할이라는 게 프로젝트 전제(리뷰 결정, $defs.cut.allOf 참고). cut_index 유일성(1~4 각 1회)은 스키마가 아니라 storyboard-guard.ts의 런타임 체크로 강제한다 — 배열 요소가 객체라 uniqueItems로 못 잡음.",
+      "items": { "$ref": "#/$defs/cut" },
+      "contains": { "properties": { "narrative_beat": { "const": "cta" } } },
+      "minContains": 1,
+      "maxContains": 1
+    }
+  },
+  "$defs": {
+    "castMember": {
+      "type": "object",
+      "required": ["character_id", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "character_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "이 인물을 가리키는 라벨. chictimin 확인 결과 preset.assets.character_sheet는 고정 마스코트(지도사) 한 명만 담고, 주인공·어르신 등 나머지 인물은 고정 시트가 없는 가변 인물(세션마다 새로 생성)이라 character_sheet를 참조할 필요가 없다 — role=supporting이 지도사를 가리킬 때만 character_sheet와 연결된다고 보면 된다. cuts[].characters_in_frame의 character_id도 여기 나온 값과 일치해야 한다(스키마로는 강제 못 함, 리뷰 시 수동 확인 필요)."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["protagonist", "supporting"]
+        },
+        "description": {
+          "type": "string",
+          "description": "이 세션에서 이 캐릭터가 맡은 배역 설명 (예: '무릎이 아픈 어머니')"
+        }
+      }
+    },
+    "cut": {
+      "type": "object",
+      "required": ["cut_index", "narrative_beat", "shot_type", "camera_angle", "characters_in_frame", "caption"],
+      "additionalProperties": false,
+      "properties": {
+        "cut_index": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "narrative_beat": {
+          "type": "string",
+          "enum": ["hook", "problem", "solution", "cta", "question", "fact", "benefit", "before", "turning", "after"]
+        },
+        "shot_type": {
+          "type": "string",
+          "enum": ["closeup", "bust", "waist", "full", "wide"]
+        },
+        "camera_angle": {
+          "type": "string",
+          "enum": ["eye", "high", "low"]
+        },
+        "time_of_day": {
+          "type": "string",
+          "enum": ["morning", "noon", "evening", "night"]
+        },
+        "characters_in_frame": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "description": "cast 중 이 컷에 실제로 등장하는 인물. character_id는 cast[].character_id 중 하나와 일치해야 한다.",
+          "items": {
+            "type": "object",
+            "required": ["character_id", "expression", "pose"],
+            "additionalProperties": false,
+            "properties": {
+              "character_id": { "type": "string" },
+              "expression": {
+                "type": "string",
+                "enum": ["neutral", "smile", "laugh", "tired", "worried", "surprised", "determined", "relieved"]
+              },
+              "pose": {
+                "type": "string",
+                "enum": ["stand", "sit", "slump", "point", "arms_up", "walk", "stretch", "lie_down"]
+              }
+            }
+          }
+        },
+        "caption": {
+          "type": "object",
+          "required": ["text", "bubble_type", "position"],
+          "additionalProperties": false,
+          "description": "그림 위에 나중에 얹는 대사. 이미지 생성 프롬프트엔 절대 포함하지 않는다 — 캡션 수정 시 이미지 재생성이 필요 없어야 하기 때문.",
+          "properties": {
+            "text": { "type": "string" },
+            "bubble_type": {
+              "type": "string",
+              "enum": ["rounded", "rect", "cloud"],
+              "description": "기본은 preset.style.bubble_style을 따르되, 이 컷만 다르게 쓰고 싶으면 덮어쓴다"
+            },
+            "position": {
+              "type": "string",
+              "enum": ["top_left", "top_right", "bottom_left", "bottom_right", "center"]
+            }
+          }
+        },
+        "reserved_zone": {
+          "type": "string",
+          "enum": ["top", "bottom", "left", "right"],
+          "description": "이미지 생성 시점에 이 가장자리를 비워달라고 지시하는 값 (caption.position과는 별개 — reserved_zone은 생성 단계 지시, position은 이후 말풍선을 실제로 얹는 위치)"
+        },
+        "cta_override": {
+          "type": ["string", "null"],
+          "description": "narrative_beat=cta인 컷에서만 의미 있음. null이면 preset.rules.cta_format 기본값을 그대로 쓴다. null이 아니면 spec/data/cta_presets.json의 presets[].id 중 하나여야 한다 (preset.rules.cta_format과 동일 규약, issue #4)."
+        },
+        "generated_image": {
+          "type": ["string", "null"],
+          "pattern": "^asset://",
+          "description": "생성된 이미지 애셋 참조. preset.assets의 다른 필드들과 동일한 asset:// 규약을 따른다. 생성 전엔 null."
+        },
+        "prompt_used": {
+          "type": ["string", "null"],
+          "description": "실제 생성에 쓰인 프롬프트 (재생성/디버깅용). 대사 텍스트는 포함하지 않는다."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "narrative_beat": { "const": "cta" } } },
+          "then": { "required": ["cta_override"] },
+          "else": { "properties": { "cta_override": { "const": null } } }
+        },
+        {
+          "if": { "properties": { "narrative_beat": { "const": "cta" } } },
+          "then": { "properties": { "cut_index": { "const": 4 } } },
+          "description": "CTA는 서사 비트가 아니라 마지막 컷의 고정 역할이라는 게 프로젝트 전제라서(레포 문서가 CTA를 항상 '마지막 컷'으로 다룸), 위치를 4번으로 고정한다 (리뷰 결정)."
+        }
+      ]
+    }
+  }
 }
