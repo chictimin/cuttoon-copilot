@@ -58,8 +58,8 @@ cuttoon-copilot/
 | 폴더 | 담당 |
 | --- | --- |
 | `app/(studio)/` | A② |
-| `app/api/preset/`, `app/api/session/` | A③ |
-| `lib/llm/`, `spec/` | A① |
+| `app/api/preset/`, `app/api/session/` | A③ (chictimin) |
+| `lib/llm/`, `spec/` | A① (dabi) |
 | `app/api/generate/`, `lib/openai/generate.ts` | B① |
 | `lib/openai/extract.ts` | B② |
 | `lib/render/` | B③ |
