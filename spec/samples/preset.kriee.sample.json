@@ -1,0 +1,29 @@
+{
+  "preset_version": "1.1",
+  "project_name": "한국노인체육평가협회(KRIEE)",
+  "assets": {
+    "character_sheet": "asset://characters/kriee-fairy-instructor.png",
+    "style_refs": [],
+    "reference_asset_ids": []
+  },
+  "style": {
+    "keywords": ["귀여운", "파스텔", "카툰"],
+    "line_weight": "medium",
+    "palette": ["#5B9BD5", "#FFFFFF", "#F2C572"],
+    "saturation": "pastel",
+    "character_ratio": "2head",
+    "background_density": "low",
+    "bubble_style": "rounded"
+  },
+  "rules": {
+    "forbidden": ["무서운 표정", "사실적(실사) 렌더링"],
+    "cta_format": "프로필 링크로 신청/문의"
+  },
+  "context": {
+    "industry": ["헬스케어", "시니어 피트니스 교육"],
+    "interests": ["recruiting", "trust_building"],
+    "age_band": ["30s", "40s"],
+    "life_stage": ["job_seeker", "early_career"],
+    "main_subjects": ["갱년기", "무릎 관절 회복", "시니어 트레이닝 자격증"]
+  }
+}
