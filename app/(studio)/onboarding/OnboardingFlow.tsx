@@ -36,7 +36,6 @@ export default function OnboardingFlow() {
   const [isDragging, setIsDragging] = useState(false);
   const [confirmedName, setConfirmedName] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [userKeywords, setUserKeywords] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function runAnalysis(count: number) {
@@ -83,7 +82,6 @@ export default function OnboardingFlow() {
   }
 
   function handleConfirmKeywords(keywords: string[]) {
-    setUserKeywords(keywords);
     const merged = mergeStyleValues(null, keywords);
     const analysisResult: StyleAnalysisResult = {
       style: {
