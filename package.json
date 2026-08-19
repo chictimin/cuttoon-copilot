@@ -7,13 +7,17 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "spec:docs": "pipx run --spec json-schema-for-humans generate-schema-doc --config template_name=md spec/preset.schema.json spec/docs/preset.md"
+    "spec:docs": "pipx run --spec json-schema-for-humans generate-schema-doc --config template_name=md spec/preset.schema.json spec/docs/preset.md",
+    "spec:sync-check": "node spec/sync-check.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "archiver": "^8.0.0",
     "next": "16.3.1",
+    "openai": "^7.5.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
     "sharp": "^0.35.3"
   },
   "devDependencies": {
