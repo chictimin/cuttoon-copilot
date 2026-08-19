@@ -10,6 +10,7 @@
 // 가드의 목적이 LLM 출력의 큰 형태 오류를 잡는 것이라 오타 필드까지는 지금 급하지 않다고 판단.
 
 import presetSchema from "@/spec/preset.schema.json";
+import vocabulary from "@/spec/vocabulary.json";
 import { isValidCtaId, type Interest } from "./cta-presets";
 
 export type { Interest };
@@ -99,6 +100,19 @@ const VALID = {
 for (const [key, values] of Object.entries(VALID)) {
   if (values.length === 0) {
     throw new Error(`preset.schema.json에서 ${key} enum을 못 읽음 — 스키마 경로 확인 필요`);
+  }
+}
+
+// vocabulary.json의 모든 값을 하나의 Set으로 flatten — 미매핑 단어 검사에 사용
+const ALLOWED_VOCABULARY = new Set<string>();
+for (const [key, values] of Object.entries(vocabulary)) {
+  if (key === "vocabulary_version") continue;
+  if (Array.isArray(values)) {
+    for (const v of values) {
+      if (typeof v === "string") {
+        ALLOWED_VOCABULARY.add(v);
+      }
+    }
   }
 }
 
@@ -225,15 +239,29 @@ export function isValidPreset(data: unknown): data is Preset {
 }
 
 /**
- * issue #5의 "미매핑 단어 처리 정책" 항목. style.keywords/rules.forbidden/context.main_subjects/
- * context.industry는 enum이 아니라 자유 태그라, 프롬프트 조립 시 모델이 못 알아듣는 단어가 섞일
- * 위험이 preset.schema.json에도 명시돼 있다. 정책(예: 무시/경고/치환) 자체가 아직 안 정해져서
- * 여기서 임의로 결정하지 않고 TODO로 남긴다 — 팀 논의 필요.
+ * issue #15: 미매핑 단어 처리 정책 - 경고 방식.
+ * style.keywords/rules.forbidden/context.main_subjects/context.industry는 자유 태그라,
+ * 프롬프트 조립 시 모델이 못 알아듣는 단어가 섞일 위험이 있다.
+ *
+ * 정책: vocabulary.json에 없는 단어를 감지하여 경고 메시지 반환 (저장은 허용).
+ *
+ * @returns 미매핑된 단어 목록. 빈 배열이면 모든 단어가 허용됨.
  */
-export function checkUnmappedWordsPolicy(): never {
-  throw new Error(
-    "TODO(issue #5): 미매핑 단어 처리 정책 미정. style.keywords/rules.forbidden/" +
-      "context.main_subjects/context.industry가 자유 태그라 검증 규칙이 아직 없음 — " +
-      "팀 논의 후 구현."
-  );
+export function checkUnmappedWordsPolicy(preset: Preset): string[] {
+  const unmappedWords: string[] = [];
+
+  const checkField = (fieldName: string, values: string[]) => {
+    for (const value of values) {
+      if (!ALLOWED_VOCABULARY.has(value)) {
+        unmappedWords.push(`${fieldName}: "${value}"`);
+      }
+    }
+  };
+
+  checkField("style.keywords", preset.style.keywords);
+  checkField("rules.forbidden", preset.rules.forbidden);
+  checkField("context.main_subjects", preset.context.main_subjects);
+  checkField("context.industry", preset.context.industry);
+
+  return unmappedWords;
 }
