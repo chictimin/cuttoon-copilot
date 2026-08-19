@@ -1,0 +1,89 @@
+{
+  "storyboard_version": "1.0",
+  "subject": "무릎 연골 나감",
+  "cast": [
+    {
+      "character_id": "mother",
+      "role": "protagonist",
+      "description": "무릎 연골이 닳아 아파하는 60대 어머니"
+    },
+    {
+      "character_id": "trainer",
+      "role": "supporting",
+      "description": "노인운동 지도사"
+    }
+  ],
+  "cuts": [
+    {
+      "cut_index": 1,
+      "narrative_beat": "problem",
+      "shot_type": "closeup",
+      "camera_angle": "eye",
+      "time_of_day": "morning",
+      "characters_in_frame": [
+        { "character_id": "mother", "expression": "worried", "pose": "sit" }
+      ],
+      "caption": {
+        "text": "무릎 연골이 다 닳았다는 말을 들었을 때",
+        "bubble_type": "rounded",
+        "position": "top_left"
+      },
+      "reserved_zone": "top",
+      "generated_image": "asset://cuttoon/knee/cut1.png",
+      "prompt_used": "Korean webtoon style, clean line art, flat colors, simple background. [character reference: mother from character_sheet]. No embedded text, no speech bubbles, no lettering. Leave clear empty space at the top for a speech bubble. Panel: closeup shot, eye-level angle, morning light, character sitting and wincing while touching her knee."
+    },
+    {
+      "cut_index": 2,
+      "narrative_beat": "before",
+      "shot_type": "full",
+      "camera_angle": "eye",
+      "characters_in_frame": [
+        { "character_id": "mother", "expression": "tired", "pose": "slump" }
+      ],
+      "caption": {
+        "text": "앉았다 일어나는 것조차 무서웠어요",
+        "bubble_type": "rounded",
+        "position": "top_right"
+      },
+      "reserved_zone": "top",
+      "generated_image": null,
+      "prompt_used": null
+    },
+    {
+      "cut_index": 3,
+      "narrative_beat": "solution",
+      "shot_type": "waist",
+      "camera_angle": "eye",
+      "characters_in_frame": [
+        { "character_id": "mother", "expression": "determined", "pose": "stand" },
+        { "character_id": "trainer", "expression": "smile", "pose": "point" }
+      ],
+      "caption": {
+        "text": "힘 쓰는 순서를 바꾸니 무릎이 아프지 않았어요",
+        "bubble_type": "rounded",
+        "position": "top_left"
+      },
+      "reserved_zone": "left",
+      "generated_image": null,
+      "prompt_used": null
+    },
+    {
+      "cut_index": 4,
+      "narrative_beat": "cta",
+      "shot_type": "wide",
+      "camera_angle": "low",
+      "characters_in_frame": [
+        { "character_id": "mother", "expression": "laugh", "pose": "walk" }
+      ],
+      "caption": {
+        "text": "지금은 계단도 거뜬히 오릅니다",
+        "bubble_type": "rounded",
+        "position": "top_left"
+      },
+      "reserved_zone": "top",
+      "cta_override": null,
+      "generated_image": null,
+      "prompt_used": null
+    }
+  ]
+}
