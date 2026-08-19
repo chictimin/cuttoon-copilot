@@ -100,8 +100,17 @@ export default function OnboardingFlow() {
       },
     };
 
-    // 스키마와 실제로 맞는지 마지막에 한 번 더 확인 (조립 실수 방지)
-    assertValidPreset(preset);
+    try {
+      // 스키마와 실제로 맞는지 마지막에 한 번 더 확인 (조립 실수 방지)
+      assertValidPreset(preset);
+    } catch {
+      // mock을 실제 스타일 분석 API로 교체하면 이 경로가 실제로 발생할 수 있다
+      // (PR #22 리뷰, chictimin). 검증 실패를 그냥 던지면 "프리셋 확정" 버튼이 반응
+      // 없는 것처럼 보이므로, Result 단계로 되돌려 "다시 뽑기"로 복구하게 한다.
+      setError("분석 결과에 문제가 있어요. 다시 뽑아주세요");
+      setStep("result");
+      return;
+    }
 
     setError(null);
     setSaving(true);
@@ -143,7 +152,12 @@ export default function OnboardingFlow() {
       )}
       {step === "analyzing" && <AnalyzingStep />}
       {step === "result" && analysis && (
-        <ResultStep analysis={analysis} onRetry={handleRetry} onConfirm={handleConfirmStyle} />
+        <ResultStep
+          analysis={analysis}
+          error={error}
+          onRetry={handleRetry}
+          onConfirm={handleConfirmStyle}
+        />
       )}
       {step === "details" && (
         <DetailsStep onConfirm={handleConfirmDetails} error={error} saving={saving} />
@@ -250,10 +264,12 @@ const SATURATION_LABEL: Record<string, string> = {
 
 function ResultStep({
   analysis,
+  error,
   onRetry,
   onConfirm,
 }: {
   analysis: StyleAnalysisResult;
+  error: string | null;
   onRetry: () => void;
   onConfirm: () => void;
 }) {
@@ -262,6 +278,12 @@ function ResultStep({
   return (
     <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
       <h1 className="text-xl font-semibold">이런 스타일로 만들었어요</h1>
+
+      {error && (
+        <p className="w-full max-w-md rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">
+          {error}
+        </p>
+      )}
 
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
         <figure className="flex flex-col items-center gap-2">
