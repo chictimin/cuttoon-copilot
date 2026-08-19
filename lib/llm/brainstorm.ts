@@ -205,5 +205,18 @@ export async function generateBrainstormTurns(
     }
   }
 
-  return parsed;
+  // 프롬프트가 turnsToGenerate만 요청해도 모델이 지시를 무시하고 이미 채워진
+  // 턴까지 같이 만들어 보낼 수 있다 (실측 확인됨 — protagonist가 채워진 draft를
+  // 넘겨도 응답에 protagonist가 다시 포함됨). 턴 건너뛰기가 프롬프트 지시에만
+  // 의존하면 조용히 깨지므로, 실제로 요청한 집합으로 응답을 다시 한번 좁힌다.
+  const requested = new Set(turnsToGenerate);
+  const filtered = parsed.filter((turn) => requested.has(turn.key));
+  if (filtered.length !== turnsToGenerate.length) {
+    console.error("브레인스토밍: 응답이 요청한 턴 집합과 다름", {
+      requested: turnsToGenerate,
+      received: parsed.map((t) => t.key),
+    });
+  }
+
+  return filtered;
 }
