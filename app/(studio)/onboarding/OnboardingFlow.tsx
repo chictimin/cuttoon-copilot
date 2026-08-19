@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { analyzeStyle, type StyleAnalysisResult } from "@/lib/gemini/generate";
-import type { Preset } from "./types";
+import { useRef, useState } from "react";
+import { assertValidPreset, type Preset } from "@/lib/llm/preset-guard";
+import {
+  analyzeStyle,
+  CHARACTER_SHEET_PREVIEW,
+  type StyleAnalysisResult,
+} from "./mock-style-analysis";
+import DetailsStep, { type DetailsFormValue } from "./DetailsStep";
 
-type Step = "upload" | "analyzing" | "result";
+type Step = "upload" | "analyzing" | "result" | "details" | "confirmed";
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png"];
 const MAX_FILES = 5;
@@ -24,25 +29,19 @@ function validateFiles(files: File[]): { valid: File[]; error: string | null } {
 
 export default function OnboardingFlow() {
   const [step, setStep] = useState<Step>("upload");
-  const [referenceUrls, setReferenceUrls] = useState<string[]>([]);
-  const [result, setResult] = useState<StyleAnalysisResult | null>(null);
+  const [referenceCount, setReferenceCount] = useState(0);
+  const [analysis, setAnalysis] = useState<StyleAnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isConfirmed, setIsConfirmed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [confirmedName, setConfirmedName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    return () => {
-      referenceUrls.forEach((url) => URL.revokeObjectURL(url));
-    };
-  }, [referenceUrls]);
-
-  async function runAnalysis(refs: string[]) {
+  async function runAnalysis(count: number) {
     setError(null);
     setStep("analyzing");
     try {
-      const analysis = await analyzeStyle(refs);
-      setResult(analysis);
+      const result = await analyzeStyle(count);
+      setAnalysis(result);
       setStep("result");
     } catch {
       setError("다시 시도해주세요");
@@ -62,30 +61,51 @@ export default function OnboardingFlow() {
       return;
     }
 
-    referenceUrls.forEach((url) => URL.revokeObjectURL(url));
-    const urls = valid.map((file) => URL.createObjectURL(file));
-
-    setReferenceUrls(urls);
-    setIsConfirmed(false);
-    void runAnalysis(urls);
+    setReferenceCount(valid.length);
+    void runAnalysis(valid.length);
   }
 
   function handleRetry() {
-    if (referenceUrls.length === 0) return;
-    void runAnalysis(referenceUrls);
+    if (referenceCount === 0) return;
+    void runAnalysis(referenceCount);
   }
 
-  function handleConfirm() {
-    if (!result) return;
+  function handleConfirmStyle() {
+    setStep("details");
+  }
+
+  function handleConfirmDetails(details: DetailsFormValue) {
+    if (!analysis) return;
+
     const preset: Preset = {
-      reference_images: referenceUrls,
-      character_sheet: result.characterSheet,
-      color_palette: result.colorPalette,
-      background_tone: result.backgroundTone,
+      preset_version: "1.1",
+      project_name: details.projectName,
+      assets: {
+        character_sheet: analysis.characterSheetAsset,
+        style_refs: analysis.styleRefAssets,
+        reference_asset_ids: [],
+      },
+      style: analysis.style,
+      rules: {
+        forbidden: details.forbidden,
+        cta_format: details.ctaId,
+      },
+      context: {
+        industry: details.industry,
+        interests: details.interests,
+        age_band: details.ageBand,
+        life_stage: details.lifeStage,
+        main_subjects: details.mainSubjects,
+      },
     };
+
+    // 스키마와 실제로 맞는지 마지막에 한 번 더 확인 (조립 실수 방지)
+    assertValidPreset(preset);
+
     // TODO(A③): app/api/preset 연동 전까지 임시로 세션에 저장.
     window.sessionStorage.setItem("cuttoon:onboarding-preset", JSON.stringify(preset));
-    setIsConfirmed(true);
+    setConfirmedName(preset.project_name);
+    setStep("confirmed");
   }
 
   return (
@@ -100,13 +120,17 @@ export default function OnboardingFlow() {
         />
       )}
       {step === "analyzing" && <AnalyzingStep />}
-      {step === "result" && result && (
-        <ResultStep
-          result={result}
-          isConfirmed={isConfirmed}
-          onRetry={handleRetry}
-          onConfirm={handleConfirm}
-        />
+      {step === "result" && analysis && (
+        <ResultStep analysis={analysis} onRetry={handleRetry} onConfirm={handleConfirmStyle} />
+      )}
+      {step === "details" && <DetailsStep onConfirm={handleConfirmDetails} />}
+      {step === "confirmed" && (
+        <div className="flex flex-col items-center gap-2 text-center">
+          <h1 className="text-xl font-semibold">프리셋이 저장되었습니다</h1>
+          <p className="text-sm text-zinc-500">
+            &ldquo;{confirmedName}&rdquo; 프로젝트가 준비됐어요
+          </p>
+        </div>
       )}
     </main>
   );
@@ -187,65 +211,83 @@ function AnalyzingStep() {
   );
 }
 
+const BACKGROUND_DENSITY_LABEL: Record<string, string> = {
+  none: "배경 없음",
+  low: "배경 단순",
+  medium: "배경 보통",
+  high: "배경 풍부",
+};
+
+const SATURATION_LABEL: Record<string, string> = {
+  pastel: "파스텔",
+  vivid: "선명한",
+  muted: "차분한",
+};
+
 function ResultStep({
-  result,
-  isConfirmed,
+  analysis,
   onRetry,
   onConfirm,
 }: {
-  result: StyleAnalysisResult;
-  isConfirmed: boolean;
+  analysis: StyleAnalysisResult;
   onRetry: () => void;
   onConfirm: () => void;
 }) {
-  const cards: { label: string; src: string }[] = [
-    { label: "캐릭터 시트", src: result.characterSheet },
-    { label: "색감 팔레트", src: result.colorPalette },
-    { label: "배경 톤", src: result.backgroundTone },
-  ];
+  const { style } = analysis;
 
   return (
     <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
       <h1 className="text-xl font-semibold">이런 스타일로 만들었어요</h1>
 
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
-        {cards.map((card) => (
-          <figure key={card.label} className="flex flex-col items-center gap-2">
-            {/* eslint-disable-next-line @next/next/no-img-element -- data URI placeholder, next/image 불필요 */}
-            <img
-              src={card.src}
-              alt={card.label}
-              className="aspect-square w-full rounded-lg object-cover"
-            />
-            <figcaption className="text-sm text-zinc-500">
-              {card.label}
-            </figcaption>
-          </figure>
-        ))}
+        <figure className="flex flex-col items-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element -- data URI placeholder, next/image 불필요 */}
+          <img
+            src={CHARACTER_SHEET_PREVIEW}
+            alt="캐릭터 시트"
+            className="aspect-square w-full rounded-lg object-cover"
+          />
+          <figcaption className="text-sm text-zinc-500">캐릭터 시트</figcaption>
+        </figure>
+
+        <figure className="flex flex-col items-center gap-2">
+          <div className="grid aspect-square w-full grid-cols-2 gap-1 overflow-hidden rounded-lg">
+            {style.palette.map((color) => (
+              <div key={color} style={{ backgroundColor: color }} />
+            ))}
+          </div>
+          <figcaption className="text-sm text-zinc-500">
+            색감 팔레트 · {SATURATION_LABEL[style.saturation] ?? style.saturation}
+          </figcaption>
+        </figure>
+
+        <figure className="flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-lg bg-zinc-100 p-4">
+          <span className="text-sm text-zinc-600">
+            {BACKGROUND_DENSITY_LABEL[style.background_density] ?? style.background_density}
+          </span>
+          <span className="text-xs text-zinc-400">선 굵기: {style.line_weight}</span>
+          <span className="text-xs text-zinc-400">비율: {style.character_ratio}</span>
+          <span className="text-xs text-zinc-400">말풍선: {style.bubble_style}</span>
+          <figcaption className="text-sm text-zinc-500">배경 톤</figcaption>
+        </figure>
       </div>
 
-      {isConfirmed ? (
-        <p className="rounded-md bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
-          프리셋이 저장되었습니다
-        </p>
-      ) : (
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={onRetry}
-            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
-          >
-            다시 뽑기
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-          >
-            이걸로 할게
-          </button>
-        </div>
-      )}
+      <div className="flex gap-3">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
+        >
+          다시 뽑기
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+        >
+          이걸로 할게
+        </button>
+      </div>
     </div>
   );
 }
