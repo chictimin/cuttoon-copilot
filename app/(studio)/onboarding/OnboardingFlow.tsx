@@ -123,7 +123,13 @@ export default function OnboardingFlow() {
     };
 
     // 스키마와 실제로 맞는지 마지막에 한 번 더 확인 (조립 실수 방지)
-    assertValidPreset(preset);
+    try {
+      assertValidPreset(preset);
+    } catch {
+      setError("분석 결과에 문제가 있어요. 다시 뽑아주세요");
+      setStep("result");
+      return;
+    }
 
     setError(null);
     setSaving(true);

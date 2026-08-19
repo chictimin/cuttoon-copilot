@@ -78,13 +78,6 @@ export function mergeStyleValues(
   extracted: StyleExtractionResult | null,
   userKeywords: string[]
 ): MergedStyleResult {
-  // 추출값이 없으면 기본값 사용
-  if (!extracted) {
-    return {
-      ...DEFAULT_STYLE_VALUES,
-    };
-  }
-
   // 사용자 키워드에서 enum 값을 찾는 헬퍼
   const findKeywordMatch = <T extends string>(
     keywords: string[],
@@ -98,39 +91,39 @@ export function mergeStyleValues(
     return undefined;
   };
 
-  // 사용자 키워드가 있으면 우선, 없으면 추출값 사용
+  // 사용자 키워드가 있으면 우선, 없으면 추출값(또는 기본값) 사용
   const line_weight = (
     findKeywordMatch(userKeywords, VALID.line_weight) ||
-    extracted.line_weight ||
+    extracted?.line_weight ||
     DEFAULT_STYLE_VALUES.line_weight
   ) as "thin" | "medium" | "thick";
 
   const saturation = (
     findKeywordMatch(userKeywords, VALID.saturation) ||
-    extracted.saturation ||
+    extracted?.saturation ||
     DEFAULT_STYLE_VALUES.saturation
   ) as "pastel" | "vivid" | "muted";
 
   const character_ratio = (
     findKeywordMatch(userKeywords, VALID.character_ratio) ||
-    extracted.character_ratio ||
+    extracted?.character_ratio ||
     DEFAULT_STYLE_VALUES.character_ratio
   ) as "2head" | "2.5head" | "3head" | "realistic";
 
   const background_density = (
     findKeywordMatch(userKeywords, VALID.background_density) ||
-    extracted.background_density ||
+    extracted?.background_density ||
     DEFAULT_STYLE_VALUES.background_density
   ) as "none" | "low" | "medium" | "high";
 
   const bubble_style = (
     findKeywordMatch(userKeywords, VALID.bubble_style) ||
-    extracted.bubble_style ||
+    extracted?.bubble_style ||
     DEFAULT_STYLE_VALUES.bubble_style
   ) as "rounded" | "rect" | "cloud";
 
-  // 팔레트는 추출값 우선
-  const palette = extracted.palette || DEFAULT_STYLE_VALUES.palette;
+  // 팔레트: 추출값 우선, 없으면 기본값
+  const palette = extracted?.palette || DEFAULT_STYLE_VALUES.palette;
 
   return {
     line_weight,
