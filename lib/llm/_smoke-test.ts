@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { buildSessionCast } from "./session-cast";
 import { checkUnmappedWordsPolicy, assertValidPreset, mergeStyleValues } from "./preset-guard";
+import { uploadAsset, resolveAssetPath, isValidAssetUri } from "../asset-store";
 
 const s = buildSessionCast({
   instructorCharacterId: "fairy_instructor",
@@ -71,3 +72,15 @@ const result3 = mergeStyleValues(
   []
 );
 console.log("추출값만:", result3);
+
+// asset-store 테스트
+console.log("\n--- asset-store 테스트 ---");
+const testBuffer = Buffer.from("테스트 파일 내용");
+const uploadResult = uploadAsset(testBuffer, "test.txt", "text/plain");
+console.log("업로드 결과:", uploadResult);
+
+const resolvedPath = resolveAssetPath(uploadResult.assetUri);
+console.log("해결된 경로:", resolvedPath);
+
+const isValid = isValidAssetUri(uploadResult.assetUri);
+console.log("유효한 URI:", isValid);
