@@ -1,12 +1,45 @@
 {
-  "vocabulary_version": "0-provisional",
-  "expression": ["neutral","smile","laugh","tired","worried","surprised","determined","relieved"],
-  "pose": ["stand","sit","slump","point","arms_up","walk","stretch","lie_down"],
-  "shot_type": ["closeup","bust","waist","full","wide"],
-  "camera_angle": ["eye","high","low"],
-  "time_of_day": ["morning","noon","evening","night"],
-  "bubble_type": ["rounded","rect","cloud"],
-  "position": ["top_left","top_right","bottom_left","bottom_right","center"],
-  "reserved_zone": ["top","bottom","left","right"],
-  "narrative_beat": ["hook","problem","solution","cta","question","fact","benefit","before","turning","after"]
+  "vocabulary_version": "1.0",
+  "expression": [
+    { "id": "neutral",     "prompt_hint": "relaxed face, no particular emotion, mouth closed" },
+    { "id": "smile",       "prompt_hint": "gentle smile, slight upward curve of lips, soft eyes" },
+    { "id": "laugh",       "prompt_hint": "wide open mouth laughing, eyes squinting with joy, raised cheeks" },
+    { "id": "tired",       "prompt_hint": "half-closed droopy eyes, slight frown, slouched posture" },
+    { "id": "worried",     "prompt_hint": "furrowed brows, slightly biting lower lip, tense shoulders" },
+    { "id": "surprised",   "prompt_hint": "wide open eyes, raised eyebrows, mouth slightly open in O shape" },
+    { "id": "determined",  "prompt_hint": "firm gaze forward, clenched jaw, confident upright posture" },
+    { "id": "relieved",    "prompt_hint": "exhaling with closed eyes, relaxed shoulders, soft gentle smile" }
+  ],
+  "pose": [
+    { "id": "stand",     "prompt_hint": "standing upright with both feet on the ground, arms at sides" },
+    { "id": "sit",       "prompt_hint": "sitting on a chair, back straight, hands on lap or desk" },
+    { "id": "slump",     "prompt_hint": "shoulders drooped forward, head tilted down, curved back" },
+    { "id": "point",     "prompt_hint": "one arm extended forward, index finger pointing at something" },
+    { "id": "arms_up",   "prompt_hint": "both arms raised above head in celebration or stretching" },
+    { "id": "walk",      "prompt_hint": "mid-stride walking pose, one foot forward, arms swinging naturally" },
+    { "id": "stretch",   "prompt_hint": "arms reaching upward or outward, body elongated, slight back arch" },
+    { "id": "lie_down",  "prompt_hint": "lying flat on back or side, body horizontal, relaxed limbs" }
+  ],
+  "shot_type": [
+    { "id": "closeup",  "prompt_hint": "framing from shoulders up, face fills most of the frame" },
+    { "id": "bust",     "prompt_hint": "framing from chest up, showing upper body and face" },
+    { "id": "waist",    "prompt_hint": "framing from waist up, showing torso and arms" },
+    { "id": "full",     "prompt_hint": "full body visible from head to toe, some space around the figure" },
+    { "id": "wide",     "prompt_hint": "character small in frame, environment dominates the composition" }
+  ],
+  "camera_angle": [
+    { "id": "eye",   "prompt_hint": "camera at eye level, straight-on perspective, neutral angle" },
+    { "id": "high",  "prompt_hint": "camera looking down from above, character appears smaller" },
+    { "id": "low",   "prompt_hint": "camera looking up from below, character appears taller and imposing" }
+  ],
+  "time_of_day": [
+    { "id": "morning",  "prompt_hint": "warm golden sunrise light, soft long shadows from the left" },
+    { "id": "noon",     "prompt_hint": "bright overhead sunlight, short shadows, vivid clear colors" },
+    { "id": "evening",  "prompt_hint": "warm orange-pink sunset glow, long shadows, golden hour tones" },
+    { "id": "night",    "prompt_hint": "dark blue sky, artificial indoor or street lighting, cool tones" }
+  ],
+  "bubble_type": ["rounded", "rect", "cloud"],
+  "position": ["top_left", "top_right", "bottom_left", "bottom_right", "center"],
+  "reserved_zone": ["top", "bottom", "left", "right"],
+  "narrative_beat": ["hook", "problem", "solution", "cta", "question", "fact", "benefit", "before", "turning", "after"]
 }
