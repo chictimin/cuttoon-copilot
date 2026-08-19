@@ -22,7 +22,7 @@ export function loadBrandConfig(): BrandConfig | null {
   return JSON.parse(readFileSync(configPath, "utf-8"));
 }
 
-export function loadBrandCharacterBuffers(): Buffer[] {
+export function loadBrandCharacterBuffers(): Buffer<ArrayBuffer>[] {
   const brand = loadBrandConfig();
   if (!brand) return [];
   return brand.characters
@@ -30,7 +30,7 @@ export function loadBrandCharacterBuffers(): Buffer[] {
       const filePath = join(BRAND_DIR, c.file);
       return existsSync(filePath) ? readFileSync(filePath) : null;
     })
-    .filter((buf): buf is Buffer => buf !== null);
+    .filter((buf): buf is Buffer<ArrayBuffer> => buf !== null);
 }
 
 export interface StyleResult {
@@ -147,9 +147,12 @@ export async function generateCharacterSheet(
     size: "1024x1024",
   });
 
-  const data = response.data[0];
+  const data = response.data?.[0];
+  if (!data?.b64_json) {
+    throw new Error("gpt-image-1 응답에 이미지 데이터가 없음");
+  }
   return {
-    imageBase64: data.b64_json!,
+    imageBase64: data.b64_json,
     revisedPrompt: prompt,
   };
 }

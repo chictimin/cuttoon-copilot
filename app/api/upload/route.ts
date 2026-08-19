@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const result = uploadAsset(buffer, file.name, file.type);
+    const result = uploadAsset(buffer, file.name);
 
     return NextResponse.json({
       assetUri: result.assetUri,

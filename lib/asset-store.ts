@@ -28,8 +28,7 @@ export interface AssetUploadResult {
  */
 export function uploadAsset(
   fileBuffer: Buffer,
-  originalName: string,
-  _mimeType: string
+  originalName: string
 ): AssetUploadResult {
   const assetId = randomUUID();
   const ext = originalName.split(".").pop() ?? "bin";
