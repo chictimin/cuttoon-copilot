@@ -14,8 +14,10 @@ export async function POST(request: Request) {
     const turns = await generateBrainstormTurns(subject.trim());
     return Response.json({ turns });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "브레인스토밍 생성 실패";
     console.error("브레인스토밍 에러:", error);
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json(
+      { error: "브레인스토밍 생성에 실패했습니다. 다시 시도해주세요." },
+      { status: 500 }
+    );
   }
 }
