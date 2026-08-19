@@ -35,6 +35,7 @@ cuttoon-copilot/
 │  └─ api/
 │      ├─ preset/              프리셋 CRUD                    A③
 │      ├─ session/             세션 관리 · Export             A③
+│      ├─ brainstorm/          브레인스토밍 3턴 (lib/llm 호출) A③
 │      └─ generate/            이미지 생성 (maxDuration=300)  B①
 ├─ lib/
 │  ├─ llm/                     브레인스토밍 3턴 · 캡션         A①
@@ -58,7 +59,7 @@ cuttoon-copilot/
 | 폴더 | 담당 |
 | --- | --- |
 | `app/(studio)/` | A② |
-| `app/api/preset/`, `app/api/session/` | A③ (chictimin) |
+| `app/api/preset/`, `app/api/session/`, `app/api/brainstorm/` | A③ (chictimin) |
 | `lib/llm/`, `spec/` | A① (dabi) |
 | `app/api/generate/`, `lib/openai/generate.ts` | B① |
 | `lib/openai/extract.ts` | B② |
@@ -77,7 +78,7 @@ cuttoon-copilot/
 | 5. 캐릭터 시트 표시 | — | 있음 | 완료 |
 | 6. 프로젝트 목록 | `GET /api/preset` (id 없이) | placeholder | 미연결 |
 | 7. 소재 입력 | — | 있음 | 있음 |
-| 8. 브레인스토밍 3턴 | 없음 | mock | 미구현 |
+| 8. 브레인스토밍 3턴 | 없음 (`lib/llm`은 A①, 라우트는 A③) | mock | 미구현 |
 | 9. 표지컷 3안 | 없음 | mock | 미구현 |
 | 10. 4컷 생성 | `POST /api/generate` + 계약 스텁 | mock | 미구현 |
 | 11. 대사 수정 · 드래그 | — | 있음(mock) | 반쪽 |
