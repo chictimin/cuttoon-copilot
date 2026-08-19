@@ -116,6 +116,81 @@ for (const [key, values] of Object.entries(vocabulary)) {
   }
 }
 
+// issue #2: 스타일 추출값과 사용자 키워드 병합 규칙
+// 레퍼런스 없이 키워드만 입력했을 때 사용하는 기본값 세트
+const DEFAULT_STYLE_VALUES = {
+  line_weight: "medium" as const,
+  saturation: "pastel" as const,
+  character_ratio: "2.5head" as const,
+  background_density: "low" as const,
+  bubble_style: "rounded" as const,
+};
+
+export interface StyleExtractionResult {
+  line_weight?: "thin" | "medium" | "thick";
+  saturation?: "pastel" | "vivid" | "muted";
+  character_ratio?: "2head" | "2.5head" | "3head" | "realistic";
+  background_density?: "none" | "low" | "medium" | "high";
+  bubble_style?: "rounded" | "rect" | "cloud";
+  palette?: string[];
+}
+
+/**
+ * issue #2: 스타일 추출값과 사용자 키워드를 병합한다.
+ * 정책:
+ * - 충돌 시 사용자 키워드 우선
+ * - 레퍼런스 없이 키워드만 있을 때는 기본값 세트 사용
+ * - 키워드가 enum 값으로 매핑되지 않을 때는 경고 (checkUnmappedWordsPolicy)
+ */
+export function mergeStyleValues(
+  extracted: StyleExtractionResult | null,
+  userKeywords: string[]
+): {
+  line_weight: "thin" | "medium" | "thick";
+  saturation: "pastel" | "vivid" | "muted";
+  character_ratio: "2head" | "2.5head" | "3head" | "realistic";
+  background_density: "none" | "low" | "medium" | "high";
+  bubble_style: "rounded" | "rect" | "cloud";
+  palette: string[];
+} {
+  // 추출값이 없으면 기본값 사용
+  if (!extracted) {
+    return {
+      ...DEFAULT_STYLE_VALUES,
+      palette: ["#4A90E2", "#50C878", "#FFD700", "#FF6B6B"],
+    };
+  }
+
+  // 사용자 키워드에서 enum 값을 매핑하는 헬퍼
+  const findKeyword = <T extends string>(keywords: string[], validValues: readonly T[]): T | undefined => {
+    for (const keyword of keywords) {
+      if (validValues.includes(keyword as T)) {
+        return keyword as T;
+      }
+    }
+    return undefined;
+  };
+
+  // 사용자 키워드가 있으면 우선, 없으면 추출값 사용
+  const line_weight = (findKeyword(userKeywords, VALID.line_weight) ?? extracted.line_weight ?? DEFAULT_STYLE_VALUES.line_weight) as "thin" | "medium" | "thick";
+  const saturation = (findKeyword(userKeywords, VALID.saturation) ?? extracted.saturation ?? DEFAULT_STYLE_VALUES.saturation) as "pastel" | "vivid" | "muted";
+  const character_ratio = (findKeyword(userKeywords, VALID.character_ratio) ?? extracted.character_ratio ?? DEFAULT_STYLE_VALUES.character_ratio) as "2head" | "2.5head" | "3head" | "realistic";
+  const background_density = (findKeyword(userKeywords, VALID.background_density) ?? extracted.background_density ?? DEFAULT_STYLE_VALUES.background_density) as "none" | "low" | "medium" | "high";
+  const bubble_style = (findKeyword(userKeywords, VALID.bubble_style) ?? extracted.bubble_style ?? DEFAULT_STYLE_VALUES.bubble_style) as "rounded" | "rect" | "cloud";
+
+  // 팔레트는 추출값 우선 (사용자 키워드에서 HEX 색상을 추출하기 어려움)
+  const palette = extracted.palette ?? ["#4A90E2", "#50C878", "#FFD700", "#FF6B6B"];
+
+  return {
+    line_weight,
+    saturation,
+    character_ratio,
+    background_density,
+    bubble_style,
+    palette,
+  };
+}
+
 export class PresetValidationError extends Error {}
 
 function fail(message: string): never {

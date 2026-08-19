@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { buildSessionCast } from "./session-cast";
-import { checkUnmappedWordsPolicy, assertValidPreset } from "./preset-guard";
+import { checkUnmappedWordsPolicy, assertValidPreset, mergeStyleValues } from "./preset-guard";
 
 const s = buildSessionCast({
   instructorCharacterId: "fairy_instructor",
@@ -50,3 +50,24 @@ const testPreset = {
 assertValidPreset(testPreset);
 const unmapped = checkUnmappedWordsPolicy(testPreset);
 console.log("\n미매핑 단어:", unmapped);
+
+// mergeStyleValues 테스트
+console.log("\n--- mergeStyleValues 테스트 ---");
+
+// 1. 추출값 없이 키워드만 있을 때
+const result1 = mergeStyleValues(null, ["귀여운", "파스텔"]);
+console.log("추출값 없음 + 키워드:", result1);
+
+// 2. 추출값 있고 키워드도 있을 때 (충돌 - 사용자 키워드 우선)
+const result2 = mergeStyleValues(
+  { line_weight: "thick", saturation: "vivid" },
+  ["thin", "pastel"]
+);
+console.log("추출값 + 키워드 (충돌):", result2);
+
+// 3. 추출값만 있고 키워드 없을 때
+const result3 = mergeStyleValues(
+  { line_weight: "thin", saturation: "muted" },
+  []
+);
+console.log("추출값만:", result3);
