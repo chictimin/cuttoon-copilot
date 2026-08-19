@@ -43,3 +43,6 @@ CLAUDE.md
 
 # agent session state (hcom/opencode)
 .omo/
+
+# lib/render 방식 검증용 임시 산출물 (schema 확정 전 POC)
+.demo-output/
