@@ -1,8 +1,10 @@
 import OpenAI from "openai";
+import sharp from "sharp";
+import { OUTPUT_SIZE } from "./generate";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export interface StyleResult {
+export interface StyleExtractionResult {
   line_weight: "thin" | "medium" | "thick";
   saturation: "pastel" | "vivid" | "muted";
   character_ratio: "2head" | "2.5head" | "3head" | "realistic";
@@ -22,7 +24,7 @@ const SYSTEM_PROMPT = `당신은 컷툰 스타일 분석가입니다. 첨부된 
 
 반드시 이 필드만 포함한 JSON 하나로만 답하세요. 설명 문장은 쓰지 마세요.`;
 
-export async function extractStyle(refs: Buffer[]): Promise<StyleResult> {
+export async function extractStyle(refs: Buffer[]): Promise<StyleExtractionResult> {
   const imageMessages = refs.map((buf) => ({
     type: "image_url" as const,
     image_url: {
@@ -47,13 +49,13 @@ export async function extractStyle(refs: Buffer[]): Promise<StyleResult> {
   });
 
   const raw = response.choices[0].message.content ?? "{}";
-  return JSON.parse(raw) as StyleResult;
+  return JSON.parse(raw) as StyleExtractionResult;
 }
 
 // --- generateCharacterSheet ---
 
 export interface PresetInput {
-  style: StyleResult & { keywords: string[] };
+  style: StyleExtractionResult & { keywords: string[] };
   context: {
     industry: string[];
     age_band: string[];
@@ -93,6 +95,15 @@ Draw the character in THREE poses on a single white-background sheet:
 No speech bubbles. No text. Clean reference sheet layout with clear separation between poses.`;
 }
 
+async function resizeToOutput(base64: string): Promise<string> {
+  const buf = Buffer.from(base64, "base64");
+  const resized = await sharp(buf)
+    .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: "cover" })
+    .png()
+    .toBuffer();
+  return resized.toString("base64");
+}
+
 export async function generateCharacterSheet(
   preset: PresetInput
 ): Promise<CharacterSheetResult> {
@@ -102,15 +113,17 @@ export async function generateCharacterSheet(
     model: "gpt-image-1",
     prompt,
     n: 1,
-    size: "1024x1024",
+    size: `${OUTPUT_SIZE.width}x${OUTPUT_SIZE.height}` as const,
   });
 
   const data = response.data?.[0];
   if (!data?.b64_json) {
     throw new Error("gpt-image-1 응답에 이미지 데이터가 없음");
   }
+
+  const resizedBase64 = await resizeToOutput(data.b64_json);
   return {
-    imageBase64: data.b64_json,
+    imageBase64: resizedBase64,
     revisedPrompt: prompt,
   };
 }
