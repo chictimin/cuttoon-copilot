@@ -90,6 +90,12 @@ interface MinimalPreset {
     age_band?: string[]
     life_stage?: string[]
   }
+  // 호출부가 referenceAssets 를 빼먹었을 때의 폴백 출처. style_refs 는 일부러
+  // 읽지 않는다 — P0 게이트는 캐릭터 동일성이고, reference 이미지를 늘리면
+  // 시트의 비중이 그만큼 묽어진다. 스타일은 프롬프트의 Style 문장이 담당한다.
+  assets?: {
+    character_sheet?: string
+  }
 }
 
 // "Leave the top edge empty" 로 쓰면 모델이 그림 위에 별도의 흰 띠를 붙인다 —
@@ -131,7 +137,13 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   const parts = [
     `Single webtoon/comic panel, consistent with the attached character reference sheet.`,
     `Style: ${styleStr}.`,
-    `Subject: ${storyboard.subject ?? 'a person dealing with an everyday situation'}.`,
+    // "Subject: 무릎 연골 나감." 처럼 명사구만 넣으면 모델이 소재를 표정으로만
+    // 처리한다 — codex 검증에서 4/4 가 "걱정하는 얼굴" 이고 무릎은 어디에도 없었다.
+    // 소재를 몸·행동·주변으로 보이게 하라고 지시한다. 다만 프레이밍과 싸우면
+    // 안 된다(closeup 은 어깨 위라 무릎이 물리적으로 프레임 밖이다).
+    `The story is about ${storyboard.subject ?? 'a person dealing with an everyday situation'}. ` +
+      `Make that situation visible in the character's body, gesture and surroundings ` +
+      `as far as the framing allows — not just as a mood on the face.`,
   ]
 
   // 사용자가 온보딩에서 고른 타깃·업종. 값이 없으면 문장을 아예 넣지 않는다 —
@@ -158,6 +170,13 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   }
 
   if (cut) {
+    // 컷이 이야기에서 하는 역할. 이게 없으면 4컷이 전부 같은 온도로 나온다 —
+    // problem 컷과 after 컷이 구분되지 않는다. prompt_hints 에 narrative_beat
+    // 항목이 아직 없어(spec/ 은 A① 소유) 토큰이 그대로 들어가지만, enum 값이
+    // 이미 영어 단어라(problem/before/turning/after…) 모델이 읽는다.
+    const beat = hint('narrative_beat', cut.narrative_beat)
+    if (beat) parts.push(`This panel is the "${beat}" beat of the story.`)
+
     const shot = hint('shot_type', cut.shot_type)
     if (shot) parts.push(`Framing: ${shot}.`)
     const angle = hint('camera_angle', cut.camera_angle)
@@ -196,13 +215,37 @@ function nextUngeneratedCut(cuts?: MinimalCut[]): MinimalCut | undefined {
   return cuts?.find((c) => !c.generated_image)
 }
 
-async function toInputImages(referenceAssets: unknown[]): Promise<Array<{ type: 'input_image'; image_url: string }>> {
+// 캐릭터 시트는 4컷 동일성(P0 게이트)의 유일한 방어선이다 — 스파이크 결론이
+// "체이닝만으로는 부족, 시트를 매 컷 넣어야 한다" 였다. 그래서 호출부가
+// referenceAssets 를 빼먹어도 preset.assets.character_sheet 로 채운다. 방어선이
+// 켜져 있는지가 호출부의 실수 하나에 달려 있으면 안 된다.
+function referenceUris(referenceAssets: unknown[], preset: MinimalPreset): string[] {
   const uris = referenceAssets.filter((a): a is string => typeof a === 'string')
+  const sheet = preset.assets?.character_sheet
+  if (sheet && !uris.includes(sheet)) uris.push(sheet)
+  return uris
+}
+
+async function toInputImages(uris: string[]): Promise<Array<{ type: 'input_image'; image_url: string }>> {
   const images: Array<{ type: 'input_image'; image_url: string }> = []
   for (const uri of uris) {
     const buf = await readAsset(uri)
-    if (!buf) continue
+    // 조용히 넘기지 않는다. 못 읽은 것을 묻어두면 방어선이 소리 없이 꺼진 채로
+    // 유료 생성이 돌아가고, 나중에 "왜 캐릭터가 컷마다 다르지" 만 남는다.
+    // #67 이 실제로 그 상태였다 — 버킷이 없어 애셋 읽기가 전부 실패하고 있었다.
+    if (!buf) {
+      console.error(`[generate] reference 애셋을 읽지 못했습니다: ${uri}`)
+      continue
+    }
     images.push({ type: 'input_image', image_url: `data:image/png;base64,${buf.toString('base64')}` })
+  }
+
+  // 유료 호출 전에 막는다. reference 가 하나도 없으면 P0 게이트를 통과할 수 없는
+  // 이미지에 생성비를 쓰는 것이고, 4컷이 다 나온 뒤에야 드러난다.
+  if (images.length === 0) {
+    throw new Error(
+      '캐릭터 시트를 읽을 수 없어 생성을 중단했습니다 — referenceAssets 와 preset.assets.character_sheet 를 확인하세요'
+    )
   }
   return images
 }
@@ -210,9 +253,10 @@ async function toInputImages(referenceAssets: unknown[]): Promise<Array<{ type: 
 async function callImageGeneration(
   prompt: string,
   referenceAssets: unknown[],
+  preset: MinimalPreset,
   previousResponseId?: string
 ): Promise<{ base64: string; responseId: string }> {
-  const inputImages = await toInputImages(referenceAssets)
+  const inputImages = await toInputImages(referenceUris(referenceAssets, preset))
 
   // openai SDK(^7.5.0)의 Responses 타입이 image_generation 도구 옵션을 아직 못
   // 따라와 as any로 우회한다 — 실제 호출로 요청/응답 모양을 검증했다 (#18).
@@ -268,7 +312,7 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const cut = nextUngeneratedCut(storyboard.cuts)
 
   const prompt = buildCutPrompt(storyboard, preset, cut)
-  const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, input.continueFrom)
+  const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, preset, input.continueFrom)
 
   const buffer = await resizeToOutput(base64)
   const { assetUri } = await uploadAsset(buffer, 'image/png', 'cut.png')
@@ -294,7 +338,7 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   // 성공분 생성비가 그대로 날아간다 (#104). 성공한 것만 살려서 돌려준다.
   const settled = await Promise.allSettled(
     Array.from({ length: input.count }, async (): Promise<GeneratedImageResult> => {
-      const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets)
+      const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, preset)
       const buffer = await resizeToOutput(base64)
       const { assetUri } = await uploadAsset(buffer, 'image/png', 'cover.png')
       return {
