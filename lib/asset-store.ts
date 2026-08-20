@@ -37,6 +37,50 @@ export type UploadValidationError = {
   message: string;
 };
 
+// #72: 코드 상수(MAX_UPLOAD_SIZE_BYTES/ALLOWED_UPLOAD_MIME_TYPES)와 버킷의 실제
+// 설정이 서로 다른 곳(코드 vs Supabase 대시보드)에 있어서, 대시보드를 다시
+// 만지면 같은 종류의 어긋남이 재발할 수 있다 — 실제로 한 번 일어났었다
+// (버킷 10,000,000 vs 코드 10,485,760, 474KB 구간에서 400 대신 500이 나감).
+// 부팅 시 한 번 실제 값을 읽어 대조하고, 다르면 경고만 남긴다. 이 검사는
+// advisory일 뿐이라 업로드 요청을 막거나 지연시키지 않고, 실패해도(네트워크
+// 문제 등) 조용히 건너뛴다.
+async function warnIfBucketConfigDrifted(): Promise<void> {
+  try {
+    const { data, error } = await supabase.storage.getBucket(BUCKET_NAME);
+    if (error || !data) {
+      console.warn(
+        `[asset-store] #72 드리프트 감지: 버킷 설정을 못 읽어 건너뜀 (${error?.message ?? "no data"})`
+      );
+      return;
+    }
+
+    if (data.file_size_limit != null && data.file_size_limit !== MAX_UPLOAD_SIZE_BYTES) {
+      console.warn(
+        `[asset-store] #72 드리프트: 버킷 file_size_limit(${data.file_size_limit})이 ` +
+          `코드 MAX_UPLOAD_SIZE_BYTES(${MAX_UPLOAD_SIZE_BYTES})와 다릅니다 — ` +
+          "두 값 사이 크기의 파일은 400 대신 500을 받습니다. 둘 중 하나를 맞춰주세요."
+      );
+    }
+
+    const bucketMimeTypes = data.allowed_mime_types;
+    if (bucketMimeTypes != null) {
+      const codeSet = new Set<string>(ALLOWED_UPLOAD_MIME_TYPES);
+      const bucketSet = new Set(bucketMimeTypes);
+      const matches = codeSet.size === bucketSet.size && [...codeSet].every((t) => bucketSet.has(t));
+      if (!matches) {
+        console.warn(
+          `[asset-store] #72 드리프트: 버킷 allowed_mime_types(${JSON.stringify(bucketMimeTypes)})가 ` +
+            `코드 ALLOWED_UPLOAD_MIME_TYPES(${JSON.stringify(ALLOWED_UPLOAD_MIME_TYPES)})와 다릅니다.`
+        );
+      }
+    }
+  } catch (err) {
+    console.warn("[asset-store] #72 드리프트 감지 중 예외 — 건너뜀:", err);
+  }
+}
+
+void warnIfBucketConfigDrifted();
+
 /**
  * 업로드 전 크기·타입을 확인한다. file.type은 클라이언트가 멀티파트 요청에 써
  * 보내는 문자열이라 그 자체로는 아무것도 증명하지 않는다 — 실제 내용 확인은
