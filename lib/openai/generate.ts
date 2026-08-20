@@ -158,7 +158,7 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, input.continueFrom)
 
   const buffer = Buffer.from(base64, 'base64')
-  const { assetUri } = await uploadAsset(buffer, 'cut.png')
+  const { assetUri } = await uploadAsset(buffer, 'image/png', 'cut.png')
 
   return {
     asset: assetUri,
@@ -180,7 +180,7 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
     Array.from({ length: input.count }, async (): Promise<GeneratedImageResult> => {
       const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets)
       const buffer = Buffer.from(base64, 'base64')
-      const { assetUri } = await uploadAsset(buffer, 'cover.png')
+      const { assetUri } = await uploadAsset(buffer, 'image/png', 'cover.png')
       return {
         asset: assetUri,
         ...OUTPUT_SIZE,
