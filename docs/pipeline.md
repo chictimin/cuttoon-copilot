@@ -100,19 +100,21 @@ A가 넘기는 것과 받는 것(계약)만 적었다. 내부에서 어떤 모�
 
 **호출 순서 (온보딩 1회, 재시도 없는 골든 패스)**
 
+A② 소유 파일(`OnboardingFlow.tsx`·`style-analysis.ts`)은 **함수명만 적는다** — 라인 번호를 붙이면 그 파일이 바뀔 때마다 이 표가 조용히 틀린다. 실측으로 겪었다: 이 표의 초판이 머지 당일 `OnboardingFlow.tsx` 라인 5개가 전부 어긋났다.
+
 | 순서 | 함수 | 위치 | 호출 대상 |
 |---|---|---|---|
-| 1 | `handleFilesSelected` → `runAnalysis` | `OnboardingFlow.tsx:62,49` | — |
-| 2 | `analyzeStyle` → `uploadReference` ×N | `style-analysis.ts:33` | `POST /api/upload` ×N |
-| 3 | `analyzeStyle` → fetch | `style-analysis.ts:35-39` | `POST /api/extract` → **`extractStyle`** ×1 |
-| 4 | `handleConfirmStyle` | `OnboardingFlow.tsx:87` | (화면 전환, 호출 없음) |
-| 5 | `handleConfirmDetails` → fetch | `OnboardingFlow.tsx:104-119` | `POST /api/generate {kind:"character_sheet"}` → **`generateCharacterSheet`** ×1 |
+| 1 | `handleFilesSelected` → `runAnalysis` | `OnboardingFlow.tsx` | — |
+| 2 | `analyzeStyle` → `uploadReference` ×N | `style-analysis.ts` | `POST /api/upload` ×N |
+| 3 | `analyzeStyle` → `fetch("/api/extract")` | `style-analysis.ts` | `POST /api/extract` → **`extractStyle`** ×1 |
+| 4 | `handleConfirmStyle` | `OnboardingFlow.tsx` | (화면 전환, 호출 없음) |
+| 5 | `handleConfirmDetails` → `fetch("/api/generate")` | `OnboardingFlow.tsx` | `POST /api/generate {kind:"character_sheet"}` → **`generateCharacterSheet`** ×1 |
 
 **세션당 호출 횟수 (판정 예산 관련)**
 
 - 이미지 생성(유료) 호출: `generateCharacterSheet`는 프로젝트 생성 시 **정확히 1회**뿐이다 — 재시도 버튼이 없다(#19 결정: 세션마다 다시 만들지 않음). 그 프로젝트로 세션을 몇 개 만들거나 몇 번 재방문해도 추가 호출은 없다.
-- 텍스트 호출: `extractStyle`은 `ResultStep`의 "다시 뽑기"(`OnboardingFlow.tsx:387-393`)를 누를 때마다 추가로 1회씩 늘어난다 — 상한이 없어 사용자가 원하는 만큼 반복 가능하다. 같은 클릭이 같은 파일을 `/api/upload`에 재업로드하므로, 재시도 1회당 업로드 N회 + 추출 1회가 함께 늘어난다.
-- 참고: `generateCoverVariants`(B①)에도 별도 "다시 뽑기"가 있다(`SessionFlow.tsx:436-461`). 이건 `extract.ts` 소관이 아니라 혼동 방지로만 적는다.
+- 텍스트 호출: `extractStyle`은 `ResultStep`(`OnboardingFlow.tsx`)의 "다시 뽑기"를 누를 때마다 추가로 1회씩 늘어난다 — 상한이 없어 사용자가 원하는 만큼 반복 가능하다. 같은 클릭이 같은 파일을 `/api/upload`에 재업로드하므로, 재시도 1회당 업로드 N회 + 추출 1회가 함께 늘어난다.
+- 참고: `generateCoverVariants`(B①)에도 별도 "다시 뽑기"가 있다(`SessionFlow.tsx`). 이건 `extract.ts` 소관이 아니라 혼동 방지로만 적는다.
 
 **`spec/vocabulary.json` 소비 방식**
 
@@ -134,7 +136,7 @@ A가 넘기는 것과 받는 것(계약)만 적었다. 내부에서 어떤 모�
 | `narrative-flow.json` | 서사 흐름 템플릿 3종(#153) | `lib/llm/narrative-flow.ts` |
 | `style-vocabulary.json` | 스타일 키워드 매핑 | `lib/llm/preset-guard.ts`(`checkUnmappedWordsPolicy` 관련) |
 
-**`spec/vocabulary.json`**(위 `data/`와 다른 위치, A① 소유) — enum별 프롬프트 힌트. B①(`lib/openai/generate.ts`)이 프롬프트 조립에 쓰지만, 그 소비 방식은 B① 작성 대기.
+**`spec/vocabulary.json`**(위 `data/`와 다른 위치, A① 소유) — enum별 프롬프트 힌트. B①(`lib/openai/generate.ts`)이 프롬프트 조립에 쓴다. **캐릭터 시트 쪽 소비 경로는 5-1b절에 적었다**(`extract.ts` → `ratioClause` → `promptHint`). 컷 프롬프트(`buildCutPrompt`)의 소비 방식은 B① 작성 대기.
 
 **아직 코드에 남은 상수** (`storyboard-assembly.ts`, A②, #152 대상)
 
