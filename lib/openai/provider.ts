@@ -1,5 +1,5 @@
 // spec/ 계약: ImageProvider 어댑터. 구현은 B①.
-import type { StyleResult } from './extract'
+import type { StyleExtractionResult } from './extract'
 
 export type ReservedZone = 'top' | 'bottom' | 'left' | 'right'
 
@@ -26,7 +26,7 @@ export interface GeneratedImageResult {
 }
 
 export interface ImageProvider {
-  extractStyle(refs: Buffer[]): Promise<StyleResult>
+  extractStyle(refs: Buffer[]): Promise<StyleExtractionResult>
   // #19 결정: extractStyle과 결합도가 높아 B②(extract.ts)가 구현을 소유한다.
   generateCharacterSheet(preset: unknown): Promise<GeneratedImageResult>
 
