@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import { assertValidPreset, type Preset } from "@/lib/llm/preset-guard";
-import { mergeStyleValues } from "@/lib/llm/style-merge";
 import {
   analyzeStyle,
   CHARACTER_SHEET_PREVIEW,
@@ -10,7 +9,7 @@ import {
 } from "./mock-style-analysis";
 import DetailsStep, { type DetailsFormValue } from "./DetailsStep";
 
-type Step = "upload" | "analyzing" | "result" | "keywords" | "details" | "confirmed";
+type Step = "upload" | "analyzing" | "result" | "details" | "confirmed";
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png"];
 const MAX_FILES = 5;
@@ -30,7 +29,7 @@ function validateFiles(files: File[]): { valid: File[]; error: string | null } {
 
 export default function OnboardingFlow() {
   const [step, setStep] = useState<Step>("upload");
-  const [referenceCount, setReferenceCount] = useState(0);
+  const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
   const [analysis, setAnalysis] = useState<StyleAnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -38,11 +37,11 @@ export default function OnboardingFlow() {
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function runAnalysis(count: number) {
+  async function runAnalysis(files: File[]) {
     setError(null);
     setStep("analyzing");
     try {
-      const result = await analyzeStyle(count);
+      const result = await analyzeStyle(files);
       setAnalysis(result);
       setStep("result");
     } catch {
@@ -63,35 +62,16 @@ export default function OnboardingFlow() {
       return;
     }
 
-    setReferenceCount(valid.length);
-    void runAnalysis(valid.length);
+    setReferenceFiles(valid);
+    void runAnalysis(valid);
   }
 
   function handleRetry() {
-    if (referenceCount === 0) return;
-    void runAnalysis(referenceCount);
+    if (referenceFiles.length === 0) return;
+    void runAnalysis(referenceFiles);
   }
 
   function handleConfirmStyle() {
-    setStep("details");
-  }
-
-  function handleSkipReference() {
-    setReferenceCount(0);
-    setStep("keywords");
-  }
-
-  function handleConfirmKeywords(keywords: string[]) {
-    const merged = mergeStyleValues(null, keywords);
-    const analysisResult: StyleAnalysisResult = {
-      style: {
-        keywords,
-        ...merged,
-      },
-      characterSheetAsset: "asset://default-character-sheet",
-      styleRefAssets: [],
-    };
-    setAnalysis(analysisResult);
     setStep("details");
   }
 
@@ -120,17 +100,8 @@ export default function OnboardingFlow() {
       },
     };
 
-    try {
-      // 스키마와 실제로 맞는지 마지막에 한 번 더 확인 (조립 실수 방지)
-      assertValidPreset(preset);
-    } catch {
-      // mock을 실제 스타일 분석 API로 교체하면 이 경로가 실제로 발생할 수 있다
-      // (PR #22 리뷰, chictimin). 검증 실패를 그냥 던지면 "프리셋 확정" 버튼이 반응
-      // 없는 것처럼 보이므로, Result 단계로 되돌려 "다시 뽑기"로 복구하게 한다.
-      setError("분석 결과에 문제가 있어요. 다시 뽑아주세요");
-      setStep("result");
-      return;
-    }
+    // 스키마와 실제로 맞는지 마지막에 한 번 더 확인 (조립 실수 방지)
+    assertValidPreset(preset);
 
     setError(null);
     setSaving(true);
@@ -147,10 +118,9 @@ export default function OnboardingFlow() {
         return;
       }
 
-      const { presetId, projectId } = await res.json();
-      // 세션 화면(POST /api/session)이 둘 다 필요하다 (issue #41).
+      const { presetId } = await res.json();
+      // 세션 화면이 어느 프리셋으로 시작할지 알아야 해서 id만 남긴다.
       window.sessionStorage.setItem("cuttoon:preset-id", presetId);
-      window.sessionStorage.setItem("cuttoon:project-id", projectId);
       setConfirmedName(preset.project_name);
       setStep("confirmed");
     } catch {
@@ -169,20 +139,11 @@ export default function OnboardingFlow() {
           fileInputRef={fileInputRef}
           onDragStateChange={setIsDragging}
           onFilesSelected={handleFilesSelected}
-          onSkipReference={handleSkipReference}
         />
       )}
       {step === "analyzing" && <AnalyzingStep />}
       {step === "result" && analysis && (
-        <ResultStep
-          analysis={analysis}
-          error={error}
-          onRetry={handleRetry}
-          onConfirm={handleConfirmStyle}
-        />
-      )}
-      {step === "keywords" && (
-        <KeywordsStep onConfirm={handleConfirmKeywords} />
+        <ResultStep analysis={analysis} onRetry={handleRetry} onConfirm={handleConfirmStyle} />
       )}
       {step === "details" && (
         <DetailsStep onConfirm={handleConfirmDetails} error={error} saving={saving} />
@@ -205,14 +166,12 @@ function UploadStep({
   fileInputRef,
   onDragStateChange,
   onFilesSelected,
-  onSkipReference,
 }: {
   error: string | null;
   isDragging: boolean;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onDragStateChange: (dragging: boolean) => void;
   onFilesSelected: (files: FileList | File[]) => void;
-  onSkipReference: () => void;
 }) {
   return (
     <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
@@ -262,14 +221,6 @@ function UploadStep({
           }}
         />
       </label>
-
-      <button
-        type="button"
-        onClick={onSkipReference}
-        className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
-      >
-        레퍼런스 건너뛰기
-      </button>
     </div>
   );
 }
@@ -299,12 +250,10 @@ const SATURATION_LABEL: Record<string, string> = {
 
 function ResultStep({
   analysis,
-  error,
   onRetry,
   onConfirm,
 }: {
   analysis: StyleAnalysisResult;
-  error: string | null;
   onRetry: () => void;
   onConfirm: () => void;
 }) {
@@ -313,12 +262,6 @@ function ResultStep({
   return (
     <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
       <h1 className="text-xl font-semibold">이런 스타일로 만들었어요</h1>
-
-      {error && (
-        <p className="w-full max-w-md rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">
-          {error}
-        </p>
-      )}
 
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
         <figure className="flex flex-col items-center gap-2">
@@ -369,46 +312,6 @@ function ResultStep({
           이걸로 할게
         </button>
       </div>
-    </div>
-  );
-}
-
-function KeywordsStep({
-  onConfirm,
-}: {
-  onConfirm: (keywords: string[]) => void;
-}) {
-  const [input, setInput] = useState("");
-
-  return (
-    <div className="flex w-full max-w-xl flex-col items-center gap-4">
-      <h1 className="text-xl font-semibold">
-        스타일을 설명해주세요
-      </h1>
-      <p className="text-sm text-zinc-500">
-        쉼표로 구분된 단어들을 입력하세요
-      </p>
-
-      <textarea
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder="예: pastel, 2head, rounded, vivid"
-        className="w-full rounded-md border border-zinc-300 p-3 text-sm"
-        rows={4}
-      />
-
-      <button
-        type="button"
-        onClick={() => {
-          const keywords = input.split(",").map(k => k.trim()).filter(k => k);
-          if (keywords.length > 0) {
-            onConfirm(keywords);
-          }
-        }}
-        className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-      >
-        계속
-      </button>
     </div>
   );
 }

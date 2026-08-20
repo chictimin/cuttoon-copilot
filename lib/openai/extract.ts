@@ -4,7 +4,7 @@ import type { GeneratedImageResult } from "./provider";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export interface StyleResult {
+export interface StyleExtractionResult {
   line_weight: "thin" | "medium" | "thick";
   saturation: "pastel" | "vivid" | "muted";
   character_ratio: "2head" | "2.5head" | "3head" | "realistic";
@@ -24,7 +24,7 @@ const SYSTEM_PROMPT = `당신은 컷툰 스타일 분석가입니다. 첨부된 
 
 반드시 이 필드만 포함한 JSON 하나로만 답하세요. 설명 문장은 쓰지 마세요.`;
 
-export async function extractStyle(refs: Buffer[]): Promise<StyleResult> {
+export async function extractStyle(refs: Buffer[]): Promise<StyleExtractionResult> {
   const imageMessages = refs.map((buf) => ({
     type: "image_url" as const,
     image_url: {
@@ -49,13 +49,13 @@ export async function extractStyle(refs: Buffer[]): Promise<StyleResult> {
   });
 
   const raw = response.choices[0].message.content ?? "{}";
-  return JSON.parse(raw) as StyleResult;
+  return JSON.parse(raw) as StyleExtractionResult;
 }
 
 // --- generateCharacterSheet ---
 
 export interface PresetInput {
-  style: StyleResult & { keywords: string[] };
+  style: StyleExtractionResult & { keywords: string[] };
   context: {
     industry: string[];
     age_band: string[];
