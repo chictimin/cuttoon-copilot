@@ -24,7 +24,7 @@ function referenceAssetsOf(preset: Preset): string[] {
 }
 
 async function resolveAssetUrl(uri: string): Promise<string> {
-  const res = await fetch(`/session/asset-url?uri=${encodeURIComponent(uri)}`);
+  const res = await fetch(`/api/session/asset-url?uri=${encodeURIComponent(uri)}`);
   if (!res.ok) {
     throw new Error("이미지 URL을 가져오지 못했습니다");
   }
