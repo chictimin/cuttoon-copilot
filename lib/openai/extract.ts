@@ -1,5 +1,7 @@
 import OpenAI from "openai";
+import sharp from "sharp";
 import { uploadAsset } from "../asset-store";
+import { OUTPUT_SIZE } from "./generate";
 import type { GeneratedImageResult } from "./provider";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -96,6 +98,18 @@ No speech bubbles. No text. Clean reference sheet layout with clear separation b
 // 그대로 받음) B②(extract.ts)가 소유한다. ImageProvider 계약(GeneratedImageResult)에
 // 맞춰 asset:// 업로드까지 여기서 처리한다 — 호출부(app/api/generate/route.ts)는
 // base64를 다루지 않는다.
+//
+// gpt-image-1이 같은 프롬프트에도 요청한 크기와 다른 실제 크기를 낼 때가 있어
+// (generate.ts #20 주석 참고) sharp로 강제 리사이즈해 계약 ④의 width/height를
+// 실제 값과 어긋나지 않게 보장한다.
+async function resizeToOutput(base64: string): Promise<Buffer> {
+  const buf = Buffer.from(base64, "base64");
+  return sharp(buf)
+    .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: "cover" })
+    .png()
+    .toBuffer();
+}
+
 export async function generateCharacterSheet(
   preset: PresetInput
 ): Promise<GeneratedImageResult> {
@@ -105,7 +119,7 @@ export async function generateCharacterSheet(
     model: "gpt-image-1",
     prompt,
     n: 1,
-    size: "1024x1024",
+    size: `${OUTPUT_SIZE.width}x${OUTPUT_SIZE.height}` as const,
   });
 
   const data = response.data?.[0];
@@ -113,12 +127,12 @@ export async function generateCharacterSheet(
     throw new Error("gpt-image-1 응답에 이미지 데이터가 없음");
   }
 
-  const buffer = Buffer.from(data.b64_json, "base64");
+  const buffer = await resizeToOutput(data.b64_json);
   const { assetUri } = await uploadAsset(buffer, "image/png", "character-sheet.png");
 
   return {
     asset: assetUri,
-    width: 1024,
-    height: 1024,
+    width: OUTPUT_SIZE.width,
+    height: OUTPUT_SIZE.height,
   };
 }
