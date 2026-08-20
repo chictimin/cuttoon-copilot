@@ -25,7 +25,13 @@
         "character_sheet": {
           "type": "string",
           "pattern": "^asset://",
-          "description": "필수. 프로젝트의 캐릭터 풀. 캐릭터 동일성은 텍스트 서술로 대체 불가 — 매 컷 reference 주입의 근거 애셋. 각 컷툰에 이 중 누가 등장하는지는 세션에서 고른다"
+          "description": "필수. 프로젝트의 고정 마스코트 한 명을 3포즈로 그린 시트. 캐릭터 동일성은 텍스트 서술로 대체 불가 — 매 컷 reference 주입의 근거 애셋. issue #113에서 정합화: 이전 문구는 '캐릭터 풀'이었으나 storyboard.schema.json 의 cast[].character_id description(마스코트 한 명만 담고 나머지는 시트 없는 가변 인물)이 정본이고 구현도 1인 시트다. 여러 인물을 담는 확장은 character_pool 로 열어 뒀다"
+        },
+        "character_pool": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^asset://" },
+          "uniqueItems": true,
+          "description": "캐릭터 풀 확장용(issue #113 결정, #123). 지금은 항상 빈 배열 — 필드만 미리 박아 마이그레이션 회피(reference_asset_ids 와 같은 패턴). 프로젝트 설정 페이지에서 마스코트 외 인물을 추가할 수 있게 되면 여기가 채워진다. required 에 넣지 않는다 — 이미 저장된 프리셋이 깨진다"
         },
         "style_refs": {
           "type": "array",
