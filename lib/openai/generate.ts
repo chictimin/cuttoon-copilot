@@ -148,6 +148,24 @@ function hint(category: string, value?: string): string | undefined {
   return promptHint(category, value) ?? value
 }
 
+// character_ratio 절. 폴백 규칙까지 한 곳에 둔다 — promptHint 로 사전만 공유했을 때는
+// 이 3줄이 두 파일에 복사돼 있었고, 규칙이 갈라지는 사고가 두 번 났다.
+//
+//   #126: extract.ts 가 기본값 먼저, generate.ts 가 promptHint 먼저 → 같은 preset 에서
+//         시트와 컷이 다른 비율 지시를 받았다
+//   #129: 그것을 발견해 generate.ts 를 맞췄는데, 그 사이 #128 이 내 잘못된 형태를
+//         복사해 와서 이번엔 시트가 후퇴할 뻔했다
+//
+// 순서가 중요하다: 기본값을 먼저 적용한 뒤 힌트를 찾는다. 반대로 하면 character_ratio
+// 가 비었을 때 힌트를 건너뛰고 토큰으로 떨어진다.
+//
+// 라벨을 뒤에 붙이는 것은 힌트가 없을 때만이다. 힌트 서술문은 그 자체로 완결된 구라서
+// 뒤에 " body proportions" 를 붙이면 문장이 깨진다 (#120 리뷰).
+export function ratioClause(value?: string): string {
+  const v = value ?? '2.5head'
+  return promptHint('character_ratio', v) ?? `${v} body proportions`
+}
+
 // 대사는 텍스트 레이어로 나중에 얹는다(PRD 6절) — 프롬프트에 caption 텍스트를
 // 절대 포함하지 않는다. reserved_zone만 전달해 자리를 비워두게 한다.
 function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cut?: MinimalCut): string {
@@ -164,41 +182,39 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   // 힌트를 건너뛰고 토큰(`2.5head body proportions`)으로 떨어진다 — extract.ts 는
   // 기본값에도 힌트를 붙이므로 그 상태로는 시트와 컷이 다른 지시를 받는다. 실측으로
   // 갈리는 것을 확인했다 (PR #126 머지 후).
-  const ratioValue = s?.character_ratio ?? '2.5head'
-  const ratio = promptHint('character_ratio', ratioValue) ?? `${ratioValue} body proportions`
+  // ratio 를 문장 끝에 둔다 (#131). 힌트 서술문이 네 값 중 유일하게 길어서, 뒤에
+  // background detail 절이 이어지면 "… simplified hands and feet, low background detail" 로
+  // 읽혀 배경 지시가 인물 비율 서술의 나열 항목처럼 묻힌다. 나머지 셋은 짧은 고정
+  // 어휘라 앞에 두는 것이 맞고, 이 순서면 extract.ts 의 시트 문장과 문맥이 같아진다
+  // (그쪽은 ratio 뒤가 바로 마침표다).
+  const ratio = ratioClause(s?.character_ratio)
   const styleStr = s
-    ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${ratio}, ${s.background_density ?? 'low'} background detail`
+    ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${s.background_density ?? 'low'} background detail, ${ratio}`
     : 'default webtoon/comic style'
 
   const castById = new Map(
     (storyboard.cast ?? []).filter((m) => m.character_id).map((m) => [m.character_id!, m])
   )
 
-  // 첨부하는 시트는 고정 마스코트(지도사) 한 명만 담는다 — 주인공·어르신 등은
-  // 시트가 없는 가변 인물이고, storyboard.schema.json 의 character_id 서술이
-  // "role=supporting 이 지도사를 가리킬 때만 character_sheet 와 연결된다" 고 정한다.
+  // 첨부하는 시트는 컷에 등장하는 인물을 그린 것이 아니다. 런타임 시트는
+  // buildCharacterPrompt(extract.ts)가 preset.context — 타깃 독자 프로필 — 로만
+  // 인물을 정해 그리므로, cast 의 누구와도 대응하지 않는 제3의 인물이다.
+  // (spec/samples 의 kriee-fairy-instructor.png 는 손으로 만든 fixture 이고 런타임
+  //  파이프라인이 만드는 애셋이 아니다. #113 에서 확인.)
   //
-  // 그래서 "시트 인물과 일치시켜라" 를 무조건 붙이면 안 된다. 샘플 4컷 중 지도사가
-  // 나오는 것은 한 컷뿐인데, 나머지 컷에서 그 문장이 붙으면 60대 어머니를 그려야
-  // 하는 자리에서 지도사 시트를 따라가라고 지시하는 셈이 된다.
+  // 그래서 "시트 인물과 일치시켜라" 가 참이 되는 컷이 없다. 시트는 스타일 앵커로만
+  // 쓰고, 인물은 아래 Character 서술이 정한다. 조건 분기를 두지 않는 이유는 지금
+  // 참이 될 수 없는 조건을 남기면 다음 사람이 그것을 계약으로 읽기 때문이다 —
+  // 이 파일에서 그 실수를 두 번 했다(preset.schema.json 의 stale 문구, 샘플 fixture).
   //
-  // ponytail: role === 'supporting' 로 판정한다. 스키마에 "이 인물이 시트를 갖는다"
-  // 를 표현하는 필드가 없어서 서술 규약에 코드를 묶는 것이고, 조연이 둘이 되면
-  // 조용히 틀린다. A① 이 character_pool 에 그 자리를 만들면 그것으로 바꾼다 (#113).
-  //
-  // 판정이 안 되는 경우(cut 이 없어 프레임 인물을 모를 때)는 기존 문장을 쓴다 —
-  // 그때는 프롬프트에 인물 서술 자체가 없어서 끌려갈 대상이 없고, 반대로 지도사
-  // 컷에서 동일성 문장을 잃는 것이 P0 게이트에 더 해롭다.
-  const framed = cut?.characters_in_frame
-  const sheetPersonInFrame =
-    !framed || framed.some((c) => c.character_id && castById.get(c.character_id)?.role === 'supporting')
-
+  // ponytail: #123 이 조연을 프로젝트 마스코트로 고정하고 시트가 그 인물을 그리게
+  // 되면, 프레임에 그 인물이 있는 컷에서만 동일성 문장으로 되돌린다. 그때 판정 값은
+  // role 서술 규약이 아니라 preset 쪽 매핑 필드여야 한다 — role === 'supporting' 은
+  // 조연이 둘이 되면 조용히 틀린다.
   const parts = [
-    sheetPersonInFrame
-      ? `Single webtoon/comic panel, consistent with the attached character reference sheet.`
-      : `Single webtoon/comic panel. Match the art style, line weight and coloring of the attached ` +
-        `reference sheet, but the person in this panel is a different character from the one drawn ` +
-        `on that sheet — follow the character description below for who they are.`,
+    `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
+      `attached reference sheet, but the person in this panel is a different character from ` +
+      `the one drawn on that sheet — follow the character description below for who they are.`,
     `Style: ${styleStr}.`,
   ]
 
@@ -217,7 +233,14 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
     // 안 된다(closeup 은 어깨 위라 무릎이 물리적으로 프레임 밖이다).
     `The story is about ${storyboard.subject ?? 'a person dealing with an everyday situation'}. ` +
       `Make that situation visible in the character's body, gesture and surroundings ` +
-      `as far as the framing allows — not just as a mood on the face.`
+      `as far as the framing allows — not just as a mood on the face. ` +
+      // 소재가 옷 아래 신체 부위일 때(무릎·허리·어깨 등) 모델이 그 부위를 드러내려고
+      // 옷을 뚫는다 — codex 검증에서 바지 무릎 자리에 살색 구멍이 4/4 로 생겼고, 한 장은
+      // 찢어진 것처럼 보였다. 의학 일러스트의 습관에 가깝고 인스타툰 결과물로는 못 쓴다.
+      // 자세·손짓·효과선으로 전달하도록 못박는다.
+      `Convey it through posture, gesture and the surrounding scene only. ` +
+      `Clothing stays whole and opaque — never cut, tear, remove or see through it, ` +
+      `and never draw exposed skin or internal anatomy to point at the affected part.`
   )
 
   // 사용자가 온보딩에서 고른 타깃·업종. 값이 없으면 문장을 아예 넣지 않는다 —
