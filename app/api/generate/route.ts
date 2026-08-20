@@ -1,10 +1,11 @@
-import { generateCut } from '@/lib/openai/generate'
+import { generateCut, generateCoverVariants } from '@/lib/openai/generate'
 // #19 결정: generateCharacterSheet는 B②(extract.ts) 소유 — extractStyle과 결합도가 높음.
 import { generateCharacterSheet } from '@/lib/openai/extract'
 import type { PresetInput } from '@/lib/openai/extract'
 
 // POST /api/generate
 // body: { kind: 'character_sheet', preset }
+//     | { kind: 'cover_variants', storyboard, preset, referenceAssets }
 //     | { kind: 'cut', storyboard, preset, referenceAssets, continueFrom? }
 export async function POST(request: Request) {
   let body: unknown
@@ -32,6 +33,18 @@ export async function POST(request: Request) {
         // preset 구조 검증은 아직 없음 — storyboard와 같은 기존 관례를 따라 여기서는
         // 캐스팅만 한다. 확정 검증은 lib/llm/preset-guard.ts 쪽 후속 작업으로 남긴다.
         return Response.json({ result: await generateCharacterSheet(preset as PresetInput) })
+      case 'cover_variants':
+        // 표지 3안. count 는 계약이 리터럴 3 으로 고정한다 — 호출부가 안 개수를
+        // 임의로 늘리지 못하게 한 것이므로(#50) 본문에서 받지 않는다.
+        // 체이닝 토큰도 받지 않는다: 3안은 독립 호출이어야 한다 (PRD 6절).
+        return Response.json({
+          result: await generateCoverVariants({
+            storyboard,
+            preset,
+            referenceAssets: Array.isArray(referenceAssets) ? referenceAssets : [],
+            count: 3,
+          }),
+        })
       case 'cut':
         // storyboard 검증은 lib/llm/storyboard-guard.ts(A① 소유)가 담당한다.
         // route에서 중복 구현하지 않고, 실제 생성을 붙이는 시점에 연결한다.
@@ -47,7 +60,7 @@ export async function POST(request: Request) {
         })
       default:
         return Response.json(
-          { error: "kind는 'character_sheet' 또는 'cut'이어야 합니다" },
+          { error: "kind는 'character_sheet' · 'cover_variants' · 'cut' 중 하나여야 합니다" },
           { status: 400 },
         )
     }

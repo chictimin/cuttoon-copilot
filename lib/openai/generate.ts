@@ -9,6 +9,7 @@
 // 받지 않는다 — 텍스트 모델(예: gpt-5)을 지정하면 도구가 내부적으로 이미지 생성을
 // 위임한다(OpenAI 공식 문서, 2026-08 확인). 정확한 모델 id는 실제 호출로 검증했다.
 import OpenAI from 'openai'
+import vocabulary from '@/spec/vocabulary.json'
 import type { ImageProvider, GeneratedImageResult, ReservedZone } from './provider'
 import { readAsset, uploadAsset } from '../asset-store'
 
@@ -31,8 +32,14 @@ export const OUTPUT_SIZE = { width: 1024, height: 1024 } as const
 // 스키마 파생 전까지 화면마다 임시 타입을 따로 두지 않기로 함). 프롬프트 조립에
 // 필요한 최소 필드만 여기서 안전하게 뽑아 쓴다.
 interface MinimalCharacterInFrame {
+  character_id?: string
   expression?: string
   pose?: string
+}
+interface MinimalCastMember {
+  character_id?: string
+  role?: string
+  description?: string
 }
 interface MinimalCut {
   cut_index?: number
@@ -46,6 +53,7 @@ interface MinimalCut {
 }
 interface MinimalStoryboard {
   subject?: string
+  cast?: MinimalCastMember[]
   cuts?: MinimalCut[]
 }
 interface MinimalPreset {
@@ -57,19 +65,40 @@ interface MinimalPreset {
   }
 }
 
-const RESERVED_ZONE_HINT: Record<ReservedZone, string> = {
-  top: 'Leave the top edge of the frame empty and uncluttered — no character, object, or text there. A speech bubble will be placed there afterward.',
-  bottom: 'Leave the bottom edge of the frame empty and uncluttered — no character, object, or text there. A speech bubble will be placed there afterward.',
-  left: 'Leave the left edge of the frame empty and uncluttered — no character, object, or text there. A speech bubble will be placed there afterward.',
-  right: 'Leave the right edge of the frame empty and uncluttered — no character, object, or text there. A speech bubble will be placed there afterward.',
+// "Leave the top edge empty" 로 쓰면 모델이 그림 위에 별도의 흰 띠를 붙인다 —
+// codex 4회 검증에서 4장 중 3장이 하드 경계선이 있는 빈 블록을 만들었다. 의도는
+// 프레임 안에서 그 구역을 비우는 것이므로, 배경이 그 구역을 그대로 통과해
+// 이어져야 한다는 점을 명시한다.
+function reservedZoneHint(zone: ReservedZone): string {
+  const where = { top: 'upper', bottom: 'lower', left: 'left', right: 'right' }[zone]
+  return (
+    `Keep the ${where} part of the frame clear of the character and of any object, ` +
+    `but the background must continue through it as a smooth gradient of the same scene — ` +
+    `it is empty space inside the illustration, not a separate blank strip, not a white box, ` +
+    `and there must be no panel border or dividing line. ` +
+    `A speech bubble is composited there later.`
+  )
+}
+
+// enum 토큰을 그대로 넣으면 모델이 못 알아듣는다 — codex 4회 검증에서
+// "Shot type: closeup." 이 4/4 전신으로 나왔다. spec/vocabulary.json 의
+// prompt_hints 가 각 enum 값의 영어 서술문을 갖고 있으므로 그것을 쓴다.
+// 힌트가 없는 값은 토큰을 그대로 둬 정보가 사라지지 않게 한다.
+const HINTS = vocabulary.prompt_hints as Record<string, Record<string, string> | undefined>
+
+function hint(category: string, value?: string): string | undefined {
+  if (!value) return undefined
+  return HINTS[category]?.[value] ?? value
 }
 
 // 대사는 텍스트 레이어로 나중에 얹는다(PRD 6절) — 프롬프트에 caption 텍스트를
 // 절대 포함하지 않는다. reserved_zone만 전달해 자리를 비워두게 한다.
 function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cut?: MinimalCut): string {
   const s = preset.style
+  // character_ratio 는 prompt_hints 에 아직 항목이 없다(spec/ 은 A① 소유).
+  // 추가되면 hint() 가 자동으로 집어가므로 이 코드는 그대로 두면 된다.
   const styleStr = s
-    ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${s.character_ratio ?? '2.5head'} body proportions, ${s.background_density ?? 'low'} background detail`
+    ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${hint('character_ratio', s.character_ratio) ?? '2.5head'} body proportions, ${s.background_density ?? 'low'} background detail`
     : 'default webtoon/comic style'
 
   const parts = [
@@ -79,15 +108,29 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   ]
 
   if (cut) {
-    if (cut.shot_type) parts.push(`Shot type: ${cut.shot_type}.`)
-    if (cut.camera_angle) parts.push(`Camera angle: ${cut.camera_angle}.`)
-    if (cut.time_of_day) parts.push(`Time of day: ${cut.time_of_day}.`)
+    const shot = hint('shot_type', cut.shot_type)
+    if (shot) parts.push(`Framing: ${shot}.`)
+    const angle = hint('camera_angle', cut.camera_angle)
+    if (angle) parts.push(`Camera: ${angle}.`)
+    const time = hint('time_of_day', cut.time_of_day)
+    if (time) parts.push(`Lighting: ${time}.`)
+
+    // cast[].description 을 반드시 넣는다. 이것이 없으면 외형을 붙잡는 것이
+    // reference 시트뿐이고, 시트가 없거나 약하면 나이·헤어·복장이 컷마다 바뀐다.
+    // 실측: 서술 없이 4회 생성했을 때 "60대 어머니"가 4/4 어린아이로 나왔고
+    // 헤어스타일·복장·복장색·화면 내 크기가 전부 달라졌다. 서술을 넣은 뒤
+    // 4/4 로 정확히 나왔다.
+    const castById = new Map(
+      (storyboard.cast ?? []).filter((m) => m.character_id).map((m) => [m.character_id!, m])
+    )
     for (const c of cut.characters_in_frame ?? []) {
-      if (c.expression || c.pose) {
-        parts.push(`A character with ${c.expression ?? 'neutral'} expression, ${c.pose ?? 'standing'} pose.`)
-      }
+      const desc = c.character_id ? castById.get(c.character_id)?.description : undefined
+      const traits = [hint('expression', c.expression), hint('pose', c.pose)].filter(Boolean).join(', ')
+      // 서술을 앞세운다 — 나이·성별 같은 정체성이 표정·포즈보다 먼저 고정돼야 한다.
+      parts.push(desc ? `Character: ${desc}. ${traits}.` : `Character: ${traits || 'neutral expression, standing'}.`)
     }
-    if (cut.reserved_zone) parts.push(RESERVED_ZONE_HINT[cut.reserved_zone])
+
+    if (cut.reserved_zone) parts.push(reservedZoneHint(cut.reserved_zone))
   }
 
   parts.push('No speech bubbles. No text or lettering anywhere in the image — captions are composited separately afterward.')
