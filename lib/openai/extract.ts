@@ -127,7 +127,16 @@ export async function generateCharacterSheet(
     throw new Error("gpt-image-1 응답에 이미지 데이터가 없음");
   }
 
-  const buffer = await resizeToOutput(data.b64_json);
+  // #104: 여기까지 오면 유료 호출은 이미 성공한 뒤다 — 리사이즈가 실패해도
+  // 결과를 버리지 않고 원본 그대로 업로드한다(width/height가 OUTPUT_SIZE와
+  // 다를 수 있다는 부정확함을 감수하는 쪽을 택함).
+  let buffer: Buffer;
+  try {
+    buffer = await resizeToOutput(data.b64_json);
+  } catch (err) {
+    console.error("캐릭터 시트 리사이즈 실패, 원본으로 대체:", err);
+    buffer = Buffer.from(data.b64_json, "base64");
+  }
   const { assetUri } = await uploadAsset(buffer, "image/png", "character-sheet.png");
 
   return {
