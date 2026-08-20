@@ -24,7 +24,61 @@ const SYSTEM_PROMPT = `당신은 컷툰 스타일 분석가입니다. 첨부된 
 - bubble_style: rounded | rect | cloud (말풍선 모양)
 - palette: 이 이미지에서 대표적인 색상 4~6개를 HEX 코드로
 
+레퍼런스 이미지에 웹툰/카툰 요소(캐릭터·선화)가 없어도(예: 사진) 위 6개 필드에
+가장 가까운 값을 추정해서 채우세요. 항목을 비우거나 다른 키를 쓰지 마세요.
+
 반드시 이 필드만 포함한 JSON 하나로만 답하세요. 설명 문장은 쓰지 마세요.`;
+
+const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+
+// 레퍼런스 이미지에 카툰 요소가 없으면(사진 등) 모델이 6개 필드를 다 못 채운
+// JSON을 낼 수 있다 — 실측: 크래시로 확인(#113 판정 케이스 1, ResultStep의
+// style.palette.map이 undefined에서 죽음). response_format: json_object는 유효한
+// JSON만 보장하고 필드 존재·타입은 보장하지 않는다.
+//
+// 여기서 걸러내는 이유는 호출부(ResultStep 등)가 이 결과가 항상 완전하다고
+// 가정하고 바로 쓰기 때문이다 — 그 가정을 지키는 쪽이 호출부를 전부 방어 코드로
+// 채우는 것보다 싸다.
+const DEFAULT_STYLE: StyleExtractionResult = {
+  line_weight: "medium",
+  saturation: "vivid",
+  character_ratio: "2.5head",
+  background_density: "low",
+  bubble_style: "rounded",
+  palette: ["#2b2b2b", "#f5f0e8", "#e8734a", "#4a90a4"],
+};
+
+function pickEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
+}
+
+function normalizeStyle(raw: unknown): StyleExtractionResult {
+  const obj = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+
+  const palette =
+    Array.isArray(obj.palette) &&
+    obj.palette.length > 0 &&
+    obj.palette.every((c) => typeof c === "string" && HEX_COLOR_PATTERN.test(c))
+      ? (obj.palette as string[])
+      : DEFAULT_STYLE.palette;
+
+  return {
+    line_weight: pickEnum(obj.line_weight, ["thin", "medium", "thick"], DEFAULT_STYLE.line_weight),
+    saturation: pickEnum(obj.saturation, ["pastel", "vivid", "muted"], DEFAULT_STYLE.saturation),
+    character_ratio: pickEnum(
+      obj.character_ratio,
+      ["2head", "2.5head", "3head", "realistic"],
+      DEFAULT_STYLE.character_ratio
+    ),
+    background_density: pickEnum(
+      obj.background_density,
+      ["none", "low", "medium", "high"],
+      DEFAULT_STYLE.background_density
+    ),
+    bubble_style: pickEnum(obj.bubble_style, ["rounded", "rect", "cloud"], DEFAULT_STYLE.bubble_style),
+    palette,
+  };
+}
 
 export async function extractStyle(refs: Buffer[]): Promise<StyleExtractionResult> {
   const imageMessages = refs.map((buf) => ({
@@ -51,7 +105,13 @@ export async function extractStyle(refs: Buffer[]): Promise<StyleExtractionResul
   });
 
   const raw = response.choices[0].message.content ?? "{}";
-  return JSON.parse(raw) as StyleExtractionResult;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = {};
+  }
+  return normalizeStyle(parsed);
 }
 
 // --- generateCharacterSheet ---
