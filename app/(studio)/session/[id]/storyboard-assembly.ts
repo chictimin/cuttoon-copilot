@@ -10,9 +10,8 @@
 
 import { pickShirtColor } from "@/lib/llm/session-cast";
 import { getBeatsForFlow, getFlowOptions } from "@/lib/llm/narrative-flow";
+import { NO_SUPPORTING_OPTION } from "@/lib/llm/brainstorm-options";
 import type { CastMember, Cut, NarrativeBeat, Storyboard } from "./storyboard-types";
-
-const NO_SUPPORTING_OPTION = "혼자 진행 (조연 없음)";
 
 // issue #119-2 (갈래 3): 흐름 템플릿 3종(키·beats 시퀀스)은 spec/data/narrative-flow.json
 // 으로 옮겼다 — 값은 하나도 안 바뀌었다(lib/llm/narrative-flow.ts 참고). 흐름 선택은

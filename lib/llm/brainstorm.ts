@@ -7,6 +7,8 @@
  * - 종료 판정은 "필수 슬롯이 전부 찼는가"로 결정적이어야 한다
  */
 
+import { NO_SUPPORTING_OPTION } from "./brainstorm-options";
+
 export interface BrainstormTurn {
   key: "protagonist" | "supporting" | "flow";
   question: string;
@@ -113,7 +115,7 @@ export async function generateBrainstormTurns(
           return `{
     "key": "supporting",
     "question": "함께 등장할 인물이 있나요?",
-    "options": ["선택지1", "선택지2", "혼자 진행 (조연 없음)"]
+    "options": ["선택지1", "선택지2", "${NO_SUPPORTING_OPTION}"]
   }`;
         case "flow":
           return `{
@@ -151,7 +153,7 @@ export async function generateBrainstormTurns(
 요구사항:
 - 각 턴마다 정확히 3개의 선택지
 - protagonist: 소재와 관련된 연령대/상황의 구체적인 주인공 3명 후보
-- supporting: 조연 3가지 옵션 (반드시 "혼자 진행 (조연 없음)" 포함)
+- supporting: 조연 3가지 옵션 (반드시 "${NO_SUPPORTING_OPTION}" 포함)
 - flow: 보건/의료 컷툰에 맞는 스토리 흐름 3가지 (예: 문제→해결, 질문→답변, 전후 비교)
 - JSON 형식만 반환`,
         },
@@ -322,8 +324,11 @@ JSON으로만 반환하세요. 다른 텍스트는 없이 JSON만.
       return EMPTY_EXTRACTED_DRAFT;
     }
 
-    const NO_SUPPORTING = "없음";
-    const hasSupporting = supportingRaw !== NO_SUPPORTING;
+    // 추출 프롬프트가 "없음"을 조연 부재 마커로 쓴다 — 화면의 NO_SUPPORTING_OPTION과는
+    // 다른 문자열이다(혼동 방지용으로 이름을 분리했다). 아래 resolved에서 최종적으로
+    // NO_SUPPORTING_OPTION으로 치환한다.
+    const EXTRACTION_ABSENT_MARKER = "없음";
+    const hasSupporting = supportingRaw !== EXTRACTION_ABSENT_MARKER;
 
     const draft: DraftStoryboard = {
       cast: hasSupporting
@@ -333,7 +338,7 @@ JSON으로만 반환하세요. 다른 텍스트는 없이 JSON만.
     };
     const resolved: ExtractedSlot[] = [
       { key: "protagonist", value: protagonist },
-      { key: "supporting", value: hasSupporting ? supportingRaw : "혼자 진행 (조연 없음)" },
+      { key: "supporting", value: hasSupporting ? supportingRaw : NO_SUPPORTING_OPTION },
     ];
 
     return { draft, resolved };

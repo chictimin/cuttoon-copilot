@@ -7,6 +7,9 @@ import type { Preset } from "@/lib/llm/preset-guard";
 // 타입만 가져온다 — lib/llm/brainstorm.ts 는 OPENAI_API_KEY 를 쓰는 서버 모듈이라
 // 런타임 import 는 클라이언트로 넘어오면 안 된다.
 import type { BrainstormTurn, ExtractedSlot } from "@/lib/llm/brainstorm";
+// brainstorm.ts와는 별개 파일이다 — OPENAI_API_KEY를 쓰지 않는 순수 상수라
+// 값으로 import해도 위 규칙에 안 걸린다(lib/llm/brainstorm-options.ts 참고).
+import { NO_SUPPORTING_OPTION } from "@/lib/llm/brainstorm-options";
 import {
   assembleStoryboard,
   FLOW_OPTIONS,
@@ -17,8 +20,6 @@ import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from ".
 import type { Cut, Storyboard } from "./storyboard-types";
 
 type Step = "subject" | "brainstorm" | "assembling" | "cover" | "generating" | "cuts" | "saved";
-
-const NO_SUPPORTING_OPTION = "혼자 진행 (조연 없음)";
 
 const TURN_ORDER: BrainstormTurn["key"][] = ["protagonist", "supporting", "flow"];
 
