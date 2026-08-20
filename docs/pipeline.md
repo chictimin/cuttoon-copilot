@@ -81,7 +81,7 @@ flowchart TD
 
 A가 넘기는 것과 받는 것(계약)만 적었다. 내부에서 어떤 모델을 쓰는지, 프롬프트를 어떻게 조립하는지는 B① 작성 대기.
 
-- **`extractStyle(refs: Buffer[])`** — B②. `POST /api/extract`가 A①/A②가 올린 `assetUris`를 `readAsset`로 buffer화해 넘긴다. 반환 `StyleExtractionResult`(`extract.ts`).
+- **`extractStyle(refs: Buffer[])`** — B②. `POST /api/extract`가 A①/A②가 올린 `assetUris`를 `readAsset`로 buffer화해 넘긴다. 반환 `StyleExtractionResult`(`extract.ts`). 내부 동작은 5-1b절.
 - **`ImageProvider`**(`lib/openai/provider.ts`, B①) — A가 실제로 부르는 계약:
   - `generateCharacterSheet(preset: unknown): Promise<GeneratedImageResult>`
   - `generateCoverVariants(input: { storyboard, preset, referenceAssets, count: 3 }): Promise<GeneratedImageResult[]>` — `count`가 리터럴 타입 `3`으로 고정돼 있어 호출부가 다른 값을 넘길 수 없다
@@ -90,6 +90,33 @@ A가 넘기는 것과 받는 것(계약)만 적었다. 내부에서 어떤 모�
 - **`POST /api/generate`**(`app/api/generate/route.ts`, B①) — body `{ kind: 'character_sheet'|'cover_variants'|'cut', ... }`로 위 세 함수에 매핑. `kind`별 body 필드는 각 함수 입력과 동일.
 
 작성 대기 항목(B①): 실제 사용 모델·API, 세션당 실호출 횟수, 프롬프트 조립 로직, 체이닝 내부 처리.
+
+### 5-1b. 스타일 분석 · 캐릭터 시트 생성 (B②)
+
+`lib/openai/extract.ts` 소유. 이 파일이 내보내는 건 아래 두 함수뿐이다.
+
+- **`extractStyle(refs: Buffer[])`**(`extract.ts:83`) — 모델 `gpt-4o`, `client.chat.completions.create`(`extract.ts:91`) 1회, `response_format: json_object`, `max_tokens: 300`. `refs` N장을 **한 번의 호출**에 `image_url` content part N개로 담아 보낸다(`extract.ts:84-89`) — 이미지 장수와 API 호출 수는 무관하다. 반환 직후 비공개 헬퍼 `normalizeStyle()`(`extract.ts:55`, export 없음)이 필드 존재·enum 값을 검증·보정한다(#140) — 모듈 밖에서는 재사용할 수 없다.
+- **`generateCharacterSheet(preset: PresetInput)`**(`extract.ts:207`) — 모델 `gpt-image-1`, `client.images.generate`(`extract.ts:212`) 1회, `n: 1`, `size: "1024x1024"`(`OUTPUT_SIZE`, `generate.ts:39`). 내부에서 `buildCharacterPrompt(preset)`(`extract.ts:134`)를 1회 호출해 프롬프트를 조립한 뒤 그 문자열로 이미지 1장을 만든다.
+
+**호출 순서 (온보딩 1회, 재시도 없는 골든 패스)**
+
+| 순서 | 함수 | 위치 | 호출 대상 |
+|---|---|---|---|
+| 1 | `handleFilesSelected` → `runAnalysis` | `OnboardingFlow.tsx:62,49` | — |
+| 2 | `analyzeStyle` → `uploadReference` ×N | `style-analysis.ts:33` | `POST /api/upload` ×N |
+| 3 | `analyzeStyle` → fetch | `style-analysis.ts:35-39` | `POST /api/extract` → **`extractStyle`** ×1 |
+| 4 | `handleConfirmStyle` | `OnboardingFlow.tsx:87` | (화면 전환, 호출 없음) |
+| 5 | `handleConfirmDetails` → fetch | `OnboardingFlow.tsx:104-119` | `POST /api/generate {kind:"character_sheet"}` → **`generateCharacterSheet`** ×1 |
+
+**세션당 호출 횟수 (판정 예산 관련)**
+
+- 이미지 생성(유료) 호출: `generateCharacterSheet`는 프로젝트 생성 시 **정확히 1회**뿐이다 — 재시도 버튼이 없다(#19 결정: 세션마다 다시 만들지 않음). 그 프로젝트로 세션을 몇 개 만들거나 몇 번 재방문해도 추가 호출은 없다.
+- 텍스트 호출: `extractStyle`은 `ResultStep`의 "다시 뽑기"(`OnboardingFlow.tsx:387-393`)를 누를 때마다 추가로 1회씩 늘어난다 — 상한이 없어 사용자가 원하는 만큼 반복 가능하다. 같은 클릭이 같은 파일을 `/api/upload`에 재업로드하므로, 재시도 1회당 업로드 N회 + 추출 1회가 함께 늘어난다.
+- 참고: `generateCoverVariants`(B①)에도 별도 "다시 뽑기"가 있다(`SessionFlow.tsx:436-461`). 이건 `extract.ts` 소관이 아니라 혼동 방지로만 적는다.
+
+**`spec/vocabulary.json` 소비 방식**
+
+`extract.ts`는 `vocabulary.json`을 직접 import하지 않는다. `./generate`에서 `ratioClause`만 가져와 쓴다(`extract.ts:4`). `ratioClause(value)`(`generate.ts:164-167`)는 내부에서 `promptHint('character_ratio', value)`(`generate.ts:141`)로 `vocabulary.json`의 `prompt_hints.character_ratio` 항목을 찾고, 없으면 `` `${value} body proportions` `` 문자열로 폴백한다. `buildCharacterPrompt`(`extract.ts:154`)가 이 결과를 시트 프롬프트에 그대로 넣는다 — `generate.ts`의 `buildCutPrompt`도 같은 헬퍼를 쓰기 때문에 시트와 컷이 항상 같은 비율 지시를 받는다(#126·#129 회귀 방지, PR #130).
 
 ### 5-2. 텍스트 레이어 합성·Export (B③)
 
