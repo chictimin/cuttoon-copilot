@@ -7,6 +7,8 @@
  * - 종료 판정은 "필수 슬롯이 전부 찼는가"로 결정적이어야 한다
  */
 
+import { NO_SUPPORTING_OPTION } from "./brainstorm-options";
+
 export interface BrainstormTurn {
   key: "protagonist" | "supporting" | "flow";
   question: string;
@@ -113,7 +115,7 @@ export async function generateBrainstormTurns(
           return `{
     "key": "supporting",
     "question": "함께 등장할 인물이 있나요?",
-    "options": ["선택지1", "선택지2", "혼자 진행 (조연 없음)"]
+    "options": ["선택지1", "선택지2", "${NO_SUPPORTING_OPTION}"]
   }`;
         case "flow":
           return `{
@@ -151,7 +153,7 @@ export async function generateBrainstormTurns(
 요구사항:
 - 각 턴마다 정확히 3개의 선택지
 - protagonist: 소재와 관련된 연령대/상황의 구체적인 주인공 3명 후보
-- supporting: 조연 3가지 옵션 (반드시 "혼자 진행 (조연 없음)" 포함)
+- supporting: 조연 3가지 옵션 (반드시 "${NO_SUPPORTING_OPTION}" 포함)
 - flow: 보건/의료 컷툰에 맞는 스토리 흐름 3가지 (예: 문제→해결, 질문→답변, 전후 비교)
 - JSON 형식만 반환`,
         },
@@ -220,4 +222,128 @@ export async function generateBrainstormTurns(
   }
 
   return filtered;
+}
+
+/**
+ * issue #119-1: 소재 텍스트에서 이미 정해진 정보(주인공·조연)를 뽑아 부분
+ * DraftStoryboard를 만든다. PRD 6절 "소재에 이미 정보가 있으면 해당 턴은
+ * 건너뛴다"를 실현하는 자리 — 이 함수가 만든 draft를 generateBrainstormTurns에
+ * 넘기면 기존 isSlotFilled/areAllSlotsComplete(위)가 이미 처리한다.
+ *
+ * 별도 LLM 호출로 분리한 이유(#119 작업안): generateBrainstormTurns 안에서 한
+ * 호출로 합치면 응답이 "일부는 값, 일부는 선택지"로 섞여 파싱이 복잡해지고,
+ * 이미 실측된 문제(위 filtered 처리 참고 — 모델이 요청 안 한 턴도 같이 보낼 수
+ * 있음)를 더 복잡한 형태로 반복할 위험이 있다. 실패해도 draft 없음(빈 배열)으로
+ * 폴백해 골든패스를 막지 않는다.
+ *
+ * supporting은 protagonist와 항상 같이 결정한다 — isSlotFilled("supporting")이
+ * "cast.length > 0"(협업자 유무가 이미 결정됨)만 보는 구조라, protagonist만 알고
+ * supporting이 모호한 상태로 draft를 반쪽만 채우면 "조연 없음으로 결정됨"으로
+ * 잘못 읽혀 그 턴이 부당하게 스킵된다. 그래서 둘 다 확실할 때만 draft를 채우고,
+ * 하나라도 불확실하면 통째로 빈 draft(둘 다 물어봄)로 되돌린다.
+ */
+export interface ExtractedSlot {
+  key: "protagonist" | "supporting";
+  /** 화면 안내 배너에 보여줄 값. supporting이 "없음으로 판단"인 경우 그 문구를 담는다. */
+  value: string;
+}
+
+export interface ExtractedDraft {
+  draft: DraftStoryboard;
+  /** 소재에서 이미 파악된 슬롯 — 화면이 "이미 파악한 것" 안내에 쓴다. 빈 배열이면 안내 없음. */
+  resolved: ExtractedSlot[];
+}
+
+const EMPTY_EXTRACTED_DRAFT: ExtractedDraft = { draft: { cast: [], cuts: [] }, resolved: [] };
+
+export async function extractDraftFromSubject(subject: string): Promise<ExtractedDraft> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    // 실패해도 골든패스를 막지 않는다 — 3턴 전부 묻는 기존 동작으로 돌아간다.
+    return EMPTY_EXTRACTED_DRAFT;
+  }
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        temperature: 0,
+        max_tokens: 256,
+        messages: [
+          {
+            role: "user",
+            content: `아래 소재 문장에 주인공·조연 정보가 이미 명확히 들어있는지 판단하세요.
+
+소재: "${subject}"
+
+JSON으로만 반환하세요. 다른 텍스트는 없이 JSON만.
+
+{
+  "protagonist": "소재에 구체적으로 드러난 주인공 서술" 또는 null,
+  "supporting": "소재에 구체적으로 드러난 조연 서술" 또는 "없음"(조연이 없다는 것이 명확한 경우) 또는 null
+}
+
+규칙:
+- 명확히 드러나지 않으면 반드시 null로 답하세요. 추측해서 지어내지 마세요.
+- protagonist가 null이면 supporting도 null로 답하세요 — 주인공을 모르는데 조연 유무만 아는 경우는 없습니다.
+- JSON 형식만 반환`,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("소재 분석 OpenAI API 에러:", await response.json().catch(() => ({})));
+      return EMPTY_EXTRACTED_DRAFT;
+    }
+
+    const data = (await response.json()) as { choices: Array<{ message: { content: string } }> };
+    const content = data.choices[0]?.message.content;
+    if (!content) return EMPTY_EXTRACTED_DRAFT;
+
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return EMPTY_EXTRACTED_DRAFT;
+
+    const parsed = JSON.parse(jsonMatch[0]) as { protagonist?: unknown; supporting?: unknown };
+
+    const protagonist = typeof parsed.protagonist === "string" ? parsed.protagonist.trim() : null;
+    if (!protagonist) {
+      // protagonist가 없으면 위 규칙대로 supporting도 무시 — 둘 다 물어본다.
+      return EMPTY_EXTRACTED_DRAFT;
+    }
+
+    const supportingRaw = typeof parsed.supporting === "string" ? parsed.supporting.trim() : null;
+    if (!supportingRaw) {
+      // protagonist는 확실한데 supporting이 모호하면(null) 통째로 폴백한다 — 반쪽 draft가
+      // "조연 없음"으로 잘못 읽히는 것을 막는다(위 함수 설명 참고).
+      return EMPTY_EXTRACTED_DRAFT;
+    }
+
+    // 추출 프롬프트가 "없음"을 조연 부재 마커로 쓴다 — 화면의 NO_SUPPORTING_OPTION과는
+    // 다른 문자열이다(혼동 방지용으로 이름을 분리했다). 아래 resolved에서 최종적으로
+    // NO_SUPPORTING_OPTION으로 치환한다.
+    const EXTRACTION_ABSENT_MARKER = "없음";
+    const hasSupporting = supportingRaw !== EXTRACTION_ABSENT_MARKER;
+
+    const draft: DraftStoryboard = {
+      cast: hasSupporting
+        ? [{ role: "protagonist" }, { role: "supporting" }]
+        : [{ role: "protagonist" }],
+      cuts: [],
+    };
+    const resolved: ExtractedSlot[] = [
+      { key: "protagonist", value: protagonist },
+      { key: "supporting", value: hasSupporting ? supportingRaw : NO_SUPPORTING_OPTION },
+    ];
+
+    return { draft, resolved };
+  } catch (err) {
+    console.error("소재 분석 실패:", err);
+    return EMPTY_EXTRACTED_DRAFT;
+  }
 }
