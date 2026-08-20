@@ -37,6 +37,22 @@ function checkWiring() {
     /continueFrom\s*:/,
     "route.ts가 continueFrom을 generateCut에 전달하지 않습니다 (#75 재발)"
   );
+
+  // 표지 3안은 count 를 리터럴 3 으로 고정해야 한다 (#50) — 호출부가 안 개수를
+  // 임의로 늘리지 못하게 한 계약이다. 그리고 체이닝 토큰을 받지 않아야 한다:
+  // 3안이 서로 독립이어야 2안이 1안에 끌려가지 않는다 (PRD 6절).
+  const cover = src.match(/generateCoverVariants\(\{([\s\S]*?)\}\)/);
+  assert.ok(cover, "route.ts에서 generateCoverVariants 호출을 찾지 못했습니다");
+  assert.match(
+    cover[1],
+    /count\s*:\s*3/,
+    "route.ts가 generateCoverVariants에 count: 3 을 전달하지 않습니다"
+  );
+  assert.doesNotMatch(
+    cover[1],
+    /continueFrom/,
+    "표지 3안은 독립 호출이어야 합니다 — continueFrom을 넘기면 안 됩니다 (PRD 6절)"
+  );
 }
 
 let failed = 0;
@@ -69,6 +85,18 @@ const cases = [
     json('{"kind":"cut","preset":{},"storyboard":{"cuts":[{"cut_index":1,"generated_image":null}]},"referenceAssets":[]}'),
     200,
     (r) => assert.match(r.result.asset, /^asset:\/\//),
+    true,
+  ],
+  [
+    // 3장을 생성하므로 다른 실제 호출 케이스보다 비싸다.
+    "cover_variants (실제 호출 3장)",
+    json('{"kind":"cover_variants","preset":{},"storyboard":{"cuts":[{"cut_index":1}]},"referenceAssets":[]}'),
+    200,
+    (r) => {
+      assert.ok(Array.isArray(r.result), "result가 배열이 아닙니다");
+      assert.equal(r.result.length, 3, `3안이어야 합니다 (받음: ${r.result.length})`);
+      for (const v of r.result) assert.match(v.asset, /^asset:\/\//);
+    },
     true,
   ],
   ["preset 없음", json('{"kind":"cut"}'), 400, (r) => assert.ok(r.error), false],
