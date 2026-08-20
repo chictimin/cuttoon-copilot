@@ -19,62 +19,105 @@ const BUCKET_NAME = "assets";
 export interface AssetUploadResult {
   assetUri: string;
   path: string;
-  originalName: string;
+  originalName?: string;
 }
 
 // issue #68/#72: 업로드 제한값. 버킷 설정(#68)과 라우트 검증(#72)이 같은 값을
 // 쓰도록 여기 한 곳에 둔다 — 값이 바뀌면 여기만 고치면 된다.
 // uploadAsset()을 부르는 곳이 app/api/upload/route.ts 하나뿐이고, 실제로
 // 올라오는 건 레퍼런스 이미지뿐이라 이미지 3종으로 제한한다 (pdf/txt/json은
-// getMimeType()에 매핑만 돼 있을 뿐 쓰는 곳이 없음 — #68 확인 결과).
+// 예전엔 getMimeType()에 매핑만 돼 있을 뿐 쓰는 곳이 없었음 — #68 확인 결과,
+// #78에서 그 매핑 자체를 제거함).
 export const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 export const ALLOWED_UPLOAD_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
+export type AllowedUploadMimeType = (typeof ALLOWED_UPLOAD_MIME_TYPES)[number];
 
-export type UploadValidationError = { code: "too_large" | "unsupported_type"; message: string };
+export type UploadValidationError = {
+  code: "too_large" | "unsupported_type" | "content_mismatch";
+  message: string;
+};
 
 /**
- * 업로드 전 크기·타입을 확인한다. 문제 없으면 null을 반환한다.
+ * 업로드 전 크기·타입을 확인한다. file.type은 클라이언트가 멀티파트 요청에 써
+ * 보내는 문자열이라 그 자체로는 아무것도 증명하지 않는다 — 실제 내용 확인은
+ * validateFileContent()가 한다(#78). 이 함수는 그 전에 값싸게 걸러내는 1차
+ * 필터일 뿐이다.
  */
 export function validateUpload(file: File): UploadValidationError | null {
   if (file.size > MAX_UPLOAD_SIZE_BYTES) {
     return { code: "too_large", message: "이미지는 10MB까지 올릴 수 있습니다" };
   }
-  if (!ALLOWED_UPLOAD_MIME_TYPES.includes(file.type as (typeof ALLOWED_UPLOAD_MIME_TYPES)[number])) {
+  if (!ALLOWED_UPLOAD_MIME_TYPES.includes(file.type as AllowedUploadMimeType)) {
     return { code: "unsupported_type", message: "PNG · JPG · WebP 이미지만 올릴 수 있습니다" };
   }
   return null;
 }
 
-function getMimeType(ext: string): string {
-  const mimeTypes: Record<string, string> = {
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    webp: "image/webp",
-    svg: "image/svg+xml",
-    pdf: "application/pdf",
-    txt: "text/plain",
-    json: "application/json",
-  };
-  return mimeTypes[ext.toLowerCase()] || "application/octet-stream";
+// #78: 파일 확장자·선언된 file.type이 아니라 실제 바이트(매직바이트)로 판정한다.
+// 확장자를 속여도(payload.svg를 image/png로 선언) 여기서 내용 자체를 확인하므로
+// 통과하지 못한다.
+const MAGIC_BYTE_CHECKS: Record<AllowedUploadMimeType, (buf: Buffer) => boolean> = {
+  "image/png": (buf) =>
+    buf.length >= 8 &&
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47 &&
+    buf[4] === 0x0d &&
+    buf[5] === 0x0a &&
+    buf[6] === 0x1a &&
+    buf[7] === 0x0a,
+  "image/jpeg": (buf) => buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff,
+  "image/webp": (buf) =>
+    buf.length >= 12 &&
+    buf.toString("ascii", 0, 4) === "RIFF" &&
+    buf.toString("ascii", 8, 12) === "WEBP",
+};
+
+/**
+ * declaredType(validateUpload를 통과한 file.type)이 실제 파일 내용과 맞는지
+ * 매직바이트로 확인한다. buffer를 다 읽은 뒤(라우트에서 이미 arrayBuffer로
+ * 읽는 시점) 업로드 직전에 호출하는 걸 전제로 한다.
+ */
+export function validateFileContent(
+  buffer: Buffer,
+  declaredType: AllowedUploadMimeType
+): UploadValidationError | null {
+  if (!MAGIC_BYTE_CHECKS[declaredType](buffer)) {
+    return {
+      code: "content_mismatch",
+      message: "파일 내용이 선언한 이미지 형식과 일치하지 않습니다",
+    };
+  }
+  return null;
 }
+
+const EXTENSION_FOR_MIME: Record<AllowedUploadMimeType, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+};
 
 /**
  * 파일을 Supabase Storage에 업로드하고 asset:// URI를 반환한다.
+ *
+ * contentType은 validateUpload + validateFileContent를 모두 통과한 값이어야
+ * 한다 — 저장 시 쓰는 확장자·contentType이 이 값 하나에서만 나오게 해서
+ * (#78) "검증에 쓰는 필드와 저장에 쓰는 필드가 다른" 구조 자체를 없앤다.
+ * originalName은 화면 표시용일 뿐 저장 로직에 영향을 주지 않는다.
  */
 export async function uploadAsset(
   fileBuffer: Buffer,
-  originalName: string
+  contentType: AllowedUploadMimeType,
+  originalName?: string
 ): Promise<AssetUploadResult> {
   const assetId = randomUUID();
-  const ext = originalName.split(".").pop() ?? "bin";
-  const fileName = `${assetId}.${ext}`;
+  const fileName = `${assetId}.${EXTENSION_FOR_MIME[contentType]}`;
 
   const { error } = await supabase.storage
     .from(BUCKET_NAME)
     .upload(fileName, fileBuffer, {
-      contentType: getMimeType(ext),
+      contentType,
       upsert: false,
     });
 

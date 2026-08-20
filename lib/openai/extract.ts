@@ -114,7 +114,7 @@ export async function generateCharacterSheet(
   }
 
   const buffer = Buffer.from(data.b64_json, "base64");
-  const { assetUri } = await uploadAsset(buffer, "character-sheet.png");
+  const { assetUri } = await uploadAsset(buffer, "image/png", "character-sheet.png");
 
   return {
     asset: assetUri,
