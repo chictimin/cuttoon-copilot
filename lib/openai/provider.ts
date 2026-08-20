@@ -27,6 +27,7 @@ export interface GeneratedImageResult {
 
 export interface ImageProvider {
   extractStyle(refs: Buffer[]): Promise<StyleResult>
+  // #19 결정: extractStyle과 결합도가 높아 B②(extract.ts)가 구현을 소유한다.
   generateCharacterSheet(preset: unknown): Promise<GeneratedImageResult>
 
   // 표지 3안: 독립 호출. 세션에 누적하면 2안이 1안에 끌려가 서로 비슷해진다
