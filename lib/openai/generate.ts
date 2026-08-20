@@ -204,13 +204,16 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   // 어머니다. 그냥 "audience in their 30s" 로 쓰면 모델이 인물 나이 지시로
   // 읽어 cast 서술과 충돌한다.
   //
-  // life_stage 값은 스네이크케이스 enum 이라 밑줄을 공백으로 바꿔 넣는다.
-  // prompt_hints 에 life_stage 항목이 없어 서술문이 없다(spec/ 은 A① 소유).
+  // life_stage 는 힌트가 있으면 그것을 쓰고, 없으면 밑줄만 공백으로 바꿔 넣는다.
+  // hint() 를 그냥 쓰면 힌트가 없을 때 스네이크케이스 토큰(job_seeker)이 그대로
+  // 나가므로, 폴백을 직접 지정한다 — 힌트가 추가되면 자동으로 집어간다 (#121).
   const ctx = preset.context
   const audience = [
     ctx?.industry?.length ? `${ctx.industry.join(' / ')} field` : undefined,
     ctx?.age_band?.length ? `readers in their ${ctx.age_band.join(', ')}` : undefined,
-    ctx?.life_stage?.length ? ctx.life_stage.map((v) => v.replace(/_/g, ' ')).join(', ') : undefined,
+    ctx?.life_stage?.length
+      ? ctx.life_stage.map((v) => HINTS.life_stage?.[v] ?? v.replace(/_/g, ' ')).join(', ')
+      : undefined,
   ].filter(Boolean)
   if (audience.length) {
     parts.push(
@@ -225,7 +228,13 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
     // 항목이 아직 없어(spec/ 은 A① 소유) 토큰이 그대로 들어가지만, enum 값이
     // 이미 영어 단어라(problem/before/turning/after…) 모델이 읽는다.
     const beat = hint('narrative_beat', cut.narrative_beat)
-    if (beat) parts.push(`This panel is the "${beat}" beat of the story.`)
+    // 라벨 형태로 둔다. 예전엔 `This panel is the "${beat}" beat of the story.` 였는데,
+    // 그러면 힌트가 그 영어 문장 안에 들어맞는 짧은 구여야 해서 spec/ 쪽 서술문 작성이
+    // 제 파일의 문장 모양에 묶인다. 다른 힌트(Framing/Camera/Lighting)는 전부 라벨 뒤에
+    // 서술문을 붙이는 형태이므로 여기도 맞춘다 (#121).
+    //
+    // 힌트가 없으면 hint() 가 토큰을 그대로 주고, `… : problem.` 으로도 읽힌다.
+    if (beat) parts.push(`This panel's role in the story: ${beat}.`)
 
     const shot = hint('shot_type', cut.shot_type)
     if (shot) parts.push(`Framing: ${shot}.`)
