@@ -130,6 +130,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   async function loadPreset() {
     const presetId = window.sessionStorage.getItem("cuttoon:preset-id");
+    if (!presetId) {
+      setPresetError("먼저 온보딩에서 프로젝트를 만들어주세요");
+      return;
+    }
     try {
       const res = await fetch(`/api/preset?id=${presetId}`);
       if (!res.ok) throw new Error("프리셋을 찾을 수 없습니다");
@@ -137,11 +141,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       setPreset(loaded);
       setPresetError(null);
     } catch {
-      setPresetError(
-        presetId
-          ? "프로젝트 정보를 불러오지 못했어요. 다시 시도해주세요"
-          : "먼저 온보딩에서 프로젝트를 만들어주세요"
-      );
+      setPresetError("프로젝트 정보를 불러오지 못했어요. 다시 시도해주세요");
     }
   }
 
@@ -406,6 +406,24 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
+      {/* issue #123: preset을 마운트 시점에 미리 받는데, 그 실패는 storyboard가
+          조립되기 전(subject·brainstorm·assembling 단계 전부) 어디서든 보여줘야
+          한다 — assembling까지 3턴을 다 진행한 뒤에야 알리면 너무 늦다.
+          checkingExisting은 위에서 이미 걸러졌고, storyboard가 있으면(복원된
+          세션이거나 이미 조립됐으면) preset 문제와 무관하니 띄우지 않는다. */}
+      {presetError && !storyboard && (
+        <div className="flex w-full max-w-xl flex-col items-center gap-3 rounded-md bg-red-50 px-4 py-3 text-center">
+          <p className="text-sm text-red-600">{presetError}</p>
+          <button
+            type="button"
+            onClick={() => void loadPreset()}
+            className="rounded-md bg-zinc-900 px-4 py-2 text-xs font-medium text-white hover:bg-zinc-700"
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
+
       {step === "subject" && (
         <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
           <h1 className="text-xl font-semibold">이번엔 어떤 이야기를 만들어볼까요?</h1>
@@ -511,18 +529,6 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       )}
 
       {step === "assembling" && !presetError && <Spinner text="이야기를 엮고 있어요..." />}
-      {step === "assembling" && presetError && (
-        <div className="flex flex-col items-center gap-3 text-center">
-          <p className="rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">{presetError}</p>
-          <button
-            type="button"
-            onClick={() => void loadPreset()}
-            className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
-          >
-            다시 시도
-          </button>
-        </div>
-      )}
       {step === "cover" && !coverVariants && !genError && <Spinner text="표지 3안을 그리고 있어요..." />}
       {step === "generating" && <Spinner text="나머지 컷을 완성하고 있어요..." />}
 
