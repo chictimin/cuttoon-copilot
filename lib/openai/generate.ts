@@ -164,10 +164,15 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   // 힌트를 건너뛰고 토큰(`2.5head body proportions`)으로 떨어진다 — extract.ts 는
   // 기본값에도 힌트를 붙이므로 그 상태로는 시트와 컷이 다른 지시를 받는다. 실측으로
   // 갈리는 것을 확인했다 (PR #126 머지 후).
+  // ratio 를 문장 끝에 둔다 (#131). 힌트 서술문이 네 값 중 유일하게 길어서, 뒤에
+  // background detail 절이 이어지면 "… simplified hands and feet, low background detail" 로
+  // 읽혀 배경 지시가 인물 비율 서술의 나열 항목처럼 묻힌다. 나머지 셋은 짧은 고정
+  // 어휘라 앞에 두는 것이 맞고, 이 순서면 extract.ts 의 시트 문장과 문맥이 같아진다
+  // (그쪽은 ratio 뒤가 바로 마침표다).
   const ratioValue = s?.character_ratio ?? '2.5head'
   const ratio = promptHint('character_ratio', ratioValue) ?? `${ratioValue} body proportions`
   const styleStr = s
-    ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${ratio}, ${s.background_density ?? 'low'} background detail`
+    ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${s.background_density ?? 'low'} background detail, ${ratio}`
     : 'default webtoon/comic style'
 
   const castById = new Map(
