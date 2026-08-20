@@ -64,12 +64,42 @@ function promptForCut(subject: string, cut: Cut): string {
   return `${subject} · ${cut.narrative_beat} · ${cut.shot_type}/${cut.camera_angle}`;
 }
 
+// issue #143: 저장된 세션 URL로 재진입해도 완성된 4컷이 복원되지 않던 문제.
+// EditorFlow.resolveImageUrl과 같은 이유로 asset://를 공개 URL로 바꿔야
+// <img>에 그릴 수 있다 — 중복 구현은 #144에서 공용 유틸로 정리하기로 함.
+async function resolveSessionAssetUrl(uri: string): Promise<string> {
+  const res = await fetch(`/api/session/asset-url?uri=${encodeURIComponent(uri)}`);
+  if (!res.ok) throw new Error("이미지 URL을 가져오지 못했습니다");
+  const { url } = (await res.json()) as { url: string };
+  return url;
+}
+
+async function resolveCutImages(cuts: Cut[]): Promise<Record<number, string>> {
+  const entries = await Promise.all(
+    cuts.map(async (cut) => {
+      if (!cut.generated_image) return null;
+      try {
+        return [cut.cut_index, await resolveSessionAssetUrl(cut.generated_image)] as const;
+      } catch {
+        return null;
+      }
+    })
+  );
+  return Object.fromEntries(entries.filter((e): e is NonNullable<typeof e> => e !== null));
+}
+
 export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [step, setStep] = useState<Step>("subject");
   // issue #134: 에디터로 가는 링크가 실제 저장된 세션 id를 알아야 한다.
   // sessionId prop은 저장 전 임시값일 수 있고 저장 후에도 window.history로만
   // URL을 바꿔서 prop 자체는 갱신되지 않는다 — 그래서 저장 결과를 별도로 든다.
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
+  // issue #143: URL의 sessionId로 이미 저장된 세션이 있으면 처음부터 다시
+  // 만들지 않고 그 결과를 그대로 보여준다. checkingExisting이 풀리기 전까지는
+  // "subject" 단계를 잠깐이라도 보여주지 않는다(있던 데이터가 순간 안 보이는
+  // 깜빡임 방지).
+  const [checkingExisting, setCheckingExisting] = useState(true);
+  const [isRestoredView, setIsRestoredView] = useState(false);
   const [subject, setSubject] = useState("");
   const [turnIndex, setTurnIndex] = useState(0);
   const [turns, setTurns] = useState<BrainstormTurn[] | null>(null);
@@ -87,6 +117,44 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [draftCaption, setDraftCaption] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // issue #143: 마운트 시 이 id로 이미 저장된 세션이 있는지 확인한다. 있으면
+  // (POST /api/session은 handleSave에서 골든패스 완주 후에만 호출되므로,
+  // 저장된 세션은 항상 4컷이 다 채워진 상태다) 그 storyboard로 상태를 채우고
+  // "cuts" 단계로 바로 보여준다 — 처음부터 다시 만들지 않는다.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/session?id=${encodeURIComponent(sessionId)}`);
+        if (cancelled) return;
+        if (!res.ok) return; // 없으면(404 등) 새로 만드는 골든패스를 그대로 둔다.
+
+        const data = await res.json();
+        if (cancelled) return;
+
+        const restored: Storyboard = data.storyboard;
+        const urls = await resolveCutImages(restored.cuts);
+        if (cancelled) return;
+
+        setStoryboard(restored);
+        setSubject(restored.subject);
+        setCutImageUrls(urls);
+        setSavedSessionId(sessionId);
+        setIsRestoredView(true);
+        setStep("cuts");
+      } catch {
+        // 조회 자체가 실패해도 골든패스를 막지 않는다 — 새로 시작하는 것과 같다.
+      } finally {
+        if (!cancelled) setCheckingExisting(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
 
   function recordAnswer(value: string) {
     if (!turns) return;
@@ -305,6 +373,15 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     }
   }
 
+  if (checkingExisting) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-zinc-200 border-t-zinc-700" />
+        <p className="text-sm text-zinc-500">불러오는 중...</p>
+      </main>
+    );
+  }
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
       {step === "subject" && (
@@ -471,7 +548,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
       {step === "cuts" && storyboard && (
         <div className="flex w-full max-w-4xl flex-col items-center gap-6">
-          <h1 className="text-xl font-semibold">4컷이 완성됐어요</h1>
+          <h1 className="text-xl font-semibold">
+            {isRestoredView ? "이미 저장된 컷툰이에요" : "4컷이 완성됐어요"}
+          </h1>
           {saveError && (
             <p className="w-full max-w-md rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">
               {saveError}
@@ -501,7 +580,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                     {cut.cut_index}컷 · {cut.narrative_beat}
                   </span>
                 </div>
-                {editingCutIndex === i ? (
+                {/* 복원 뷰에는 저장 수단(handleSave)이 없어 여기서 고치면 그냥
+                    사라진다 — 캡션 수정은 실제로 저장되는 에디터로 유도한다. */}
+                {isRestoredView ? (
+                  <p className="rounded-md px-2 py-1.5 text-left text-sm text-zinc-700">
+                    {cut.caption.text}
+                  </p>
+                ) : editingCutIndex === i ? (
                   <div className="flex gap-2">
                     <input
                       autoFocus
@@ -535,14 +620,26 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               </div>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
-          >
-            {saving ? "저장 중…" : "저장"}
-          </button>
+          {isRestoredView ? (
+            // 이미 저장된 세션이다 — 다시 "저장"을 누르면 POST /api/session이
+            // 매번 새 세션을 만들기 때문에(같은 id로 덮어쓰는 경로가 없음),
+            // 여기서는 저장을 다시 시도하지 않고 실제로 고칠 수 있는 에디터로 보낸다.
+            <Link
+              href={`/editor/${sessionId}`}
+              className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
+            >
+              에디터에서 수정하기
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
+            >
+              {saving ? "저장 중…" : "저장"}
+            </button>
+          )}
         </div>
       )}
 
