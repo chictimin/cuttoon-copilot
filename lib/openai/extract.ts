@@ -1,8 +1,7 @@
 import OpenAI from "openai";
 import sharp from "sharp";
-import vocabulary from "@/spec/vocabulary.json";
 import { uploadAsset } from "../asset-store";
-import { OUTPUT_SIZE } from "./generate";
+import { OUTPUT_SIZE, ratioClause } from "./generate";
 import type { GeneratedImageResult } from "./provider";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -67,29 +66,12 @@ export interface PresetInput {
   };
 }
 
-// spec/vocabulary.json 의 prompt_hints. enum 토큰을 모델이 알아듣는 서술문으로
-// 바꾼다 — generate.ts(B①)가 컷 프롬프트에서 쓰는 것과 같은 사전이다.
-//
-// 같은 사전을 두 파일이 각자 읽는다. generate.ts 의 hint() 가 모듈 내부 const 라
-// export 되지 않아서다(#120 에 export 를 요청해뒀다) — export 되면 그것으로 바꿔
-// 이 중복을 없앤다.
-const HINTS = vocabulary.prompt_hints as Record<string, Record<string, string> | undefined>;
-
-// character_ratio 서술. 시트와 컷이 같은 지시를 받아야 한다 — 컷은 hint() 를 거쳐
-// 서술문을 받는데 시트가 토큰(`2head`)을 그대로 보내면, #121 이 힌트를 추가하는
-// 순간 둘이 갈라진다. 시트는 매 컷 reference 로 주입되는 기준물이라, 갈라지면
-// 기준물과 컷이 서로 다른 비율로 그려져 P0 게이트 1(캐릭터 동일성)에 바로 걸린다.
-//
-// 힌트가 있으면 그것만 넣는다. 힌트 서술문은 그 자체로 완결된 구라서
-// (#121 초안: "extreme chibi proportions — the head is about half of ...")
-// 뒤에 " body proportions" 를 붙이면 "... simplified hands and feet body
-// proportions" 로 읽힌다. 힌트가 없을 때만 토큰 + 라벨 형태로 폴백한다.
-function ratioClause(value?: string): string {
-  const v = value ?? "2.5head";
-  return HINTS.character_ratio?.[v] ?? `${v} body proportions`;
-}
-
-function buildCharacterPrompt(preset: PresetInput): string {
+// export 하는 이유: 시트와 컷의 프롬프트가 **문구 수준으로** 같은 스타일 지시를
+// 내는지 대조하려면 두 파일에서 실제로 조립한 문자열을 비교해야 한다. #120 의
+// checkStyleParity() 는 "컷이 그 필드를 읽는가" 까지만 보고, 그 한계 때문에
+// character_ratio 폴백 차이가 두 번 통과했다(#126 → #129). B① 요청에 따라 열어
+// 스모크 테스트가 이 함수를 직접 부를 수 있게 한다.
+export function buildCharacterPrompt(preset: PresetInput): string {
   // preset 구조를 저장 시점에 검증하는 곳이 아직 없다(route.ts 주석 참고) — 배열
   // 필드가 비어 있거나 아예 빠진 채로 들어와도 여기서 죽지 않게 방어한다.
   const s = preset.style ?? ({} as PresetInput["style"]);
@@ -101,9 +83,19 @@ function buildCharacterPrompt(preset: PresetInput): string {
   const ageStr = c.age_band?.length ? c.age_band.join(", ") : "all ages";
   const lifeStr = c.life_stage?.length ? c.life_stage.join(", ") : "general";
 
+  // 컷 프롬프트(generate.ts buildCutPrompt)와 같은 지시를 받아야 한다. 시트는 매 컷
+  // reference 로 주입되는 기준물이라, 비율 지시가 갈라지면 기준물과 컷이 서로 다른
+  // 비율로 그려져 P0 게이트 1(캐릭터 동일성)의 "비율" 항목을 오독하게 된다 (#113).
+  //
+  // ratioClause() 는 B① 이 export 한 것이다(PR #130, 8fc0dbc) — 폴백 규칙(기본값
+  // 적용 순서 포함) 자체를 공유해 규칙이 두 파일에 복사되는 것을 막는다. 이 자리에
+  // 규칙을 인라인으로 다시 쓰면 세 번째로 갈라진다 — #126 에서 생기고 #129 에서
+  // 발견된 것과 같은 실수다.
+  const ratio = ratioClause(s.character_ratio);
+
   return `Character reference sheet for a webtoon/comic series.
 
-Style: ${s.line_weight ?? "medium"} line weight, ${s.saturation ?? "vivid"} colors, ${ratioClause(s.character_ratio)}.
+Style: ${s.line_weight ?? "medium"} line weight, ${s.saturation ?? "vivid"} colors, ${ratio}.
 Color palette: ${paletteStr}.
 Style keywords: ${keywordsStr}.
 
