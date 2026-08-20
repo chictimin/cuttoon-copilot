@@ -37,12 +37,15 @@ async function toGeneratedCut(result: { asset: string; continuationToken?: strin
   return { asset: result.asset, image, continuationToken: result.continuationToken };
 }
 
+// URL 리졸브 없이 생성 결과(asset·continuationToken)만 받는다. #104: 리졸브
+// 실패와 생성 실패를 분리해야 체이닝 중간에 리졸브만 실패했을 때 이미 유료로
+// 생성된 asset·다음 컷 체이닝 토큰까지 잃지 않는다 — 아래 generateChainedCuts 참고.
 async function callGenerateCut(input: {
   storyboard: Storyboard;
   preset: Preset;
   referenceAssets: string[];
   continueFrom?: string;
-}): Promise<GeneratedCut> {
+}): Promise<{ asset: string; continuationToken?: string }> {
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -55,7 +58,7 @@ async function callGenerateCut(input: {
   const { result } = (await res.json()) as {
     result: { asset: string; continuationToken?: string };
   };
-  return toGeneratedCut(result);
+  return result;
 }
 
 export interface CoverVariantsResult {
@@ -128,15 +131,31 @@ export async function generateChainedCuts(
   let continueFrom: string | undefined = startContinueFrom;
 
   for (let i = 1; i < cuts.length; i++) {
-    const result = await callGenerateCut({
+    const raw = await callGenerateCut({
       storyboard: { ...storyboard, cuts },
       preset,
       referenceAssets,
       continueFrom,
     });
-    cuts[i] = { ...cuts[i], generated_image: result.asset };
-    continueFrom = result.continuationToken ?? continueFrom;
-    results.push(result);
+    // 생성(유료 호출) 자체는 여기서 이미 끝났다 — asset과 다음 컷 체이닝
+    // 토큰을 확보했으니 체이닝은 리졸브 결과와 무관하게 이어간다.
+    cuts[i] = { ...cuts[i], generated_image: raw.asset };
+    continueFrom = raw.continuationToken ?? continueFrom;
+
+    // URL 리졸브만 실패해도 여기서 던지면 이 컷과 앞서 성공한 컷들까지
+    // handleSelectCover의 catch에서 통째로 버려진다(#104). 리졸브 실패는
+    // 이 컷의 표시용 image만 비우고(저장은 asset 기준이라 영향 없음) 계속한다.
+    let image = "";
+    try {
+      image = await resolveAssetUrl(raw.asset);
+    } catch (e) {
+      console.error(
+        `[generateChainedCuts] 컷 ${cuts[i].cut_index} 이미지 URL 리졸브 실패 — asset은 보존됨:`,
+        e
+      );
+    }
+
+    results.push({ asset: raw.asset, image, continuationToken: raw.continuationToken });
   }
 
   return results;
