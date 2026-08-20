@@ -131,19 +131,39 @@ function reservedZoneHint(zone: ReservedZone): string {
 // 힌트가 없는 값은 토큰을 그대로 둬 정보가 사라지지 않게 한다.
 const HINTS = vocabulary.prompt_hints as Record<string, Record<string, string> | undefined>
 
+// 힌트가 있으면 서술문, 없으면 undefined. extract.ts(B②)가 같은 사전·같은 폴백
+// 규칙을 쓸 수 있게 export 한다 — 두 파일이 vocabulary.json 을 각자 읽으면 폴백이
+// 갈라지고, 그러면 시트와 컷이 다른 지시를 받는다(이 PR 이 고친 문제와 같은 종류).
+//
+// hint() 와 나눠둔 이유: hint() 는 힌트가 없을 때 토큰을 그대로 돌려주므로
+// "힌트가 있었는지" 를 알 수 없다. 그 구분이 필요한 자리가 있다 — character_ratio 는
+// 힌트가 있으면 서술문만 쓰고, 없을 때만 `${토큰} body proportions` 로 폴백해야 한다.
+export function promptHint(category: string, value?: string): string | undefined {
+  if (!value) return undefined
+  return HINTS[category]?.[value]
+}
+
 function hint(category: string, value?: string): string | undefined {
   if (!value) return undefined
-  return HINTS[category]?.[value] ?? value
+  return promptHint(category, value) ?? value
 }
 
 // 대사는 텍스트 레이어로 나중에 얹는다(PRD 6절) — 프롬프트에 caption 텍스트를
 // 절대 포함하지 않는다. reserved_zone만 전달해 자리를 비워두게 한다.
 function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cut?: MinimalCut): string {
   const s = preset.style
-  // character_ratio 는 prompt_hints 에 아직 항목이 없다(spec/ 은 A① 소유).
-  // 추가되면 hint() 가 자동으로 집어가므로 이 코드는 그대로 두면 된다.
+  // character_ratio 만 라벨이 뒤에 붙는 형태였다 — `${값} body proportions`. 힌트
+  // 서술문은 그 자체로 완결된 구라서 뒤에 라벨을 또 붙이면 문장이 깨진다.
+  //
+  //   "… simplified hands and feet body proportions, low background detail"
+  //
+  // 그래서 힌트가 있으면 서술문만 쓰고, 없을 때만 토큰 + 라벨로 폴백한다. 다른
+  // 힌트(Framing·Camera·Lighting)는 라벨이 앞에 있어 이 문제가 없다 (PR #120 리뷰).
+  const ratio =
+    promptHint('character_ratio', s?.character_ratio) ??
+    `${s?.character_ratio ?? '2.5head'} body proportions`
   const styleStr = s
-    ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${hint('character_ratio', s.character_ratio) ?? '2.5head'} body proportions, ${s.background_density ?? 'low'} background detail`
+    ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${ratio}, ${s.background_density ?? 'low'} background detail`
     : 'default webtoon/comic style'
 
   const castById = new Map(
