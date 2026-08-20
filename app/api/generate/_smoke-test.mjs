@@ -6,10 +6,48 @@
 // #18: generateCharacterSheet/generateCut/generateCoverVariants가 실제 모델을
 // 호출하므로(스텁 아님), 기본 실행에서는 400 계열(무료) 케이스만 돈다. 실제
 // 호출까지 확인하려면 RUN_REAL_GENERATION=1로 실행 — OpenAI 과금이 발생한다.
+//
+// 앞부분의 정적 배선 검사는 서버도 크레딧도 필요 없다 — 언제나 돈다.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 const URL_ = process.env.SMOKE_URL ?? "http://localhost:3000/api/generate";
 const RUN_REAL = process.env.RUN_REAL_GENERATION === "1";
+
+// ── 정적 배선 검사 ──────────────────────────────────────────────────────────
+// #75: route가 continueFrom을 본문에서 읽지 않아 조용히 버려지던 사고. 당시엔
+// 스텁이 받은 값을 에코해 HTTP로 확인했지만, 실제 모델 호출(#18, PR #80)로
+// 바뀌면서 성공 경로가 유료가 되어 그 방식을 쓸 수 없게 됐다. 배선 자체는
+// 소스에서 확인할 수 있으므로 여기서 검사한다 — 무료이고 서버도 필요 없다.
+function checkWiring() {
+  const src = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
+
+  const destructure = src.match(/const\s*\{([^}]*)\}\s*=\s*body/);
+  assert.ok(destructure, "route.ts에서 body destructuring을 찾지 못했습니다");
+  assert.match(
+    destructure[1],
+    /\bcontinueFrom\b/,
+    "route.ts가 body에서 continueFrom을 읽지 않습니다 (#75 재발)"
+  );
+
+  const call = src.match(/generateCut\(\{([\s\S]*?)\}\)/);
+  assert.ok(call, "route.ts에서 generateCut 호출을 찾지 못했습니다");
+  assert.match(
+    call[1],
+    /continueFrom\s*:/,
+    "route.ts가 continueFrom을 generateCut에 전달하지 않습니다 (#75 재발)"
+  );
+}
+
+let failed = 0;
+
+try {
+  checkWiring();
+  console.log("ok   [정적] route가 continueFrom을 읽어 generateCut에 전달");
+} catch (err) {
+  failed++;
+  console.error(`FAIL [정적] ${err.message}`);
+}
 
 const json = (body) => ({
   method: "POST",
@@ -41,10 +79,8 @@ const cases = [
 ].filter(([, , , , realCall]) => RUN_REAL || !realCall);
 
 if (!RUN_REAL) {
-  console.log("(RUN_REAL_GENERATION=1이 아니라 실제 호출 케이스는 건너뜀)\n");
+  console.log("(RUN_REAL_GENERATION=1이 아니라 실제 호출 케이스는 건너뜀)");
 }
-
-let failed = 0;
 
 for (const [name, init, status, check] of cases) {
   try {
@@ -58,8 +94,9 @@ for (const [name, init, status, check] of cases) {
   }
 }
 
+const total = cases.length + 1; // + 정적 배선 검사
 if (failed > 0) {
   console.error(`\n${failed}건 실패`);
   process.exit(1);
 }
-console.log(`\n${cases.length}건 통과`);
+console.log(`\n${total}건 통과`);
