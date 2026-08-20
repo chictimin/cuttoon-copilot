@@ -1,0 +1,17 @@
+{
+  "narrative_flow_version": "1.0",
+  "flows": [
+    {
+      "key": "문제 제기 → 이전 상황 → 해결 → CTA",
+      "beats": ["problem", "before", "solution", "cta"]
+    },
+    {
+      "key": "질문 던지기 → 사실 전달 → 효과 강조 → CTA",
+      "beats": ["question", "fact", "benefit", "cta"]
+    },
+    {
+      "key": "이전 상황 → 전환 계기 → 이후 → CTA",
+      "beats": ["before", "turning", "after", "cta"]
+    }
+  ]
+}
