@@ -31,12 +31,12 @@ function clone(storyboard: Storyboard): Storyboard {
 }
 
 // generated_image는 issue #82 이후 asset:// 참조를 저장한다(storyboard.schema.json
-// 패턴 ^asset://) — 브라우저에 그리려면 /session/asset-url로 공개 URL을 리졸브해야
+// 패턴 ^asset://) — 브라우저에 그리려면 /api/session/asset-url로 공개 URL을 리졸브해야
 // 한다. #82 이전 mock 시절 세션은 data: URI를 그대로 저장해뒀을 수 있어 그 값은
 // 리졸브 없이 그대로 쓴다(레거시 호환).
 async function resolveImageUrl(uri: string): Promise<string> {
   if (!uri.startsWith("asset://")) return uri;
-  const res = await fetch(`/session/asset-url?uri=${encodeURIComponent(uri)}`);
+  const res = await fetch(`/api/session/asset-url?uri=${encodeURIComponent(uri)}`);
   if (!res.ok) throw new Error("이미지 URL을 가져오지 못했습니다");
   const { url } = (await res.json()) as { url: string };
   return url;
