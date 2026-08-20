@@ -6,7 +6,7 @@
 
 | 문서 | 담는 것 | 변경 권한 |
 | --- | --- | --- |
-| [`PRD.md`](./PRD.md) | 제품 요구사항 · 제약 · 제외 기능 · 아키텍처 결정 | chictimin 승인 |
+| [`PRD.md`](./PRD.md) | 제품 요구사항 · 제약 · 제외 기능 · 아키텍처 결정 | chictimin 승인 (5-1절 의존성 목록은 예외 — 승인 불필요) |
 | `README.md` (이 문서) | 스택 · 폴더 소유권 · 브랜치 · git 규칙 | chictimin 승인 |
 | `spec/*.schema.json` | 데이터 계약(필드·enum) | A① 승인 |
 
@@ -35,6 +35,7 @@ cuttoon-copilot/
 │  └─ api/
 │      ├─ preset/              프리셋 CRUD                    A③
 │      ├─ session/             세션 관리 · Export             A③
+│      ├─ brainstorm/          브레인스토밍 3턴                A①
 │      └─ generate/            이미지 생성 (maxDuration=300)  B①
 ├─ lib/
 │  ├─ llm/                     브레인스토밍 3턴 · 캡션         A①
@@ -59,40 +60,42 @@ cuttoon-copilot/
 | --- | --- |
 | `app/(studio)/` | A② |
 | `app/api/preset/`, `app/api/session/` | A③ (chictimin) |
-| `lib/llm/`, `spec/` | A① (dabi) |
+| `lib/llm/`, `app/api/brainstorm/`, `spec/` | A① (dabi) |
 | `app/api/generate/`, `lib/openai/generate.ts` | B① |
 | `lib/openai/extract.ts` | B② |
 | `lib/render/` | B③ |
 
 ## 구현 현황
 
-골든 패스 각 단계가 지금 어디까지 됐는지. **2026-08-19 기준, main에 머지된 것만** 센다 — 열려 있는 PR은 포함하지 않는다.
+골든 패스 각 단계가 지금 어디까지 됐는지. **2026-08-20 기준, main에 머지된 것만** 센다 — 열려 있는 PR은 포함하지 않는다.
 
-| 단계 | 로직·API | 화면 | 상태 |
-| --- | --- | --- | --- |
-| 1. 레퍼런스 업로드 | 없음 | 있음 | 막힘 |
-| 2. 스타일 추출 | `lib/openai/extract.ts` (실제 호출) | mock 사용 | 반쪽 |
-| 3. 프리셋 자동 확정 | `lib/llm/preset-guard.ts` | 있음 | 완료 |
-| 4. 프리셋 저장 | `GET·POST /api/preset` | 연결됨 | 완료 |
-| 5. 캐릭터 시트 표시 | — | 있음 | 완료 |
-| 6. 프로젝트 목록 | `GET /api/preset` (id 없이) | placeholder | 미연결 |
-| 7. 소재 입력 | — | 있음 | 있음 |
-| 8. 브레인스토밍 3턴 | 없음 | mock | 미구현 |
-| 9. 표지컷 3안 | 없음 | mock | 미구현 |
-| 10. 4컷 생성 | `POST /api/generate` + 계약 스텁 | mock | 미구현 |
-| 11. 대사 수정 · 드래그 | — | 있음(mock) | 반쪽 |
-| 12. v2 저장 · 되돌리기 | `/api/session` `/version` `/revert` | 미연결 | 미연결 |
-| 13. Export ZIP | `lib/render/` 구현 완료(대사 합성 + ZIP) | 없음 | 반쪽 |
+| 단계 | 로직·API | 화면 | 상태 | 관련 이슈 |
+| --- | --- | --- | --- | --- |
+| 1. 레퍼런스 업로드 | `POST /api/upload` · `lib/asset-store.ts` | mock 사용 | 미연결 | #87 (낮은 우선순위) |
+| 2. 스타일 추출 | `lib/openai/extract.ts` (실제 호출) | mock 사용 | 반쪽 | #87 (낮은 우선순위) |
+| 3. 프리셋 자동 확정 | `lib/llm/preset-guard.ts` | 있음 | 완료 | — |
+| 4. 프리셋 저장 | `GET·POST /api/preset` | 연결됨 | 완료 | — |
+| 5. 캐릭터 시트 표시 | — | 있음 | 완료 | — |
+| 6. 프로젝트 목록 | `GET /api/preset` (id 없이) | 연결됨 | 완료 | — |
+| 7. 소재 입력 | — | 있음 | 있음 | — |
+| 8. 브레인스토밍 3턴 | PR #53 대기(미머지) | mock 사용 | 미구현 | #83 (머지) · #84 (화면 재연결) |
+| 9. 표지컷 3안 | `generateCoverVariants` 실제 호출 연결됨(PR #80) | mock 사용 | 반쪽 | #82 |
+| 10. 4컷 생성 | `POST /api/generate` 실제 호출 연결됨(PR #80) | mock 사용 | 반쪽 | #82 |
+| 11. 대사 수정 · 드래그 | — | 있음 | 완료 | — |
+| 12. v2 저장 · 되돌리기 | `/api/session` `/version` `/revert` | 연결됨 | 완료 | — |
+| 13. Export ZIP | `GET /api/session/export` 완료 | 없음 | 반쪽 | #85 (다운로드 버튼) |
 
-알아둘 것 세 가지다.
+알아둘 것 네 가지다.
 
-**화면에서 실제 API를 부르는 곳은 온보딩 하나뿐이다.** `OnboardingFlow.tsx`의 `fetch("/api/preset")`가 전부고, 세션·에디터·목록은 mock이나 placeholder다. API가 있어도 화면이 안 붙으면 새로고침에서 사라진다.
+**저장·조회 계열은 화면까지 이어졌습니다.** 프로젝트 목록(`GET /api/preset`), 프리셋 저장(`POST /api/preset`), 세션 저장(`POST /api/session`), 에디터의 조회·버전 저장·되돌리기가 모두 실제 API를 부릅니다.
 
-**이미지 생성에 실제 모델 호출이 아직 없다.** 라우트와 인터페이스는 들어왔지만(PR #26) `generateCharacterSheet`·`generateCut`이 `asset://stub/...`을 돌려주는 스텁이다. 8·9·10번이 전부 여기 걸려 있어서, 실제 호출이 붙기 전까지 P2도 P3도 시작할 수 없다.
+**이미지 생성은 백엔드가 실제 모델 호출로 붙었지만(PR #80), 화면이 아직 그걸 안 부릅니다.** 세션 화면(`SessionFlow.tsx`)이 `lib/openai/generate.ts`/`POST /api/generate` 대신 화면 폴더 안의 로컬 mock(`mock-generate.ts`)을 직접 호출하고 있어서, 9·10번은 지금 실행해도 placeholder만 나옵니다(#82). 브레인스토밍(8번)도 같은 이유로 로컬 mock(`mock-brainstorm.ts`)을 쓰는데, 실제 구현은 PR #53에 이미 있고 아직 미머지 상태입니다(#83·#84).
 
-**P0 게이트를 아직 검증하지 못했다.** `PRD.md` 7절이 "P0의 두 게이트가 가장 중요한 판단점"이라고 못 박았는데(캐릭터 4컷 동일성 / 말풍선 억제), 검증할 코드 자체가 없는 상태다.
+**레퍼런스 업로드·스타일 추출(1·2번)은 낮은 우선순위로 미뤄뒀습니다.** `readAsset()`이 mock asset URI를 못 찾으면 조용히 `null`을 반환해서, 화면이 mock인 채로 있어도 이후 생성 단계가 크래시 없이 돕니다 — 캐릭터 동일성 품질만 떨어집니다(#87).
 
-이 표는 손으로 갱신한다. 단계를 완료하는 PR을 올릴 때 같이 고친다.
+**P0 게이트를 아직 화면에서 검증하지 못했습니다.** `PRD.md` 7절이 "P0의 두 게이트가 가장 중요한 판단점"이라고 못 박았는데(캐릭터 4컷 동일성 / 말풍선 억제), 백엔드는 실제 호출이 붙었지만 화면이 아직 mock을 쓰고 있어(#82) 화면에서 눈으로 검증할 수 없는 상태입니다.
+
+이 표는 손으로 갱신합니다. 단계를 완료하는 PR을 올릴 때 함께 고쳐주세요.
 
 ## 브랜치
 
@@ -113,3 +116,26 @@ cuttoon-copilot/
 npm install
 npm run dev
 ```
+
+`.env`는 저장소에 들어 있으므로(위 git 규칙 5번) 따로 만들 필요는 없다.
+
+### Supabase 셋업
+
+새 Supabase 프로젝트로 갈아타거나 처음 셋업할 때는 아래 둘 다 필요하다. 테이블만 만들고 버킷을 빠뜨리면 업로드와 이미지 읽기가 통째로 실패한다(`Bucket not found`, issue #67).
+
+1. **테이블** — `lib/db/schema.sql`을 Supabase SQL Editor에서 실행
+2. **Storage 버킷** — `assets` 버킷을 **public으로** 생성
+
+버킷을 public으로 두는 이유는 `lib/asset-store.ts`의 `getAssetUrl()`이 `getPublicUrl()`을 쓰기 때문이다. private으로 만들면 이미지 URL이 전부 깨진다.
+
+대시보드에서 만들거나(Storage → New bucket → 이름 `assets`, Public 체크), 서비스롤 키로 한 줄이면 된다.
+
+```
+npx tsx -e "
+import {createClient} from '@supabase/supabase-js';
+const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+s.storage.createBucket('assets', { public: true }).then(r => console.log(r.data ?? r.error));
+"
+```
+
+파일 크기·mime 제한은 아직 걸지 않았다 — 값 확정은 issue #68에서 논의 중이다.

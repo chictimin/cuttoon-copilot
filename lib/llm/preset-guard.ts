@@ -10,6 +10,7 @@
 // 가드의 목적이 LLM 출력의 큰 형태 오류를 잡는 것이라 오타 필드까지는 지금 급하지 않다고 판단.
 
 import presetSchema from "@/spec/preset.schema.json";
+import styleVocabulary from "@/spec/data/style-vocabulary.json";
 import { isValidCtaId, type Interest } from "./cta-presets";
 
 export type { Interest };
@@ -224,16 +225,123 @@ export function isValidPreset(data: unknown): data is Preset {
   }
 }
 
+export type UnmappedWordStatus = "mapped" | "substituted" | "unmapped";
+export type VocabField = "style.keywords" | "rules.forbidden";
+
+export interface UnmappedWordFinding {
+  field: VocabField;
+  original: string;
+  status: UnmappedWordStatus;
+  matchedTerm?: string;
+  promptHint?: string;
+}
+
+export interface UnmappedWordsResult {
+  findings: UnmappedWordFinding[];
+  /** 프롬프트 조립에 바로 쓸 영문 힌트. unmapped는 원본 문자열 그대로 들어간다. */
+  resolvedHints: Record<VocabField, string[]>;
+}
+
+type VocabEntry = { hint: string };
+
+// 순수 Levenshtein 거리 — 근접 매칭 하나만 필요해서 외부 라이브러리를 새로 넣지 않는다.
+function levenshtein(a: string, b: string): number {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+const SIMILARITY_THRESHOLD = 0.4; // 편집거리 / 두 단어 중 긴 쪽 길이 <= 0.4면 근접 매칭 인정
+
+function findClosestTerm(
+  word: string,
+  vocab: Record<string, VocabEntry>
+): { term: string; hint: string } | null {
+  if (vocab[word]) return { term: word, hint: vocab[word].hint };
+
+  // 포함 관계 우선 — "무서운"이 "무서운 표정"에 포함되는 경우처럼 편집거리보다 신뢰도가 높다.
+  for (const [term, { hint }] of Object.entries(vocab)) {
+    if (term.includes(word) || word.includes(term)) return { term, hint };
+  }
+
+  let best: { term: string; hint: string; dist: number } | null = null;
+  for (const [term, { hint }] of Object.entries(vocab)) {
+    const dist = levenshtein(word, term);
+    const normalized = dist / Math.max(word.length, term.length, 1);
+    if (normalized <= SIMILARITY_THRESHOLD && (!best || dist < best.dist)) {
+      best = { term, hint, dist };
+    }
+  }
+  return best ? { term: best.term, hint: best.hint } : null;
+}
+
+function resolveField(
+  field: VocabField,
+  words: string[],
+  vocab: Record<string, VocabEntry>
+): { findings: UnmappedWordFinding[]; hints: string[] } {
+  const findings: UnmappedWordFinding[] = [];
+  const hints: string[] = [];
+
+  for (const raw of words) {
+    const word = raw.trim();
+    if (!word) continue;
+
+    if (vocab[word]) {
+      findings.push({ field, original: word, status: "mapped", matchedTerm: word, promptHint: vocab[word].hint });
+      hints.push(vocab[word].hint);
+      continue;
+    }
+
+    const closest = findClosestTerm(word, vocab);
+    if (closest) {
+      findings.push({ field, original: word, status: "substituted", matchedTerm: closest.term, promptHint: closest.hint });
+      hints.push(closest.hint);
+    } else {
+      // 딸깍 원칙: 차단·경고 팝업으로 사용자 판단을 요구하지 않는다. 원본을 그대로
+      // 흘려보내고 findings에만 "unmapped"로 남겨 로그·UI에서 나중에 확인할 수 있게 한다.
+      findings.push({ field, original: word, status: "unmapped" });
+      hints.push(word);
+    }
+  }
+
+  return { findings, hints };
+}
+
 /**
- * issue #5의 "미매핑 단어 처리 정책" 항목. style.keywords/rules.forbidden/context.main_subjects/
- * context.industry는 enum이 아니라 자유 태그라, 프롬프트 조립 시 모델이 못 알아듣는 단어가 섞일
- * 위험이 preset.schema.json에도 명시돼 있다. 정책(예: 무시/경고/치환) 자체가 아직 안 정해져서
- * 여기서 임의로 결정하지 않고 TODO로 남긴다 — 팀 논의 필요.
+ * issue #15: style.keywords/rules.forbidden의 미매핑 단어 처리.
+ *
+ * 정책(2026-08-20 확정, spec/data/style-vocabulary.json 신설과 함께): 어휘 목록에
+ * 있으면 그대로, 없으면 근접 매칭(포함 관계 → 편집거리)으로 치환, 그래도 못 찾으면
+ * 원본을 그대로 쓰되 findings에 "unmapped"로 남긴다. 차단이나 경고 팝업은 딸깍
+ * 원칙과 충돌해서 쓰지 않는다.
+ *
+ * context.industry/context.main_subjects는 다루지 않는다 — preset.schema.json이
+ * "값을 고정하면 특정 업종 분류가 스키마에 박혀 범용성이 깨진다"고 명시적으로
+ * 업종 종속 없는 자유 필드로 설계했다(context.industry description). 고정 어휘로
+ * 치환하면 그 설계를 그대로 깨뜨리므로 대상에서 제외한다.
  */
-export function checkUnmappedWordsPolicy(): never {
-  throw new Error(
-    "TODO(issue #5): 미매핑 단어 처리 정책 미정. style.keywords/rules.forbidden/" +
-      "context.main_subjects/context.industry가 자유 태그라 검증 규칙이 아직 없음 — " +
-      "팀 논의 후 구현."
-  );
+export function checkUnmappedWordsPolicy(preset: {
+  style: Pick<Preset["style"], "keywords">;
+  rules: Pick<Preset["rules"], "forbidden">;
+}): UnmappedWordsResult {
+  const keywords = resolveField("style.keywords", preset.style.keywords, styleVocabulary["style.keywords"]);
+  const forbidden = resolveField("rules.forbidden", preset.rules.forbidden, styleVocabulary["rules.forbidden"]);
+
+  return {
+    findings: [...keywords.findings, ...forbidden.findings],
+    resolvedHints: {
+      "style.keywords": keywords.hints,
+      "rules.forbidden": forbidden.hints,
+    },
+  };
 }
