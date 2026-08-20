@@ -30,9 +30,11 @@ const BUBBLE_OPACITY = 0.98;
 // 걸치게 하려고 오프셋을 크게 잡지 않았다.)
 // bottom_* 는 아래쪽 구석에 두되, 인선님 피드백("꼬리만 가지 말고 말풍선 전체를
 // 당겨줘")에 따라 예전(y: 0.66)보다 인물 쪽(화면 중앙)에 확실히 더 가깝게 뒀다.
+// top_* 도 같은 이유로 예전(y: 0.0, 캔버스 맨 위)보다 인물(보통 화면 중앙 쪽) 쪽으로
+// 당겼다(인선님 피드백 2026-08-20: "사람하고 가깝게 그려줘").
 const POSITION_BOX: Record<Position, { x: number; y: number; w: number }> = {
-  top_left: { x: -0.03, y: 0.0, w: 0.44 },
-  top_right: { x: 0.59, y: 0.0, w: 0.44 },
+  top_left: { x: -0.03, y: 0.07, w: 0.44 },
+  top_right: { x: 0.59, y: 0.07, w: 0.44 },
   bottom_left: { x: 0.0, y: 0.46, w: 0.44 },
   bottom_right: { x: 0.56, y: 0.46, w: 0.44 },
   center: { x: 0.22, y: 0.38, w: 0.56 },
@@ -112,22 +114,44 @@ const STROKE = `stroke="black" stroke-width="3" stroke-linejoin="round"`;
 // 되는데 2개처럼 보이자나" — 반투명 도형을 두 번 겹쳐 그리면 항상 생기는 문제라,
 // 애초에 이음매 없는 폐곡선 하나로 만드는 것 말고는 해결 방법이 없다).
 //
-// 꼬리 방향/길이: 인물 얼굴 좌표를 실제로는 모른다(스키마에 없음) — 대신 "인물은 보통
-// 화면 중앙 쪽에 있다"는 가정으로 캔버스 중심 쪽을 향해 가늘고 길게 뻗는다.
-function tailGeometry(canvasW: number, canvasH: number, cx: number, cy: number) {
-  // 정중앙보다 살짝 위쪽을 조준한다 — 클로즈업/바스트샷에서 얼굴(특히 입)이 보통
-  // 화면 세로 중앙보다 조금 위에 오기 때문(인선님 피드백: "입하고 좀 더 가깝게").
-  const targetX = canvasW / 2;
-  const targetY = canvasH * 0.42;
-  const angle = Math.atan2(targetY - cy, targetX - cx);
-  const reach = 0.85; // 목표점 쪽으로 그 거리의 85%까지 — 더 바짝 붙이되 완전히 덮진 않게
-  const tip: [number, number] = [cx + (targetX - cx) * reach, cy + (targetY - cy) * reach];
-  return { angle, tip };
+// 꼬리 방향/길이: 인물 얼굴 좌표를 실제로는 모른다(storyboard.schema.json에 없음,
+// yj78615-blip 리뷰 PR #65에서도 지적됨 — wide 샷이면 인물이 작고 위치도 치우쳐서
+// "화면 중앙"이라는 고정 가정이 어긋난다). 그래서 목표점을 하드코딩하지 않고
+// composeCut() 호출자가 caption별로 넘길 수 있게 하고(HeadTarget), 안 넘기면
+// 기존처럼 "화면 중앙, 세로 42%"(클로즈업/바스트샷 기준 얼굴 위치 근사, 인선님
+// 피드백 "입하고 좀 더 가깝게")로 폴백한다.
+export interface HeadTarget {
+  /** 캔버스 가로 기준 비율(0~1) — 캐릭터 머리가 있는 x 위치 */
+  x: number;
+  /** 캔버스 세로 기준 비율(0~1) — 캐릭터 머리가 있는 y 위치 */
+  y: number;
 }
 
-// 타원 테두리 중 꼬리가 나갈 좁은 구간만 갈라서 뾰족한 끝(tip)을 끼워 넣은, 하나로
-// 이어진 폐곡선. instacut 참고자료의 아이디어(그림/텍스트는 재사용 안 함, 수학만 참고).
-function ellipsePath(cx: number, cy: number, rx: number, ry: number, tail: { angle: number; tip: [number, number] } | null): string {
+const DEFAULT_HEAD_TARGET: HeadTarget = { x: 0.5, y: 0.42 };
+
+// 길이는 "몸통 경계선에서부터 얼마나 튀어나오는가"로 고정한다(TAIL_PROTRUDE, 캔버스
+// 세로 기준 비율) — 처음엔 "중심→목표점 거리의 85%"로 길이를 잡았더니 구석
+// 자리에서 꼬리가 지나치게 길어졌고(팀 피드백), 그다음 "중심에서부터 절대 길이로
+// 상한"을 시도했더니 타원이 큰 경우(긴 대사라 bubbleH가 큰 경우) 그 상한이 타원
+// 반지름보다 작아서 꼬리 끝이 몸통 안에 파묻혀 아예 안 보이는 문제가 생겼다.
+// 몸통 경계선 기준으로 튀어나오는 길이를 고정하면 몸통 크기와 무관하게 항상 일정한
+// 길이로 보인다.
+const TAIL_PROTRUDE_RATIO = 0.045;
+
+function tailGeometry(canvasW: number, canvasH: number, cx: number, cy: number, headTarget: HeadTarget) {
+  const targetX = canvasW * headTarget.x;
+  const targetY = canvasH * headTarget.y;
+  const angle = Math.atan2(targetY - cy, targetX - cx);
+  const protrude = canvasH * TAIL_PROTRUDE_RATIO;
+  return { angle, protrude };
+}
+
+type Tail = { angle: number; protrude: number };
+
+// 타원 테두리 중 꼬리가 나갈 좁은 구간만 갈라서, 그 경계점에서 protrude만큼 튀어나온
+// 뾰족한 끝(tip)을 끼워 넣은, 하나로 이어진 폐곡선. instacut 참고자료의 아이디어
+// (그림/텍스트는 재사용 안 함, 수학만 참고).
+function ellipsePath(cx: number, cy: number, rx: number, ry: number, tail: Tail | null): string {
   if (!tail) {
     const steps = 64;
     const pts = Array.from({ length: steps }, (_, i) => {
@@ -144,13 +168,17 @@ function ellipsePath(cx: number, cy: number, rx: number, ry: number, tail: { ang
     const a = tail.angle + rootHalf + (span * i) / steps;
     pts.push(`${cx + rx * Math.cos(a)},${cy + ry * Math.sin(a)}`);
   }
-  pts.push(`${tail.tip[0]},${tail.tip[1]}`);
+  const boundaryX = cx + rx * Math.cos(tail.angle);
+  const boundaryY = cy + ry * Math.sin(tail.angle);
+  const tipX = boundaryX + Math.cos(tail.angle) * tail.protrude;
+  const tipY = boundaryY + Math.sin(tail.angle) * tail.protrude;
+  pts.push(`${tipX},${tipY}`);
   return `<polygon points="${pts.join(" ")}" ${FILL} ${STROKE}/>`;
 }
 
 // 사각형(rect/cloud 바탕)도 같은 원리 — 중심에서 꼬리 방향으로 쏜 광선이 변과 만나는
-// 지점을 찾아 그 자리만 갈라서 꼬리를 끼운다.
-function rectPath(x: number, y: number, w: number, h: number, rx: number, tail: { angle: number; tip: [number, number] } | null): string {
+// 지점을 찾아, 그 경계점에서 protrude만큼 튀어나온 끝을 그 자리에 갈라 끼운다.
+function rectPath(x: number, y: number, w: number, h: number, rx: number, tail: Tail | null): string {
   const corners: [number, number][] = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
   if (!tail) {
     return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" ry="${rx}" ${FILL} ${STROKE}/>`;
@@ -167,6 +195,8 @@ function rectPath(x: number, y: number, w: number, h: number, rx: number, tail: 
   const t = Math.min(tX, tY);
   const exitX = cx + dx * t;
   const exitY = cy + dy * t;
+  const tipX = exitX + dx * tail.protrude;
+  const tipY = exitY + dy * tail.protrude;
   const onVerticalEdge = tX < tY; // 좌/우 변에서 나감 -> 세로 방향이 그 변의 접선
   const spread = Math.min(w, h) * 0.045;
   const tangent: [number, number] = onVerticalEdge ? [0, 1] : [1, 0];
@@ -182,32 +212,23 @@ function rectPath(x: number, y: number, w: number, h: number, rx: number, tail: 
     const onThisEdge = Math.min(ax, bx) - 0.01 <= exitX && exitX <= Math.max(ax, bx) + 0.01
       && Math.min(ay, by) - 0.01 <= exitY && exitY <= Math.max(ay, by) + 0.01;
     if (onThisEdge) {
-      pts.push(`${p2[0]},${p2[1]}`, `${tail.tip[0]},${tail.tip[1]}`, `${p1[0]},${p1[1]}`);
+      pts.push(`${p2[0]},${p2[1]}`, `${tipX},${tipY}`, `${p1[0]},${p1[1]}`);
     }
   }
   return `<polygon points="${pts.join(" ")}" ${FILL} ${STROKE}/>`;
 }
 
+// x, y는 이미 필요한 보정(둥근 타입의 상단 넘침 보정 등, captionSvg 참고)이 끝난
+// 최종 좌표여야 한다 — 글씨 위치도 같은 x, y를 기준으로 그려지므로, 여기서 좌표를
+// 다시 바꾸면 몸통과 글씨가 어긋난다(2026-08-20: 이전엔 여기서 cy를 따로 보정해서
+// 몸통은 밀렸는데 글씨는 원래 자리에 남아 "글씨가 위에 떠있는" 결함이 있었다).
 function bubbleShapeSvg(
   bubbleType: BubbleType, x: number, y: number, w: number, h: number,
-  position: Position, canvasW: number, canvasH: number,
+  position: Position, canvasW: number, canvasH: number, headTarget: HeadTarget,
 ): string {
   const cx = x + w / 2;
-  let cy = y + h / 2;
-
-  // rounded는 텍스트 박스보다 위아래로 28% 더 큰 타원이라, top_left/top_right처럼
-  // y가 0에 붙은 자리에서는 타원 윗부분이 캔버스 경계(0) 위로 넘어간다. composeCut의
-  // 오버레이는 클리핑 없이 그대로 합성되므로 타원 윗부분이 수평으로 잘려 반원+삼각형
-  // 조합처럼 보이는 결함이 생긴다(joniverse-ai 리뷰, PR #65). 넘어간 만큼만 아래로
-  // 밀어서 온전한 타원 모양을 유지한다 — 꼬리 조준(tailGeometry)도 이 보정된 중심을
-  // 써야 몸통과 꼬리가 어긋나지 않는다.
-  const ry = (h / 2) * 1.28;
-  if (bubbleType === "rounded") {
-    const overflowTop = ry - cy;
-    if (overflowTop > 0) cy += overflowTop;
-  }
-
-  const tail = position === "center" ? null : tailGeometry(canvasW, canvasH, cx, cy);
+  const cy = y + h / 2;
+  const tail = position === "center" ? null : tailGeometry(canvasW, canvasH, cx, cy, headTarget);
 
   if (bubbleType === "rect") {
     return rectPath(x, y, w, h, 6, tail);
@@ -224,12 +245,13 @@ function bubbleShapeSvg(
   }
   // rounded: 사각형이 아니라 실제 웹툰처럼 타원으로 — 텍스트 박스보다 넉넉하게 감싼다
   const rx = (w / 2) * 1.12;
+  const ry = (h / 2) * 1.28;
   return ellipsePath(cx, cy, rx, ry, tail);
 }
 
 const VALID_BUBBLE_TYPES: BubbleType[] = ["rounded", "rect", "cloud"];
 
-function captionSvg(caption: Caption, canvasW: number, canvasH: number): string {
+function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarget: HeadTarget): string {
   // storyboard.schema.json의 enum 밖의 값이 저장 시점 검증을 뚫고 들어올 수 있다
   // (app/api/session/validate.ts는 아직 필드별 enum까지는 안 봄, #70). lib/render/는
   // 라이브러리 계층이라 호출자가 무엇을 넘기든 예외로 죽지 않는 편이 맞다고 보고
@@ -257,12 +279,26 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number): string 
   const { fontSize, lines } = fitText(caption.text, maxWidth, maxHeight);
   const textH = lines.length * fontSize * LINE_HEIGHT;
   const bubbleH = textH + PADDING * 2;
-  const y = box.y * canvasH;
+  let y = box.y * canvasH;
+
+  // rounded는 텍스트 박스보다 위아래로 28% 더 큰 타원이라, top_left/top_right처럼
+  // y가 0에 가까운 자리에서는 타원 윗부분이 캔버스 경계(0) 위로 넘어간다. composeCut의
+  // 오버레이는 클리핑 없이 그대로 합성되므로 타원 윗부분이 수평으로 잘려 반원+삼각형
+  // 조합처럼 보이는 결함이 생긴다(joniverse-ai 리뷰, PR #65). 넘어간 만큼만 아래로
+  // 밀어서 온전한 타원 모양을 유지한다 — 이 보정된 y를 몸통(bubbleShapeSvg)과 글씨
+  // (firstLineY) 양쪽에 다 써야 서로 어긋나지 않는다(전에는 몸통만 보정하고 글씨는
+  // 원래 y를 써서 "글씨가 위에 떠있는" 결함이 있었다).
+  if (bubbleType === "rounded") {
+    const cy = y + bubbleH / 2;
+    const ry = (bubbleH / 2) * 1.28;
+    const overflowTop = ry - cy;
+    if (overflowTop > 0) y += overflowTop;
+  }
 
   // #79/#92 fallback을 여기서도 그대로 이어받는다 — bubbleShapeSvg에 원본 caption.*을
   // 넘기면 몸통/꼬리 계산에 유효하지 않은 enum이 들어가 버리므로, 위에서 이미
   // center/rounded로 정리한 position/bubbleType을 넘긴다.
-  const shape = bubbleShapeSvg(bubbleType, x, y, maxWidth, bubbleH, position, canvasW, canvasH);
+  const shape = bubbleShapeSvg(bubbleType, x, y, maxWidth, bubbleH, position, canvasW, canvasH, headTarget);
 
   const cx = x + maxWidth / 2;
   const firstLineY = y + PADDING + fontSize * 0.85;
@@ -274,7 +310,14 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number): string 
   return `${shape}${text}`;
 }
 
-export async function composeCut(imageBuffer: Buffer, captions: Caption[]): Promise<Buffer> {
+// headTargets[i]는 captions[i]에 대응한다 — 생략하거나 특정 인덱스가 없으면
+// DEFAULT_HEAD_TARGET(화면 중앙, 세로 42%)으로 폴백한다. 실제 인물 위치를 아는
+// 호출자(예: 수동 보정, 향후 얼굴 검출 결과)가 캡션별로 꼬리 목표점을 옮길 수
+// 있게 하기 위한 것 — storyboard.schema.json의 Caption 자체는 바꾸지 않는다
+// (additionalProperties: false와 충돌하지 않도록).
+export async function composeCut(
+  imageBuffer: Buffer, captions: Caption[], headTargets?: (HeadTarget | undefined)[],
+): Promise<Buffer> {
   const image = sharp(imageBuffer);
   const meta = await image.metadata();
   const canvasW = meta.width ?? 1080;
@@ -282,7 +325,7 @@ export async function composeCut(imageBuffer: Buffer, captions: Caption[]): Prom
 
   const overlaySvg = `
     <svg width="${canvasW}" height="${canvasH}" xmlns="http://www.w3.org/2000/svg">
-      ${captions.map((c) => captionSvg(c, canvasW, canvasH)).join("\n")}
+      ${captions.map((c, i) => captionSvg(c, canvasW, canvasH, headTargets?.[i] ?? DEFAULT_HEAD_TARGET)).join("\n")}
     </svg>
   `;
 
