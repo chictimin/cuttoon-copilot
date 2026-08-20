@@ -193,7 +193,20 @@ function bubbleShapeSvg(
   position: Position, canvasW: number, canvasH: number,
 ): string {
   const cx = x + w / 2;
-  const cy = y + h / 2;
+  let cy = y + h / 2;
+
+  // rounded는 텍스트 박스보다 위아래로 28% 더 큰 타원이라, top_left/top_right처럼
+  // y가 0에 붙은 자리에서는 타원 윗부분이 캔버스 경계(0) 위로 넘어간다. composeCut의
+  // 오버레이는 클리핑 없이 그대로 합성되므로 타원 윗부분이 수평으로 잘려 반원+삼각형
+  // 조합처럼 보이는 결함이 생긴다(joniverse-ai 리뷰, PR #65). 넘어간 만큼만 아래로
+  // 밀어서 온전한 타원 모양을 유지한다 — 꼬리 조준(tailGeometry)도 이 보정된 중심을
+  // 써야 몸통과 꼬리가 어긋나지 않는다.
+  const ry = (h / 2) * 1.28;
+  if (bubbleType === "rounded") {
+    const overflowTop = ry - cy;
+    if (overflowTop > 0) cy += overflowTop;
+  }
+
   const tail = position === "center" ? null : tailGeometry(canvasW, canvasH, cx, cy);
 
   if (bubbleType === "rect") {
@@ -211,7 +224,6 @@ function bubbleShapeSvg(
   }
   // rounded: 사각형이 아니라 실제 웹툰처럼 타원으로 — 텍스트 박스보다 넉넉하게 감싼다
   const rx = (w / 2) * 1.12;
-  const ry = (h / 2) * 1.28;
   return ellipsePath(cx, cy, rx, ry, tail);
 }
 
