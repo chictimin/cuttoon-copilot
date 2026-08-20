@@ -9,6 +9,7 @@
 // 받지 않는다 — 텍스트 모델(예: gpt-5)을 지정하면 도구가 내부적으로 이미지 생성을
 // 위임한다(OpenAI 공식 문서, 2026-08 확인). 정확한 모델 id는 실제 호출로 검증했다.
 import OpenAI from 'openai'
+import sharp from 'sharp'
 import vocabulary from '@/spec/vocabulary.json'
 import type { ImageProvider, GeneratedImageResult, ReservedZone } from './provider'
 import { readAsset, uploadAsset } from '../asset-store'
@@ -16,7 +17,6 @@ import { readAsset, uploadAsset } from '../asset-store'
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 const RESPONSES_MODEL = 'gpt-5'
-const IMAGE_SIZE = '1024x1024'
 
 // 출력 해상도는 1024x1024 고정. 컷툰은 1:1 비율이고, 같은 프롬프트가 호출마다
 // 다른 크기를 내는 것을 실측으로 확인했으므로(1536x1024 / 1199x1312) 크기를
@@ -27,6 +27,10 @@ const IMAGE_SIZE = '1024x1024'
 // 유효한 유일한 정사각형 값이다(1080 은 16의 배수가 아니라 어느 쪽에서도 거부).
 // 인스타그램은 320~1080px 를 원본 그대로 유지하므로 1024 도 손실이 없다.
 export const OUTPUT_SIZE = { width: 1024, height: 1024 } as const
+
+// 요청에 실어보내는 size 문자열. OUTPUT_SIZE 에서 파생시켜 숫자를 두 곳에 적지
+// 않는다 — extract.ts(B②)도 PR #95 에서 같은 방식으로 하드코딩을 없앴다.
+const IMAGE_SIZE = `${OUTPUT_SIZE.width}x${OUTPUT_SIZE.height}` as const
 
 // storyboard/preset은 계약상 unknown이다(PRD 5절 — 정식 Storyboard/Preset 타입은
 // 스키마 파생 전까지 화면마다 임시 타입을 따로 두지 않기로 함). 프롬프트 조립에
@@ -192,6 +196,21 @@ async function callImageGeneration(
   return { base64: imageCall.result, responseId: (response as { id: string }).id }
 }
 
+// 모델이 요청한 size 와 다른 크기를 낼 때가 있다 — 같은 프롬프트가 1536x1024 /
+// 1199x1312 를 낸 실측이 위 OUTPUT_SIZE 주석의 근거다. 리사이즈로 강제해 계약 ④의
+// width/height 가 실제 픽셀과 어긋나지 않게 한다. fit: 'cover' 는 비율이 다르게
+// 나왔을 때 늘리지 않고 잘라낸다 — 1:1 을 지키면서 왜곡을 피하는 쪽.
+//
+// extract.ts(B②)에 같은 헬퍼가 있지만 거기서 가져오면 순환 import 가 된다
+// (extract.ts 가 이미 이 파일의 OUTPUT_SIZE 를 가져다 쓴다). 나중에 공용 위치로
+// 옮길 수 있으면 한쪽으로 합치는 편이 낫다.
+async function resizeToOutput(base64: string): Promise<Buffer> {
+  return sharp(Buffer.from(base64, 'base64'))
+    .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: 'cover' })
+    .png()
+    .toBuffer()
+}
+
 export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const storyboard = (input.storyboard ?? {}) as MinimalStoryboard
   const preset = (input.preset ?? {}) as MinimalPreset
@@ -200,7 +219,7 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const prompt = buildCutPrompt(storyboard, preset, cut)
   const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, input.continueFrom)
 
-  const buffer = Buffer.from(base64, 'base64')
+  const buffer = await resizeToOutput(base64)
   const { assetUri } = await uploadAsset(buffer, 'image/png', 'cut.png')
 
   return {
@@ -222,7 +241,7 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   const variants = await Promise.all(
     Array.from({ length: input.count }, async (): Promise<GeneratedImageResult> => {
       const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets)
-      const buffer = Buffer.from(base64, 'base64')
+      const buffer = await resizeToOutput(base64)
       const { assetUri } = await uploadAsset(buffer, 'image/png', 'cover.png')
       return {
         asset: assetUri,
