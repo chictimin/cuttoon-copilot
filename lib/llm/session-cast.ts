@@ -55,6 +55,16 @@ function pick<T>(items: T[], random: () => number): T {
 }
 
 /**
+ * 상의 색 후보(예: preset.style.palette) 중 하나를 세션당 1회 뽑는다.
+ * #123: 자유 입력 조연 유지 범위에서 buildSessionCast() 전체를 연결하지 않고
+ * 이 조각만 분리해 쓴다 — 마스코트 고정 계약(instructorCharacterId·counterparts
+ * 필수)을 건드리지 않기 위함.
+ */
+export function pickShirtColor(colors: string[], random: () => number = Math.random): string | null {
+  return colors.length ? pick(colors, random) : null;
+}
+
+/**
  * 세션 cast를 확정한다. 세션 생성 시점에 한 번만 호출할 것 — 반환값을 저장해두고
  * 4컷 전부가 같은 값을 참조해야 한다.
  */
