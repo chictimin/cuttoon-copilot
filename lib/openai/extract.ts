@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 import sharp from "sharp";
 import { OUTPUT_SIZE } from "./generate";
+import { uploadAsset } from "../asset-store";
+import type { GeneratedImageResult } from "./provider";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -64,24 +66,19 @@ export interface PresetInput {
   };
 }
 
-export interface CharacterSheetResult {
-  imageBase64: string;
-  revisedPrompt: string;
-}
-
 function buildCharacterPrompt(preset: PresetInput): string {
-  const s = preset.style;
-  const c = preset.context;
+  const s = preset.style ?? ({} as PresetInput["style"]);
+  const c = preset.context ?? ({} as PresetInput["context"]);
 
-  const paletteStr = s.palette.join(", ");
-  const keywordsStr = s.keywords.length > 0 ? s.keywords.join(", ") : "default comic style";
-  const industryStr = c.industry.length > 0 ? c.industry.join(", ") : "general";
-  const ageStr = c.age_band.length > 0 ? c.age_band.join(", ") : "all ages";
-  const lifeStr = c.life_stage.length > 0 ? c.life_stage.join(", ") : "general";
+  const paletteStr = (s.palette ?? []).join(", ") || "designer's choice";
+  const keywordsStr = s.keywords?.length ? s.keywords.join(", ") : "default comic style";
+  const industryStr = c.industry?.length ? c.industry.join(", ") : "general";
+  const ageStr = c.age_band?.length ? c.age_band.join(", ") : "all ages";
+  const lifeStr = c.life_stage?.length ? c.life_stage.join(", ") : "general";
 
   return `Character reference sheet for a webtoon/comic series.
 
-Style: ${s.line_weight} line weight, ${s.saturation} colors, ${s.character_ratio} body proportions.
+Style: ${s.line_weight ?? "medium"} line weight, ${s.saturation ?? "vivid"} colors, ${s.character_ratio ?? "2.5head"} body proportions.
 Color palette: ${paletteStr}.
 Style keywords: ${keywordsStr}.
 
@@ -95,18 +92,17 @@ Draw the character in THREE poses on a single white-background sheet:
 No speech bubbles. No text. Clean reference sheet layout with clear separation between poses.`;
 }
 
-async function resizeToOutput(base64: string): Promise<string> {
+async function resizeToOutput(base64: string): Promise<Buffer> {
   const buf = Buffer.from(base64, "base64");
-  const resized = await sharp(buf)
+  return sharp(buf)
     .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: "cover" })
     .png()
     .toBuffer();
-  return resized.toString("base64");
 }
 
 export async function generateCharacterSheet(
   preset: PresetInput
-): Promise<CharacterSheetResult> {
+): Promise<GeneratedImageResult> {
   const prompt = buildCharacterPrompt(preset);
 
   const response = await client.images.generate({
@@ -121,9 +117,12 @@ export async function generateCharacterSheet(
     throw new Error("gpt-image-1 응답에 이미지 데이터가 없음");
   }
 
-  const resizedBase64 = await resizeToOutput(data.b64_json);
+  const buffer = await resizeToOutput(data.b64_json);
+  const { assetUri } = await uploadAsset(buffer, "character-sheet.png");
+
   return {
-    imageBase64: resizedBase64,
-    revisedPrompt: prompt,
+    asset: assetUri,
+    width: OUTPUT_SIZE.width,
+    height: OUTPUT_SIZE.height,
   };
 }
