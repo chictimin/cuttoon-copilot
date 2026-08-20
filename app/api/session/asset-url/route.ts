@@ -1,6 +1,6 @@
 import { getAssetUrl } from "@/lib/asset-store";
 
-// GET /session/asset-url?uri=asset://...
+// GET /api/session/asset-url?uri=asset://...
 //
 // issue #82: 세션 화면이 실제 생성 결과(asset:// 참조)를 <img>로 그리려면 공개
 // URL이 필요하다. getAssetUrl()(lib/asset-store.ts, 서비스 롤 키 사용)은
