@@ -76,6 +76,18 @@ interface MinimalPreset {
     saturation?: string
     character_ratio?: string
     background_density?: string
+    // palette·keywords 는 enum 이 아니라 사용자·추출 결과의 자유 값이다.
+    // extract.ts(B②)가 캐릭터 시트를 만들 때 이 둘을 쓰는데 컷 프롬프트가 안
+    // 쓰고 있었다 — 시트와 컷이 서로 다른 스타일 지시를 받는 상태였다.
+    palette?: string[]
+    keywords?: string[]
+    // bubble_style 은 읽지 않는다. 말풍선은 생성 이미지에 넣지 않고 나중에
+    // 합성하므로(PRD 6절) B③ 쪽 값이다.
+  }
+  // 사용자가 온보딩에서 적은 금지 요소. 지금까지 아무 데서도 쓰이지 않아 통째로
+  // 버려지고 있었다. 프롬프트 조립은 B① 몫이라(PRD 5절) 여기서 넣는다.
+  rules?: {
+    forbidden?: string[]
   }
   // 온보딩에서 사용자가 직접 고른 값이다(골든 패스 2·3단계). 장면 연출에 쓴다 —
   // 50대 부모가 등장하는 헬스케어 장면과 20대 취준생 IT 장면은 배경·소품이 다르다.
@@ -119,32 +131,90 @@ function reservedZoneHint(zone: ReservedZone): string {
 // 힌트가 없는 값은 토큰을 그대로 둬 정보가 사라지지 않게 한다.
 const HINTS = vocabulary.prompt_hints as Record<string, Record<string, string> | undefined>
 
+// 힌트가 있으면 서술문, 없으면 undefined. extract.ts(B②)가 같은 사전·같은 폴백
+// 규칙을 쓸 수 있게 export 한다 — 두 파일이 vocabulary.json 을 각자 읽으면 폴백이
+// 갈라지고, 그러면 시트와 컷이 다른 지시를 받는다(이 PR 이 고친 문제와 같은 종류).
+//
+// hint() 와 나눠둔 이유: hint() 는 힌트가 없을 때 토큰을 그대로 돌려주므로
+// "힌트가 있었는지" 를 알 수 없다. 그 구분이 필요한 자리가 있다 — character_ratio 는
+// 힌트가 있으면 서술문만 쓰고, 없을 때만 `${토큰} body proportions` 로 폴백해야 한다.
+export function promptHint(category: string, value?: string): string | undefined {
+  if (!value) return undefined
+  return HINTS[category]?.[value]
+}
+
 function hint(category: string, value?: string): string | undefined {
   if (!value) return undefined
-  return HINTS[category]?.[value] ?? value
+  return promptHint(category, value) ?? value
 }
 
 // 대사는 텍스트 레이어로 나중에 얹는다(PRD 6절) — 프롬프트에 caption 텍스트를
 // 절대 포함하지 않는다. reserved_zone만 전달해 자리를 비워두게 한다.
 function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cut?: MinimalCut): string {
   const s = preset.style
-  // character_ratio 는 prompt_hints 에 아직 항목이 없다(spec/ 은 A① 소유).
-  // 추가되면 hint() 가 자동으로 집어가므로 이 코드는 그대로 두면 된다.
+  // character_ratio 만 라벨이 뒤에 붙는 형태였다 — `${값} body proportions`. 힌트
+  // 서술문은 그 자체로 완결된 구라서 뒤에 라벨을 또 붙이면 문장이 깨진다.
+  //
+  //   "… simplified hands and feet body proportions, low background detail"
+  //
+  // 그래서 힌트가 있으면 서술문만 쓰고, 없을 때만 토큰 + 라벨로 폴백한다. 다른
+  // 힌트(Framing·Camera·Lighting)는 라벨이 앞에 있어 이 문제가 없다 (PR #120 리뷰).
+  const ratio =
+    promptHint('character_ratio', s?.character_ratio) ??
+    `${s?.character_ratio ?? '2.5head'} body proportions`
   const styleStr = s
-    ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${hint('character_ratio', s.character_ratio) ?? '2.5head'} body proportions, ${s.background_density ?? 'low'} background detail`
+    ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${ratio}, ${s.background_density ?? 'low'} background detail`
     : 'default webtoon/comic style'
 
+  const castById = new Map(
+    (storyboard.cast ?? []).filter((m) => m.character_id).map((m) => [m.character_id!, m])
+  )
+
+  // 첨부하는 시트는 고정 마스코트(지도사) 한 명만 담는다 — 주인공·어르신 등은
+  // 시트가 없는 가변 인물이고, storyboard.schema.json 의 character_id 서술이
+  // "role=supporting 이 지도사를 가리킬 때만 character_sheet 와 연결된다" 고 정한다.
+  //
+  // 그래서 "시트 인물과 일치시켜라" 를 무조건 붙이면 안 된다. 샘플 4컷 중 지도사가
+  // 나오는 것은 한 컷뿐인데, 나머지 컷에서 그 문장이 붙으면 60대 어머니를 그려야
+  // 하는 자리에서 지도사 시트를 따라가라고 지시하는 셈이 된다.
+  //
+  // ponytail: role === 'supporting' 로 판정한다. 스키마에 "이 인물이 시트를 갖는다"
+  // 를 표현하는 필드가 없어서 서술 규약에 코드를 묶는 것이고, 조연이 둘이 되면
+  // 조용히 틀린다. A① 이 character_pool 에 그 자리를 만들면 그것으로 바꾼다 (#113).
+  //
+  // 판정이 안 되는 경우(cut 이 없어 프레임 인물을 모를 때)는 기존 문장을 쓴다 —
+  // 그때는 프롬프트에 인물 서술 자체가 없어서 끌려갈 대상이 없고, 반대로 지도사
+  // 컷에서 동일성 문장을 잃는 것이 P0 게이트에 더 해롭다.
+  const framed = cut?.characters_in_frame
+  const sheetPersonInFrame =
+    !framed || framed.some((c) => c.character_id && castById.get(c.character_id)?.role === 'supporting')
+
   const parts = [
-    `Single webtoon/comic panel, consistent with the attached character reference sheet.`,
+    sheetPersonInFrame
+      ? `Single webtoon/comic panel, consistent with the attached character reference sheet.`
+      : `Single webtoon/comic panel. Match the art style, line weight and coloring of the attached ` +
+        `reference sheet, but the person in this panel is a different character from the one drawn ` +
+        `on that sheet — follow the character description below for who they are.`,
     `Style: ${styleStr}.`,
+  ]
+
+  // extract.ts(B②)의 캐릭터 시트 프롬프트와 같은 문구를 쓴다. 시트와 컷이 문자
+  // 그대로 같은 지시를 받아야 스타일이 어긋나지 않는다.
+  //
+  // 값이 없으면 문장을 넣지 않는다. 시트 쪽은 비었을 때 "designer's choice" 를
+  // 넣는데, 컷에서는 그 채움말이 오히려 지시로 읽혀 시트에서 정해진 색을 흔든다.
+  if (preset.style?.palette?.length) parts.push(`Color palette: ${preset.style.palette.join(', ')}.`)
+  if (preset.style?.keywords?.length) parts.push(`Style keywords: ${preset.style.keywords.join(', ')}.`)
+
+  parts.push(
     // "Subject: 무릎 연골 나감." 처럼 명사구만 넣으면 모델이 소재를 표정으로만
     // 처리한다 — codex 검증에서 4/4 가 "걱정하는 얼굴" 이고 무릎은 어디에도 없었다.
     // 소재를 몸·행동·주변으로 보이게 하라고 지시한다. 다만 프레이밍과 싸우면
     // 안 된다(closeup 은 어깨 위라 무릎이 물리적으로 프레임 밖이다).
     `The story is about ${storyboard.subject ?? 'a person dealing with an everyday situation'}. ` +
       `Make that situation visible in the character's body, gesture and surroundings ` +
-      `as far as the framing allows — not just as a mood on the face.`,
-  ]
+      `as far as the framing allows — not just as a mood on the face.`
+  )
 
   // 사용자가 온보딩에서 고른 타깃·업종. 값이 없으면 문장을 아예 넣지 않는다 —
   // "general" 같은 채움말을 넣으면 모델이 그걸 지시로 읽는다.
@@ -154,13 +224,16 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   // 어머니다. 그냥 "audience in their 30s" 로 쓰면 모델이 인물 나이 지시로
   // 읽어 cast 서술과 충돌한다.
   //
-  // life_stage 값은 스네이크케이스 enum 이라 밑줄을 공백으로 바꿔 넣는다.
-  // prompt_hints 에 life_stage 항목이 없어 서술문이 없다(spec/ 은 A① 소유).
+  // life_stage 는 힌트가 있으면 그것을 쓰고, 없으면 밑줄만 공백으로 바꿔 넣는다.
+  // hint() 를 그냥 쓰면 힌트가 없을 때 스네이크케이스 토큰(job_seeker)이 그대로
+  // 나가므로, 폴백을 직접 지정한다 — 힌트가 추가되면 자동으로 집어간다 (#121).
   const ctx = preset.context
   const audience = [
     ctx?.industry?.length ? `${ctx.industry.join(' / ')} field` : undefined,
     ctx?.age_band?.length ? `readers in their ${ctx.age_band.join(', ')}` : undefined,
-    ctx?.life_stage?.length ? ctx.life_stage.map((v) => v.replace(/_/g, ' ')).join(', ') : undefined,
+    ctx?.life_stage?.length
+      ? ctx.life_stage.map((v) => HINTS.life_stage?.[v] ?? v.replace(/_/g, ' ')).join(', ')
+      : undefined,
   ].filter(Boolean)
   if (audience.length) {
     parts.push(
@@ -175,7 +248,13 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
     // 항목이 아직 없어(spec/ 은 A① 소유) 토큰이 그대로 들어가지만, enum 값이
     // 이미 영어 단어라(problem/before/turning/after…) 모델이 읽는다.
     const beat = hint('narrative_beat', cut.narrative_beat)
-    if (beat) parts.push(`This panel is the "${beat}" beat of the story.`)
+    // 라벨 형태로 둔다. 예전엔 `This panel is the "${beat}" beat of the story.` 였는데,
+    // 그러면 힌트가 그 영어 문장 안에 들어맞는 짧은 구여야 해서 spec/ 쪽 서술문 작성이
+    // 제 파일의 문장 모양에 묶인다. 다른 힌트(Framing/Camera/Lighting)는 전부 라벨 뒤에
+    // 서술문을 붙이는 형태이므로 여기도 맞춘다 (#121).
+    //
+    // 힌트가 없으면 hint() 가 토큰을 그대로 주고, `… : problem.` 으로도 읽힌다.
+    if (beat) parts.push(`This panel's role in the story: ${beat}.`)
 
     const shot = hint('shot_type', cut.shot_type)
     if (shot) parts.push(`Framing: ${shot}.`)
@@ -189,9 +268,6 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
     // 실측: 서술 없이 4회 생성했을 때 "60대 어머니"가 4/4 어린아이로 나왔고
     // 헤어스타일·복장·복장색·화면 내 크기가 전부 달라졌다. 서술을 넣은 뒤
     // 4/4 로 정확히 나왔다.
-    const castById = new Map(
-      (storyboard.cast ?? []).filter((m) => m.character_id).map((m) => [m.character_id!, m])
-    )
     for (const c of cut.characters_in_frame ?? []) {
       const desc = c.character_id ? castById.get(c.character_id)?.description : undefined
       const traits = [hint('expression', c.expression), hint('pose', c.pose)].filter(Boolean).join(', ')
@@ -201,6 +277,11 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
 
     if (cut.reserved_zone) parts.push(reservedZoneHint(cut.reserved_zone))
   }
+
+  // 금지 요소는 마지막 제약 구간에 넣는다. 사용자가 적은 자유 단어라(enum 아님)
+  // 장면 서술 사이에 끼우면 소재나 cast 서술과 다투기 쉽다.
+  const forbidden = preset.rules?.forbidden?.filter((w) => w.trim())
+  if (forbidden?.length) parts.push(`Do not include: ${forbidden.join(', ')}.`)
 
   parts.push('No speech bubbles. No text or lettering anywhere in the image — captions are composited separately afterward.')
 
@@ -348,6 +429,21 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   }
 }
 
+// #118: 부족분 재시도 on/off. 기본은 on 이다 — 정상 경로에서는 재시도가 아예
+// 일어나지 않아 평시 비용이 같고, PRD 6절의 표지 3안 고정값을 지키는 쪽이 안전하다.
+// 리허설을 반복할 때처럼 시간·비용을 아끼고 3안이 2안으로 줄어도 무방한 상황에서만 끈다.
+//
+// 호출 시점에 읽는다. 모듈 로드 시점에 캐시하면 값을 바꿔도 프로세스를 다시 띄울
+// 때까지 안 먹는데, 이 값은 상황에 따라 켜고 끄는 용도라 그게 함정이 된다.
+const RETRY_ENV = 'COVER_VARIANT_RETRY'
+
+function retryEnabled(): boolean {
+  const v = process.env[RETRY_ENV]?.trim().toLowerCase()
+  // 안 정했으면 on. 끄는 것만 명시적으로 받는다 — 오타('yes', 'ture')가 조용히
+  // off 로 떨어지면 시연에서 3안이 2안으로 줄어드는 쪽으로 실패한다.
+  return !(v === '0' || v === 'false' || v === 'off')
+}
+
 // #108: allSettled(#104)만으로는 부족하다 — 3개 중 하나가 실패하면 조용히 2개만
 // 돌아온다. provider.ts의 count: 3 리터럴과 PRD 6절("표지컷만 3안")은 고정값이라
 // 사용자에게 "왜 2안만 떴는지" 설명 없이 개수가 줄어드는 걸 허용하지 않는다.
@@ -380,9 +476,17 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   const prompt = buildCutPrompt(storyboard, preset, cut)
 
   const variants: GeneratedImageResult[] = []
-  // count(3)만큼 더 실패해도 재시도할 수 있게 여유를 둔다 — 무한 재시도로 인한
-  // 과금 폭주는 막으면서, 가끔 한두 개 실패하는 정도는 채울 수 있게 한다.
-  let attemptsLeft = input.count * 2
+  // 재시도를 켜면 count(3)만큼 더 실패해도 채울 수 있게 여유를 둔다 — 무한 재시도로
+  // 인한 과금 폭주는 막으면서, 가끔 한두 개 실패하는 정도는 채운다.
+  //
+  // 끄면 예산이 정확히 count 라서 배치가 한 번만 돌고 부족분은 그대로 반환된다
+  // (PR #97 시점 동작). 분기를 따로 두지 않고 예산 하나로 표현한다 — 두 경로를
+  // 만들면 한쪽만 고쳐지는 일이 생긴다.
+  const retry = retryEnabled()
+  let attemptsLeft = retry ? input.count * 2 : input.count
+  // 조기 종료 원인을 남긴다. 루프를 빠져나오는 길이 둘이라(예산 소진 / 배치 전멸)
+  // retry 불리언만으로는 아래 미달 로그의 원인 라벨이 갈리지 않는다.
+  let abortedOnDeadBatch = false
 
   while (variants.length < input.count && attemptsLeft > 0) {
     const needed = input.count - variants.length
@@ -414,6 +518,7 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
     // 환경은 살아 있는 것이므로 부족분을 계속 채운다.
     if (gained === 0) {
       console.error('[generate] 배치가 통째로 실패해 재시도를 중단합니다 — 환경 문제로 보입니다')
+      abortedOnDeadBatch = true
       break
     }
   }
@@ -426,8 +531,20 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   // 사용자가 아무것도 못 고르는 것보다는 낫다. 다만 PRD 고정값(3안)과 어긋나는
   // 상태이니 반드시 로그로 남겨 모니터링에서 보이게 한다.
   if (variants.length < input.count) {
+    // 원인을 로그에 박는다 (#118). 셋이 서로 다른 대응을 요구한다 — 꺼짐은 설정을
+    // 켜면 되고, 한도 소진은 실패율을 봐야 하고, 배치 전멸은 환경(업로드·스토리지)을
+    // 봐야 한다.
+    //
+    // 세 갈래로 나눈 이유: retry 불리언만 보고 찍었더니 배치 전멸로 조기 break 한
+    // 경우도 '한도 소진' 으로 나왔다. 예산이 남아 있는데도 그렇게 찍힌다 — 요약 줄만
+    // 세어 통계를 내면 원인이 왜곡된다. #113 이 이 스위치를 측정용으로 쓴다.
+    const why = !retry
+      ? `재시도 꺼짐(${RETRY_ENV}=off)`
+      : abortedOnDeadBatch
+        ? '배치 전멸로 중단'
+        : '재시도 한도 소진'
     console.error(
-      `[generate] 표지 ${input.count}안 중 ${variants.length}안만 확보(재시도 한도 소진) — PRD 고정값(#108) 미달`
+      `[generate] 표지 ${input.count}안 중 ${variants.length}안만 확보(${why}) — PRD 고정값(#108) 미달`
     )
   }
 

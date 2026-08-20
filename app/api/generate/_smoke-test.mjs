@@ -104,6 +104,37 @@ function checkCoverVariantsSettled() {
     /gained === 0[\s\S]{0,400}break/,
     "배치가 통째로 실패해도 재시도를 계속합니다 — 환경 문제에 생성비를 두 배로 씁니다 (#67)"
   );
+
+  // #118: 재시도 토글. 예산 하나로 표현해야 한다 — 분기를 따로 두면 한쪽만 고쳐진다.
+  assert.match(
+    fn,
+    /attemptsLeft\s*=\s*retry\s*\?\s*input\.count\s*\*\s*2\s*:\s*input\.count/,
+    "재시도 예산이 토글을 반영하지 않습니다 (#118)"
+  );
+  // 미달 원인이 세 갈래로 찍혀야 한다. retry 불리언만 보고 찍으면 배치 전멸로 조기
+  // break 한 경우도 "한도 소진" 으로 나온다 — 예산이 남아 있는데도 그렇게 찍히고,
+  // #113 이 요약 줄만 세어 통계를 내면 원인이 왜곡된다.
+  //
+  // 변수명이 아니라 라벨 문자열로 검사한다. 등가 리팩터로 변수명이 바뀌어도 라벨이
+  // 남아 있으면 동작은 같다.
+  for (const label of ['배치 전멸로 중단', '재시도 한도 소진', '재시도 꺼짐']) {
+    assert.ok(fn.includes(label), `미달 원인 라벨 "${label}" 이 없습니다 — 원인이 뭉쳐 찍힙니다 (#118)`);
+  }
+  assert.match(
+    fn,
+    /gained === 0[\s\S]{0,300}=\s*true/,
+    "배치 전멸로 중단할 때 원인을 기록하지 않습니다 — '한도 소진' 으로 잘못 찍힙니다 (#118)"
+  );
+
+  // 기본값은 on 이어야 한다. 오타('ture')가 조용히 off 로 떨어지면 시연에서
+  // 3안이 2안으로 줄어드는 쪽으로 실패한다 — 끄는 값만 명시적으로 받는다.
+  const toggle = src.slice(src.indexOf("function retryEnabled"));
+  assert.notEqual(src.indexOf("function retryEnabled"), -1, "retryEnabled를 찾지 못했습니다 (#118)");
+  assert.match(
+    toggle.slice(0, 400),
+    /return\s*!\(/,
+    "retryEnabled가 기본 on 이 아닙니다 — 끄는 값만 받아야 합니다 (#118)"
+  );
 }
 
 // 캐릭터 동일성(P0 게이트)의 방어선이 켜져 있는지 확인한다. reference 이미지가
@@ -139,6 +170,56 @@ function checkReferenceGuard() {
   );
 }
 
+// 캐릭터 시트(extract.ts, B②)와 컷 프롬프트가 같은 스타일 지시를 받아야 한다.
+// 시트만 palette·keywords 를 쓰고 컷은 안 쓰던 상태가 실제로 있었고, 그때 시트와
+// 컷의 스타일이 구조적으로 어긋났다. 사용자가 적은 forbidden 은 어느 쪽도 안 썼다.
+//
+// 이 검사는 "컷이 그 값들을 읽는가" 까지만 본다 — 문구가 시트와 같은지, 모델이
+// 실제로 따르는지는 육안 검증 영역이다.
+function checkStyleParity() {
+  const src = readFileSync(
+    new URL("../../../lib/openai/generate.ts", import.meta.url),
+    "utf8"
+  ).replace(/\/\/.*$/gm, "");
+
+  const at = src.indexOf("function buildCutPrompt");
+  assert.notEqual(at, -1, "generate.ts에서 buildCutPrompt를 찾지 못했습니다");
+  // buildCutPrompt 본문만 잘라낸다. 파일 전체를 보면 MinimalPreset의 타입 선언에
+  // 이름이 있는 것만으로 통과해, 값을 실제로 읽지 않아도 검사가 넘어간다.
+  const end = src.indexOf("function nextUngeneratedCut", at);
+  assert.notEqual(end, -1, "buildCutPrompt의 끝 경계를 찾지 못했습니다");
+  const fn = src.slice(at, end);
+
+  // #113: 시트는 고정 마스코트(지도사) 한 명만 담는다. "시트 인물과 일치시켜라" 를
+  // 무조건 붙이면 지도사가 없는 컷에서 주인공이 시트 쪽으로 끌려간다.
+  assert.match(
+    fn,
+    /role === 'supporting'/,
+    "프레임 안에 시트 인물이 있는지 판정하지 않습니다 — 지도사 없는 컷에서 주인공이 시트로 끌려갑니다 (#113)"
+  );
+  // 분기의 존재를 정규식으로 잡으려 했더니 미탐이 났다 — `sheetPersonInFrame` 선언문
+  // 안의 `?.`(옵셔널 체이닝)에 걸려서 삼항 분기를 지워도 통과했다. 그래서 분기 모양이
+  // 아니라 "지도사가 없을 때 나가는 문구" 자체가 있는지 본다. 그 문구가 없으면 조건
+  // 분기가 사라진 것이다.
+  assert.match(
+    fn,
+    /different character from the one drawn/,
+    "지도사가 프레임에 없을 때의 문구가 없습니다 — 시트 동일성 문장이 항상 붙습니다 (#113)"
+  );
+
+  for (const [field, why] of [
+    // #121 이 힌트를 추가하면 갈라지는 유일한 필드다 — 컷은 hint() 로 서술문을
+    // 집어가는데 extract.ts 는 raw 토큰을 쓴다. 기준물(시트)이 5~6두신으로
+    // 그려지고 컷만 2두신 지시를 받으면 #113 게이트 1 판정을 오독한다 (PR #120 리뷰).
+    ["character_ratio", "캐릭터 비율을 컷 프롬프트가 읽지 않습니다 — 시트와 비율이 어긋납니다"],
+    ["palette", "색상 팔레트를 컷 프롬프트가 읽지 않습니다 — 시트와 색이 어긋납니다"],
+    ["keywords", "사용자가 입력한 그림체 키워드를 컷 프롬프트가 읽지 않습니다"],
+    ["forbidden", "사용자가 적은 금지 요소를 컷 프롬프트가 읽지 않습니다"],
+  ]) {
+    assert.ok(fn.includes(field), why);
+  }
+}
+
 let failed = 0;
 
 try {
@@ -160,6 +241,14 @@ try {
 try {
   checkReferenceGuard();
   console.log("ok   [정적] reference 0장이면 유료 호출 전에 차단");
+} catch (err) {
+  failed++;
+  console.error(`FAIL [정적] ${err.message}`);
+}
+
+try {
+  checkStyleParity();
+  console.log("ok   [정적] 컷 프롬프트가 palette·keywords·forbidden을 읽음");
 } catch (err) {
   failed++;
   console.error(`FAIL [정적] ${err.message}`);
@@ -239,7 +328,7 @@ for (const [name, init, status, check] of cases) {
   }
 }
 
-const total = cases.length + 3; // + 정적 검사 3건
+const total = cases.length + 4; // + 정적 검사 4건
 if (failed > 0) {
   console.error(`\n${failed}건 실패`);
   process.exit(1);
