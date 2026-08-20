@@ -30,6 +30,48 @@ function clone(storyboard: Storyboard): Storyboard {
   return JSON.parse(JSON.stringify(storyboard));
 }
 
+// generated_image는 issue #82 이후 asset:// 참조를 저장한다(storyboard.schema.json
+// 패턴 ^asset://) — 브라우저에 그리려면 /session/asset-url로 공개 URL을 리졸브해야
+// 한다. #82 이전 mock 시절 세션은 data: URI를 그대로 저장해뒀을 수 있어 그 값은
+// 리졸브 없이 그대로 쓴다(레거시 호환).
+async function resolveImageUrl(uri: string): Promise<string> {
+  if (!uri.startsWith("asset://")) return uri;
+  const res = await fetch(`/session/asset-url?uri=${encodeURIComponent(uri)}`);
+  if (!res.ok) throw new Error("이미지 URL을 가져오지 못했습니다");
+  const { url } = (await res.json()) as { url: string };
+  return url;
+}
+
+async function resolveImages(storyboard: Storyboard): Promise<Record<number, string>> {
+  const entries = await Promise.all(
+    storyboard.cuts.map(async (cut) => {
+      if (!cut.generated_image) return null;
+      try {
+        return [cut.cut_index, await resolveImageUrl(cut.generated_image)] as const;
+      } catch {
+        return null;
+      }
+    })
+  );
+  return Object.fromEntries(entries.filter((e): e is NonNullable<typeof e> => e !== null));
+}
+
+// GET /api/session/export의 Content-Disposition에서 파일명을 뽑는다. filename*
+// (RFC 5987, 한글 subject)을 우선 쓰고 없으면 ASCII fallback으로.
+function parseExportFilename(contentDisposition: string | null): string {
+  if (!contentDisposition) return "cuttoon.zip";
+  const starMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (starMatch) {
+    try {
+      return decodeURIComponent(starMatch[1]);
+    } catch {
+      // fall through to plain filename
+    }
+  }
+  const plainMatch = contentDisposition.match(/filename="([^"]+)"/i);
+  return plainMatch ? plainMatch[1] : "cuttoon.zip";
+}
+
 type Phase = "loading" | "not_found" | "load_error" | "ready";
 
 interface SavedState {
@@ -41,11 +83,14 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [saved, setSaved] = useState<SavedState | null>(null);
   const [draft, setDraft] = useState<Storyboard | null>(null);
+  const [imageUrls, setImageUrls] = useState<Record<number, string>>({});
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [draftCaption, setDraftCaption] = useState("");
   const [saving, setSaving] = useState(false);
   const [reverting, setReverting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
   useEffect(() => {
@@ -71,6 +116,9 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         setSaved({ version: data.version, storyboard: data.storyboard });
         setDraft(clone(data.storyboard));
         setPhase("ready");
+
+        const urls = await resolveImages(data.storyboard);
+        if (!cancelled) setImageUrls(urls);
       } catch {
         if (!cancelled) setPhase("load_error");
       }
@@ -194,10 +242,52 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
       setSaved({ version: data.version, storyboard: data.storyboard });
       setDraft(clone(data.storyboard));
       setEditingIndex(null);
+      setImageUrls(await resolveImages(data.storyboard));
     } catch {
       setActionError("되돌리기에 실패했어요. 다시 시도해주세요");
     } finally {
       setReverting(false);
+    }
+  }
+
+  async function handleExport() {
+    setActionError(null);
+    setExportNotice(null);
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/session/export?id=${encodeURIComponent(sessionId)}`);
+
+      if (res.status === 409) {
+        const body = await res.json().catch(() => null);
+        setActionError(body?.error ?? "내보낼 이미지가 없어요");
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setActionError(body?.error ?? "내보내기에 실패했어요. 다시 시도해주세요");
+        return;
+      }
+
+      const skipped = res.headers.get("X-Export-Skipped")?.split(",").filter(Boolean) ?? [];
+      const filename = parseExportFilename(res.headers.get("Content-Disposition"));
+      const blob = await res.blob();
+
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+
+      if (skipped.length > 0) {
+        setExportNotice(`${skipped.join(", ")}번 컷은 이미지가 없어 제외했어요`);
+      }
+    } catch {
+      setActionError("내보내기에 실패했어요. 다시 시도해주세요");
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -215,6 +305,11 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
           {actionError}
         </p>
       )}
+      {exportNotice && (
+        <p className="w-full max-w-md rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-700">
+          {exportNotice}
+        </p>
+      )}
 
       <div className="grid w-full max-w-4xl grid-cols-1 gap-4 sm:grid-cols-2">
         {draft.cuts.map((cut, i) => (
@@ -230,12 +325,16 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
                 updatePosition(i, snapPosition(relX, relY));
               }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element -- mock placeholder, next/image 불필요 */}
-              <img
-                src={cut.generated_image ?? ""}
-                alt={`컷 ${cut.cut_index}`}
-                className="h-full w-full object-cover"
-              />
+              {imageUrls[cut.cut_index] ? (
+                // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
+                <img
+                  src={imageUrls[cut.cut_index]}
+                  alt={`컷 ${cut.cut_index}`}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="h-full w-full animate-pulse bg-zinc-200" />
+              )}
               <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
                 {cut.cut_index}컷 · {cut.narrative_beat}
               </span>
@@ -301,6 +400,14 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
           className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-40"
         >
           {saving ? "저장 중…" : "저장"}
+        </button>
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={exporting}
+          className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
+        >
+          {exporting ? "내보내는 중…" : "내보내기"}
         </button>
         {!isDirty && savedAt && (
           <span className="text-xs text-zinc-400">{savedAt}에 저장됨</span>
