@@ -216,7 +216,14 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
     // 안 된다(closeup 은 어깨 위라 무릎이 물리적으로 프레임 밖이다).
     `The story is about ${storyboard.subject ?? 'a person dealing with an everyday situation'}. ` +
       `Make that situation visible in the character's body, gesture and surroundings ` +
-      `as far as the framing allows — not just as a mood on the face.`
+      `as far as the framing allows — not just as a mood on the face. ` +
+      // 소재가 옷 아래 신체 부위일 때(무릎·허리·어깨 등) 모델이 그 부위를 드러내려고
+      // 옷을 뚫는다 — codex 검증에서 바지 무릎 자리에 살색 구멍이 4/4 로 생겼고, 한 장은
+      // 찢어진 것처럼 보였다. 의학 일러스트의 습관에 가깝고 인스타툰 결과물로는 못 쓴다.
+      // 자세·손짓·효과선으로 전달하도록 못박는다.
+      `Convey it through posture, gesture and the surrounding scene only. ` +
+      `Clothing stays whole and opaque — never cut, tear, remove or see through it, ` +
+      `and never draw exposed skin or internal anatomy to point at the affected part.`
   )
 
   // 사용자가 온보딩에서 고른 타깃·업종. 값이 없으면 문장을 아예 넣지 않는다 —
