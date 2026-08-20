@@ -58,13 +58,24 @@ async function callGenerateCut(input: {
   return toGeneratedCut(result);
 }
 
+export interface CoverVariantsResult {
+  variants: GeneratedCut[];
+  /**
+   * 요청한 안 개수(항상 3, #50). generateCoverVariants가 allSettled라 일부
+   * 안이 후처리에서 실패하면 variants.length가 이보다 작을 수 있다(#108) —
+   * 화면이 variants.length < requested로 부족분을 판단한다(issue #117).
+   * 구버전 서버 호환으로 응답에 없을 수 있어 optional이다.
+   */
+  requested?: number;
+}
+
 // 표지 3안 — 독립 호출(PRD 6절: 체이닝하면 2안이 1안에 끌려가 서로 닮아버림).
 // storyboard는 cuts[0].generated_image가 아직 null인 상태로 넘겨야 한다.
 // count=3은 서버 계약이 리터럴로 고정하므로 여기서 따로 받지 않는다.
 export async function generateCoverVariants(
   storyboard: Storyboard,
   preset: Preset
-): Promise<GeneratedCut[]> {
+): Promise<CoverVariantsResult> {
   const referenceAssets = referenceAssetsOf(preset);
   const res = await fetch("/api/generate", {
     method: "POST",
@@ -75,10 +86,32 @@ export async function generateCoverVariants(
     const body = await res.json().catch(() => null);
     throw new Error(body?.error ?? "표지 생성에 실패했습니다");
   }
-  const { result } = (await res.json()) as {
+  const { result, requested } = (await res.json()) as {
     result: Array<{ asset: string; continuationToken?: string }>;
+    requested?: number;
   };
-  return Promise.all(result.map(toGeneratedCut));
+
+  // Promise.all이면 3안 중 URL 리졸브 하나만 실패해도 즉시 reject되어 이미
+  // 유료로 생성된 나머지 성공분까지 통째로 버려진다(PR #124 리뷰 지적) —
+  // 서버가 generateCoverVariants에서 allSettled로 성공분을 지키는 것(#104)과
+  // 같은 이유로, 여기서도 리졸브 실패 하나가 나머지를 끌고 내려가지 않게 한다.
+  // 이러면 서버 쪽 부족(#108)과 클라이언트 쪽 리졸브 실패가 같은
+  // "variants.length < requested" 배너(#117)로 합쳐진다.
+  const settled = await Promise.allSettled(result.map(toGeneratedCut));
+  const variants = settled
+    .filter((r): r is PromiseFulfilledResult<GeneratedCut> => r.status === "fulfilled")
+    .map((r) => r.value);
+  settled
+    .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+    .forEach((r) => console.error("[generateCoverVariants] 이미지 URL 리졸브 실패:", r.reason));
+
+  // 0개면 서버와 같은 규약대로 던진다 — 골라야 할 것이 아무것도 없는 빈
+  // 선택 화면을 보여주지 않는다.
+  if (variants.length === 0) {
+    throw new Error("표지 생성에 실패했습니다");
+  }
+
+  return { variants, requested };
 }
 
 // 표지 선택 이후 나머지 3컷 — continuationToken(previous_response_id) 체이닝으로

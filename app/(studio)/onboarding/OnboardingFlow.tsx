@@ -10,6 +10,14 @@ type Step = "upload" | "analyzing" | "result" | "details" | "confirmed";
 const ALLOWED_TYPES = ["image/jpeg", "image/png"];
 const MAX_FILES = 5;
 
+// DetailsStep.tsx의 industry·forbidden 등과 같은 관례(쉼표 구분 자유 텍스트).
+function parseTags(text: string): string[] {
+  return text
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 function validateFiles(files: File[]): { valid: File[]; error: string | null } {
   if (files.length === 0) {
     return { valid: [], error: null };
@@ -28,6 +36,10 @@ export default function OnboardingFlow() {
   const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<StyleAnalysisResult | null>(null);
+  // issue #122: style.keywords는 레퍼런스 추출로는 채워지지 않는다 — 온보딩에서
+  // 직접 입력받는 게 스키마가 정의한 두 번째 입력 경로다. PRD 4절 딸깍 원칙의
+  // 예외로 자유 타이핑을 허용한다(chictimin 확인, #122).
+  const [keywordsText, setKeywordsText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [confirmedName, setConfirmedName] = useState<string | null>(null);
@@ -85,6 +97,8 @@ export default function OnboardingFlow() {
     // 캐릭터 시트는 style(분석 단계)과 context(이 폼)가 둘 다 있어야 만들 수
     // 있어서 여기서 생성한다 — 프로젝트 생성 시 1회(#19 결정: 세션마다 다시
     // 만들지 않음).
+    const styleWithKeywords = { ...analysis.style, keywords: parseTags(keywordsText) };
+
     let characterSheetAsset: string;
     try {
       const sheetRes = await fetch("/api/generate", {
@@ -93,7 +107,7 @@ export default function OnboardingFlow() {
         body: JSON.stringify({
           kind: "character_sheet",
           preset: {
-            style: analysis.style,
+            style: styleWithKeywords,
             context: {
               industry: details.industry,
               age_band: details.ageBand,
@@ -125,7 +139,7 @@ export default function OnboardingFlow() {
         style_refs: analysis.styleRefAssets,
         reference_asset_ids: [],
       },
-      style: analysis.style,
+      style: styleWithKeywords,
       rules: {
         forbidden: details.forbidden,
         cta_format: details.ctaId,
@@ -184,6 +198,8 @@ export default function OnboardingFlow() {
         <ResultStep
           analysis={analysis}
           previewUrl={previewUrl}
+          keywordsText={keywordsText}
+          onKeywordsTextChange={setKeywordsText}
           onRetry={handleRetry}
           onConfirm={handleConfirmStyle}
         />
@@ -294,11 +310,15 @@ const SATURATION_LABEL: Record<string, string> = {
 function ResultStep({
   analysis,
   previewUrl,
+  keywordsText,
+  onKeywordsTextChange,
   onRetry,
   onConfirm,
 }: {
   analysis: StyleAnalysisResult;
   previewUrl: string | null;
+  keywordsText: string;
+  onKeywordsTextChange: (text: string) => void;
   onRetry: () => void;
   onConfirm: () => void;
 }) {
@@ -345,6 +365,22 @@ function ResultStep({
           <span className="text-xs text-zinc-400">말풍선: {style.bubble_style}</span>
           <figcaption className="text-sm text-zinc-500">배경 톤</figcaption>
         </figure>
+      </div>
+
+      <div className="flex w-full max-w-xl flex-col gap-2 text-left">
+        <label htmlFor="style_keywords" className="text-sm font-medium text-zinc-700">
+          그림체 키워드 <span className="font-normal text-zinc-400">(쉼표로 구분, 건너뛰기 가능)</span>
+        </label>
+        <input
+          id="style_keywords"
+          value={keywordsText}
+          onChange={(e) => onKeywordsTextChange(e.target.value)}
+          placeholder="예: 수채화, 따뜻한, 손그림"
+          className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
+        />
+        <p className="text-xs text-zinc-400">
+          레퍼런스에서 못 뽑아낸 그림체 느낌을 직접 적어주세요. 위 분석 결과에 더해져요
+        </p>
       </div>
 
       <div className="flex gap-3">
