@@ -13,9 +13,8 @@ export interface BrainstormTurn {
   options: string[];
 }
 
-// draft storyboard의 필드만 필요하므로 간단하게 정의.
-// route가 본문에서 이 값을 읽어 넘겨야 턴 건너뛰기가 실제로 동작하므로 export한다.
-export interface DraftStoryboard {
+// draft storyboard의 필드만 필요하므로 간단하게 정의
+interface DraftStoryboard {
   cast: Array<{ role: "protagonist" | "supporting" }>;
   cuts: Array<{ narrative_beat?: string }>;
 }
