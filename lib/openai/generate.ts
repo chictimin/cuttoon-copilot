@@ -9,6 +9,7 @@
 // 받지 않는다 — 텍스트 모델(예: gpt-5)을 지정하면 도구가 내부적으로 이미지 생성을
 // 위임한다(OpenAI 공식 문서, 2026-08 확인). 정확한 모델 id는 실제 호출로 검증했다.
 import OpenAI from 'openai'
+import sharp from 'sharp'
 import vocabulary from '@/spec/vocabulary.json'
 import type { ImageProvider, GeneratedImageResult, ReservedZone } from './provider'
 import { readAsset, uploadAsset } from '../asset-store'
@@ -16,17 +17,30 @@ import { readAsset, uploadAsset } from '../asset-store'
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 const RESPONSES_MODEL = 'gpt-5'
-const IMAGE_SIZE = '1024x1024'
 
-// 출력 해상도는 1024x1024 고정. 컷툰은 1:1 비율이고, 같은 프롬프트가 호출마다
-// 다른 크기를 내는 것을 실측으로 확인했으므로(1536x1024 / 1199x1312) 크기를
-// 모델 기본값에 맡기지 않는다. 계약 ④가 요구하는 width/height 메타의 값이다.
+// 출력 해상도는 1024x1024 고정.
 //
-// 1024 인 이유: gpt-image-1 계열은 1024x1024 / 1024x1536 / 1536x1024 세 가지만
-// 받고, gpt-image-2 계열은 양변이 16의 배수여야 한다. 1024 는 양쪽 모두에서
-// 유효한 유일한 정사각형 값이다(1080 은 16의 배수가 아니라 어느 쪽에서도 거부).
-// 인스타그램은 320~1080px 를 원본 그대로 유지하므로 1024 도 손실이 없다.
+// 왜 정사각형인가 — 산출물이 인스타그램 게시물용 컷툰(인스타툰)이다. 정사각형은
+// 인스타그램이 완전히 지원하는 비율 범위(1.91:1 ~ 4:5) 안에 있어 잘리지 않고,
+// 4컷을 같은 틀로 이어 붙일 수 있다. PRD 2절이 4컷 고정을 협상 불가로 둔 것과
+// 같은 이유로 비율도 흔들지 않는다.
+//
+// 왜 1024 인가 — 인스타그램 쪽만 보면 1080 이 더 커 보이지만, 1080 은 강제 규격이
+// 아니라 "다운사이즈 없이 유지되는 최대 너비" 이고 320~1080px 는 원본이 그대로
+// 보존된다. 따라서 1024 도 인스타그램 기준으로 무손실이다. 반대로 모델 쪽 제약은
+// 1080 을 허용하지 않는다 — gpt-image-1 계열은 1024x1024 / 1024x1536 / 1536x1024
+// 세 가지만 받고, gpt-image-2 계열은 양변이 16의 배수여야 한다(1080 / 16 = 67.5).
+// 즉 1024 는 인스타툰 요구를 만족하면서 두 모델 후보 모두에서 유효한 유일한
+// 정사각형 값이다. 처음 1080 으로 올렸다가 이 근거로 정정했다(PR #63).
+//
+// 왜 상수로 고정하는가 — 같은 프롬프트가 호출마다 다른 크기를 내는 것을 실측으로
+// 확인했다(1536x1024 / 1199x1312). 크기를 모델 기본값에 맡기지 않는다.
+// 계약 ④가 요구하는 width/height 메타의 값이기도 하다.
 export const OUTPUT_SIZE = { width: 1024, height: 1024 } as const
+
+// 요청에 실어보내는 size 문자열. OUTPUT_SIZE 에서 파생시켜 숫자를 두 곳에 적지
+// 않는다 — extract.ts(B②)도 PR #95 에서 같은 방식으로 하드코딩을 없앴다.
+const IMAGE_SIZE = `${OUTPUT_SIZE.width}x${OUTPUT_SIZE.height}` as const
 
 // storyboard/preset은 계약상 unknown이다(PRD 5절 — 정식 Storyboard/Preset 타입은
 // 스키마 파생 전까지 화면마다 임시 타입을 따로 두지 않기로 함). 프롬프트 조립에
@@ -62,6 +76,19 @@ interface MinimalPreset {
     saturation?: string
     character_ratio?: string
     background_density?: string
+  }
+  // 온보딩에서 사용자가 직접 고른 값이다(골든 패스 2·3단계). 장면 연출에 쓴다 —
+  // 50대 부모가 등장하는 헬스케어 장면과 20대 취준생 IT 장면은 배경·소품이 다르다.
+  //
+  // main_subjects 와 interests 는 일부러 읽지 않는다.
+  // - main_subjects: preset.schema.json 주석이 "컷툰 한 편의 실제 소재는 여기가
+  //   아니라 세션에서 받는다" 고 못박았고, 이미 storyboard.subject 를 쓰고 있다.
+  //   둘을 같이 넣으면 소재가 두 겹이 돼 장면이 흐려진다.
+  // - interests: 마케팅 목적 축이라 컷 연출보다 CTA 쪽 값이다.
+  context?: {
+    industry?: string[]
+    age_band?: string[]
+    life_stage?: string[]
   }
 }
 
@@ -106,6 +133,29 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
     `Style: ${styleStr}.`,
     `Subject: ${storyboard.subject ?? 'a person dealing with an everyday situation'}.`,
   ]
+
+  // 사용자가 온보딩에서 고른 타깃·업종. 값이 없으면 문장을 아예 넣지 않는다 —
+  // "general" 같은 채움말을 넣으면 모델이 그걸 지시로 읽는다.
+  //
+  // "who this is for" 로 못박는 이유: 타깃과 등장 인물이 다를 수 있다. KRIEE
+  // 샘플이 그 경우다 — 타깃은 30~40대 지도사인데 컷에 나오는 인물은 60대
+  // 어머니다. 그냥 "audience in their 30s" 로 쓰면 모델이 인물 나이 지시로
+  // 읽어 cast 서술과 충돌한다.
+  //
+  // life_stage 값은 스네이크케이스 enum 이라 밑줄을 공백으로 바꿔 넣는다.
+  // prompt_hints 에 life_stage 항목이 없어 서술문이 없다(spec/ 은 A① 소유).
+  const ctx = preset.context
+  const audience = [
+    ctx?.industry?.length ? `${ctx.industry.join(' / ')} field` : undefined,
+    ctx?.age_band?.length ? `readers in their ${ctx.age_band.join(', ')}` : undefined,
+    ctx?.life_stage?.length ? ctx.life_stage.map((v) => v.replace(/_/g, ' ')).join(', ') : undefined,
+  ].filter(Boolean)
+  if (audience.length) {
+    parts.push(
+      `Who this comic is made for (not who appears in the panel): ${audience.join('; ')}. ` +
+        `Choose setting, props and tone that resonate with those readers.`
+    )
+  }
 
   if (cut) {
     const shot = hint('shot_type', cut.shot_type)
@@ -192,6 +242,26 @@ async function callImageGeneration(
   return { base64: imageCall.result, responseId: (response as { id: string }).id }
 }
 
+// 모델이 요청한 size 와 다른 크기를 낼 때가 있다 — 같은 프롬프트가 1536x1024 /
+// 1199x1312 를 낸 실측이 위 OUTPUT_SIZE 주석의 근거다. 리사이즈로 강제해 계약 ④의
+// width/height 가 실제 픽셀과 어긋나지 않게 한다. fit: 'cover' 는 비율이 다르게
+// 나왔을 때 늘리지 않고 잘라낸다 — 1:1 을 지키면서 왜곡을 피하는 쪽.
+//
+// extract.ts(B②)에 같은 헬퍼가 있지만 거기서 가져오면 순환 import 가 된다
+// (extract.ts 가 이미 이 파일의 OUTPUT_SIZE 를 가져다 쓴다). 나중에 공용 위치로
+// 옮길 수 있으면 한쪽으로 합치는 편이 낫다.
+//
+// ponytail: crop position 은 기본값(centre)이다. 비정사각형 출력에서 중앙 크롭이
+// reserved_zone 과 같은 축에 걸리면 말풍선 여백이 깎인다 — compose.ts(B③)가
+// reserved_zone 을 아직 읽지 않아 지금은 비활성이고, 읽기 시작할 때 position 을
+// zone 반대쪽으로 지정해야 한다. #105 에서 추적한다.
+async function resizeToOutput(base64: string): Promise<Buffer> {
+  return sharp(Buffer.from(base64, 'base64'))
+    .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: 'cover' })
+    .png()
+    .toBuffer()
+}
+
 export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const storyboard = (input.storyboard ?? {}) as MinimalStoryboard
   const preset = (input.preset ?? {}) as MinimalPreset
@@ -200,7 +270,7 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const prompt = buildCutPrompt(storyboard, preset, cut)
   const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, input.continueFrom)
 
-  const buffer = Buffer.from(base64, 'base64')
+  const buffer = await resizeToOutput(base64)
   const { assetUri } = await uploadAsset(buffer, 'image/png', 'cut.png')
 
   return {
@@ -219,10 +289,13 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   const cut = storyboard.cuts?.[0]
   const prompt = buildCutPrompt(storyboard, preset, cut)
 
-  const variants = await Promise.all(
+  // allSettled 인 이유: 3안은 각각 별도 유료 호출이다. Promise.all 이면 한 안이
+  // 후처리(sharp·업로드)에서 실패할 때 이미 성공한 나머지 안까지 같이 버려져
+  // 성공분 생성비가 그대로 날아간다 (#104). 성공한 것만 살려서 돌려준다.
+  const settled = await Promise.allSettled(
     Array.from({ length: input.count }, async (): Promise<GeneratedImageResult> => {
       const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets)
-      const buffer = Buffer.from(base64, 'base64')
+      const buffer = await resizeToOutput(base64)
       const { assetUri } = await uploadAsset(buffer, 'image/png', 'cover.png')
       return {
         asset: assetUri,
@@ -232,6 +305,18 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
       }
     })
   )
+
+  const variants = settled
+    .filter((r): r is PromiseFulfilledResult<GeneratedImageResult> => r.status === 'fulfilled')
+    .map((r) => r.value)
+
+  for (const r of settled) {
+    if (r.status === 'rejected') console.error('[generate] 표지 안 하나 실패', r.reason)
+  }
+
+  // 전부 실패면 던진다 — 빈 배열을 돌려주면 호출부가 "생성됐는데 0안"으로 읽어
+  // 조용히 빈 선택 화면을 띄운다. route.ts 가 500 으로 바꾼다.
+  if (variants.length === 0) throw new Error('표지 3안 생성이 모두 실패했습니다')
 
   return variants
 }
