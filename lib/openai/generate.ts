@@ -76,6 +76,18 @@ interface MinimalPreset {
     saturation?: string
     character_ratio?: string
     background_density?: string
+    // palette·keywords 는 enum 이 아니라 사용자·추출 결과의 자유 값이다.
+    // extract.ts(B②)가 캐릭터 시트를 만들 때 이 둘을 쓰는데 컷 프롬프트가 안
+    // 쓰고 있었다 — 시트와 컷이 서로 다른 스타일 지시를 받는 상태였다.
+    palette?: string[]
+    keywords?: string[]
+    // bubble_style 은 읽지 않는다. 말풍선은 생성 이미지에 넣지 않고 나중에
+    // 합성하므로(PRD 6절) B③ 쪽 값이다.
+  }
+  // 사용자가 온보딩에서 적은 금지 요소. 지금까지 아무 데서도 쓰이지 않아 통째로
+  // 버려지고 있었다. 프롬프트 조립은 B① 몫이라(PRD 5절) 여기서 넣는다.
+  rules?: {
+    forbidden?: string[]
   }
   // 온보딩에서 사용자가 직접 고른 값이다(골든 패스 2·3단계). 장면 연출에 쓴다 —
   // 50대 부모가 등장하는 헬스케어 장면과 20대 취준생 IT 장면은 배경·소품이 다르다.
@@ -137,14 +149,25 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   const parts = [
     `Single webtoon/comic panel, consistent with the attached character reference sheet.`,
     `Style: ${styleStr}.`,
+  ]
+
+  // extract.ts(B②)의 캐릭터 시트 프롬프트와 같은 문구를 쓴다. 시트와 컷이 문자
+  // 그대로 같은 지시를 받아야 스타일이 어긋나지 않는다.
+  //
+  // 값이 없으면 문장을 넣지 않는다. 시트 쪽은 비었을 때 "designer's choice" 를
+  // 넣는데, 컷에서는 그 채움말이 오히려 지시로 읽혀 시트에서 정해진 색을 흔든다.
+  if (preset.style?.palette?.length) parts.push(`Color palette: ${preset.style.palette.join(', ')}.`)
+  if (preset.style?.keywords?.length) parts.push(`Style keywords: ${preset.style.keywords.join(', ')}.`)
+
+  parts.push(
     // "Subject: 무릎 연골 나감." 처럼 명사구만 넣으면 모델이 소재를 표정으로만
     // 처리한다 — codex 검증에서 4/4 가 "걱정하는 얼굴" 이고 무릎은 어디에도 없었다.
     // 소재를 몸·행동·주변으로 보이게 하라고 지시한다. 다만 프레이밍과 싸우면
     // 안 된다(closeup 은 어깨 위라 무릎이 물리적으로 프레임 밖이다).
     `The story is about ${storyboard.subject ?? 'a person dealing with an everyday situation'}. ` +
       `Make that situation visible in the character's body, gesture and surroundings ` +
-      `as far as the framing allows — not just as a mood on the face.`,
-  ]
+      `as far as the framing allows — not just as a mood on the face.`
+  )
 
   // 사용자가 온보딩에서 고른 타깃·업종. 값이 없으면 문장을 아예 넣지 않는다 —
   // "general" 같은 채움말을 넣으면 모델이 그걸 지시로 읽는다.
@@ -201,6 +224,11 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
 
     if (cut.reserved_zone) parts.push(reservedZoneHint(cut.reserved_zone))
   }
+
+  // 금지 요소는 마지막 제약 구간에 넣는다. 사용자가 적은 자유 단어라(enum 아님)
+  // 장면 서술 사이에 끼우면 소재나 cast 서술과 다투기 쉽다.
+  const forbidden = preset.rules?.forbidden?.filter((w) => w.trim())
+  if (forbidden?.length) parts.push(`Do not include: ${forbidden.join(', ')}.`)
 
   parts.push('No speech bubbles. No text or lettering anywhere in the image — captions are composited separately afterward.')
 

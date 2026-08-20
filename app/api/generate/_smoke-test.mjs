@@ -155,6 +155,35 @@ function checkReferenceGuard() {
   );
 }
 
+// 캐릭터 시트(extract.ts, B②)와 컷 프롬프트가 같은 스타일 지시를 받아야 한다.
+// 시트만 palette·keywords 를 쓰고 컷은 안 쓰던 상태가 실제로 있었고, 그때 시트와
+// 컷의 스타일이 구조적으로 어긋났다. 사용자가 적은 forbidden 은 어느 쪽도 안 썼다.
+//
+// 이 검사는 "컷이 그 값들을 읽는가" 까지만 본다 — 문구가 시트와 같은지, 모델이
+// 실제로 따르는지는 육안 검증 영역이다.
+function checkStyleParity() {
+  const src = readFileSync(
+    new URL("../../../lib/openai/generate.ts", import.meta.url),
+    "utf8"
+  ).replace(/\/\/.*$/gm, "");
+
+  const at = src.indexOf("function buildCutPrompt");
+  assert.notEqual(at, -1, "generate.ts에서 buildCutPrompt를 찾지 못했습니다");
+  // buildCutPrompt 본문만 잘라낸다. 파일 전체를 보면 MinimalPreset의 타입 선언에
+  // 이름이 있는 것만으로 통과해, 값을 실제로 읽지 않아도 검사가 넘어간다.
+  const end = src.indexOf("function nextUngeneratedCut", at);
+  assert.notEqual(end, -1, "buildCutPrompt의 끝 경계를 찾지 못했습니다");
+  const fn = src.slice(at, end);
+
+  for (const [field, why] of [
+    ["palette", "색상 팔레트를 컷 프롬프트가 읽지 않습니다 — 시트와 색이 어긋납니다"],
+    ["keywords", "사용자가 입력한 그림체 키워드를 컷 프롬프트가 읽지 않습니다"],
+    ["forbidden", "사용자가 적은 금지 요소를 컷 프롬프트가 읽지 않습니다"],
+  ]) {
+    assert.ok(fn.includes(field), why);
+  }
+}
+
 let failed = 0;
 
 try {
@@ -176,6 +205,14 @@ try {
 try {
   checkReferenceGuard();
   console.log("ok   [정적] reference 0장이면 유료 호출 전에 차단");
+} catch (err) {
+  failed++;
+  console.error(`FAIL [정적] ${err.message}`);
+}
+
+try {
+  checkStyleParity();
+  console.log("ok   [정적] 컷 프롬프트가 palette·keywords·forbidden을 읽음");
 } catch (err) {
   failed++;
   console.error(`FAIL [정적] ${err.message}`);
@@ -255,7 +292,7 @@ for (const [name, init, status, check] of cases) {
   }
 }
 
-const total = cases.length + 3; // + 정적 검사 3건
+const total = cases.length + 4; // + 정적 검사 4건
 if (failed > 0) {
   console.error(`\n${failed}건 실패`);
   process.exit(1);
