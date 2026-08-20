@@ -304,28 +304,6 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   }
 }
 
-// #108: allSettled(#104)만으로는 부족하다 — 3개 중 하나가 실패하면 조용히 2개만
-// 돌아온다. provider.ts의 count: 3 리터럴과 PRD 6절("표지컷만 3안")은 고정값이라
-// 사용자에게 "왜 2안만 떴는지" 설명 없이 개수가 줄어드는 걸 허용하지 않는다.
-// 부족분만 다시 시도해서 채운다 — 유료 호출은 실패한 만큼만 추가된다.
-async function generateOneVariant(
-  prompt: string,
-  referenceAssets: unknown[],
-  reservedZone?: ReservedZone
-): Promise<GeneratedImageResult> {
-  const { base64, responseId } = await callImageGeneration(prompt, referenceAssets)
-  const { buffer, width, height } = await resizeToOutput(base64)
-  const { assetUri } = await uploadAsset(buffer, 'image/png', 'cover.png')
-  return {
-    asset: assetUri,
-    width,
-    height,
-    reserved_zone: reservedZone,
-    continuationToken: responseId,
-    prompt,
-  }
-}
-
 // 표지 3안. 독립 호출이므로 체이닝 토큰을 받지 않는다(PRD 6절) — 세션에 누적하면
 // 2안이 1안에 끌려가 서로 비슷해지기 때문. 3개를 병렬로 호출한다.
 export const generateCoverVariants: ImageProvider['generateCoverVariants'] = async (input) => {
@@ -334,41 +312,36 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   const cut = storyboard.cuts?.[0]
   const prompt = buildCutPrompt(storyboard, preset, cut)
 
-  const variants: GeneratedImageResult[] = []
-  // count(3)만큼 더 실패해도 재시도할 수 있게 여유를 둔다 — 무한 재시도로 인한
-  // 과금 폭주는 막으면서, 가끔 한두 개 실패하는 정도는 채울 수 있게 한다.
-  let attemptsLeft = input.count * 2
+  // allSettled 인 이유: 3안은 각각 별도 유료 호출이다. Promise.all 이면 한 안이
+  // 후처리(sharp·업로드)에서 실패할 때 이미 성공한 나머지 안까지 같이 버려져
+  // 성공분 생성비가 그대로 날아간다 (#104). 성공한 것만 살려서 돌려준다.
+  const settled = await Promise.allSettled(
+    Array.from({ length: input.count }, async (): Promise<GeneratedImageResult> => {
+      const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets)
+      const { buffer, width, height } = await resizeToOutput(base64)
+      const { assetUri } = await uploadAsset(buffer, 'image/png', 'cover.png')
+      return {
+        asset: assetUri,
+        width,
+        height,
+        reserved_zone: cut?.reserved_zone,
+        continuationToken: responseId,
+        prompt,
+      }
+    })
+  )
 
-  while (variants.length < input.count && attemptsLeft > 0) {
-    const needed = input.count - variants.length
-    const batch = Math.min(needed, attemptsLeft)
-    attemptsLeft -= batch
+  const variants = settled
+    .filter((r): r is PromiseFulfilledResult<GeneratedImageResult> => r.status === 'fulfilled')
+    .map((r) => r.value)
 
-    // allSettled 인 이유: 각 안이 별도 유료 호출이다. Promise.all 이면 한 안이
-    // 후처리(sharp·업로드)에서 실패할 때 이미 성공한 나머지 안까지 같이 버려져
-    // 성공분 생성비가 그대로 날아간다 (#104). 성공한 것만 살려서 이어붙인다.
-    const settled = await Promise.allSettled(
-      Array.from({ length: batch }, () => generateOneVariant(prompt, input.referenceAssets, cut?.reserved_zone))
-    )
-
-    for (const r of settled) {
-      if (r.status === 'fulfilled') variants.push(r.value)
-      else console.error('[generate] 표지 안 하나 실패, 부족분 재시도 예정', r.reason)
-    }
+  for (const r of settled) {
+    if (r.status === 'rejected') console.error('[generate] 표지 안 하나 실패', r.reason)
   }
 
   // 전부 실패면 던진다 — 빈 배열을 돌려주면 호출부가 "생성됐는데 0안"으로 읽어
   // 조용히 빈 선택 화면을 띄운다. route.ts 가 500 으로 바꾼다.
   if (variants.length === 0) throw new Error('표지 3안 생성이 모두 실패했습니다')
-
-  // count에 못 미치면(재시도 한도 소진) 있는 만큼이라도 반환한다 — 0개가 아닌 한
-  // 사용자가 아무것도 못 고르는 것보다는 낫다. 다만 PRD 고정값(3안)과 어긋나는
-  // 상태이니 반드시 로그로 남겨 모니터링에서 보이게 한다.
-  if (variants.length < input.count) {
-    console.error(
-      `[generate] 표지 ${input.count}안 중 ${variants.length}안만 확보(재시도 한도 소진) — PRD 고정값(#108) 미달`
-    )
-  }
 
   return variants
 }
