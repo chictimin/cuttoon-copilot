@@ -299,11 +299,32 @@ async function callImageGeneration(
 // reserved_zone 과 같은 축에 걸리면 말풍선 여백이 깎인다 — compose.ts(B③)가
 // reserved_zone 을 아직 읽지 않아 지금은 비활성이고, 읽기 시작할 때 position 을
 // zone 반대쪽으로 지정해야 한다. #105 에서 추적한다.
-async function resizeToOutput(base64: string): Promise<Buffer> {
-  return sharp(Buffer.from(base64, 'base64'))
-    .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: 'cover' })
-    .png()
-    .toBuffer()
+//
+// #104: 여기 도달했다는 건 유료 호출이 이미 성공했다는 뜻이다 — 리사이즈(후처리)
+// 실패로 그 결과를 통째로 버리지 않는다. 실패하면 원본 버퍼를 그대로 쓰고,
+// width/height도 OUTPUT_SIZE로 고정하지 않고 실제 메타데이터를 다시 읽어 반환한다
+// (메타 읽기까지 실패하면 그때만 OUTPUT_SIZE로 최후 폴백).
+async function resizeToOutput(
+  base64: string
+): Promise<{ buffer: Buffer; width: number; height: number }> {
+  const original = Buffer.from(base64, 'base64')
+  try {
+    const buffer = await sharp(original)
+      .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: 'cover' })
+      .png()
+      .toBuffer()
+    return { buffer, width: OUTPUT_SIZE.width, height: OUTPUT_SIZE.height }
+  } catch (err) {
+    console.error('[generate] resizeToOutput 실패 — 원본 버퍼로 폴백 (#104)', err)
+    const meta = await sharp(original)
+      .metadata()
+      .catch(() => undefined)
+    return {
+      buffer: original,
+      width: meta?.width ?? OUTPUT_SIZE.width,
+      height: meta?.height ?? OUTPUT_SIZE.height,
+    }
+  }
 }
 
 export const generateCut: ImageProvider['generateCut'] = async (input) => {
@@ -314,14 +335,16 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const prompt = buildCutPrompt(storyboard, preset, cut)
   const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, preset, input.continueFrom)
 
-  const buffer = await resizeToOutput(base64)
+  const { buffer, width, height } = await resizeToOutput(base64)
   const { assetUri } = await uploadAsset(buffer, 'image/png', 'cut.png')
 
   return {
     asset: assetUri,
-    ...OUTPUT_SIZE,
+    width,
+    height,
     reserved_zone: cut?.reserved_zone,
     continuationToken: responseId,
+    prompt,
   }
 }
 
@@ -339,13 +362,15 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   const settled = await Promise.allSettled(
     Array.from({ length: input.count }, async (): Promise<GeneratedImageResult> => {
       const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, preset)
-      const buffer = await resizeToOutput(base64)
+      const { buffer, width, height } = await resizeToOutput(base64)
       const { assetUri } = await uploadAsset(buffer, 'image/png', 'cover.png')
       return {
         asset: assetUri,
-        ...OUTPUT_SIZE,
+        width,
+        height,
         reserved_zone: cut?.reserved_zone,
         continuationToken: responseId,
+        prompt,
       }
     })
   )

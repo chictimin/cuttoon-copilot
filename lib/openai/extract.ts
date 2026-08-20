@@ -102,12 +102,31 @@ No speech bubbles. No text. Clean reference sheet layout with clear separation b
 // gpt-image-1이 같은 프롬프트에도 요청한 크기와 다른 실제 크기를 낼 때가 있어
 // (generate.ts #20 주석 참고) sharp로 강제 리사이즈해 계약 ④의 width/height를
 // 실제 값과 어긋나지 않게 보장한다.
-async function resizeToOutput(base64: string): Promise<Buffer> {
-  const buf = Buffer.from(base64, "base64");
-  return sharp(buf)
-    .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: "cover" })
-    .png()
-    .toBuffer();
+//
+// #104: 리사이즈가 실패해도(원본 버퍼로 대체하는 경우) width/height를 OUTPUT_SIZE로
+// 그대로 고정하면 메타가 실제 픽셀과 어긋난다 — generate.ts와 동일하게 실패 시
+// 실제 메타데이터를 다시 읽어 반환한다.
+async function resizeToOutput(
+  base64: string
+): Promise<{ buffer: Buffer; width: number; height: number }> {
+  const original = Buffer.from(base64, "base64");
+  try {
+    const buffer = await sharp(original)
+      .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: "cover" })
+      .png()
+      .toBuffer();
+    return { buffer, width: OUTPUT_SIZE.width, height: OUTPUT_SIZE.height };
+  } catch (err) {
+    console.error("[extract] resizeToOutput 실패 — 원본 버퍼로 폴백 (#104)", err);
+    const meta = await sharp(original)
+      .metadata()
+      .catch(() => undefined);
+    return {
+      buffer: original,
+      width: meta?.width ?? OUTPUT_SIZE.width,
+      height: meta?.height ?? OUTPUT_SIZE.height,
+    };
+  }
 }
 
 export async function generateCharacterSheet(
@@ -128,20 +147,15 @@ export async function generateCharacterSheet(
   }
 
   // #104: 여기까지 오면 유료 호출은 이미 성공한 뒤다 — 리사이즈가 실패해도
-  // 결과를 버리지 않고 원본 그대로 업로드한다(width/height가 OUTPUT_SIZE와
-  // 다를 수 있다는 부정확함을 감수하는 쪽을 택함).
-  let buffer: Buffer;
-  try {
-    buffer = await resizeToOutput(data.b64_json);
-  } catch (err) {
-    console.error("캐릭터 시트 리사이즈 실패, 원본으로 대체:", err);
-    buffer = Buffer.from(data.b64_json, "base64");
-  }
+  // 결과를 버리지 않는다. resizeToOutput이 실패 시 원본 버퍼 + 실제 메타데이터를
+  // 반환하므로 width/height도 실제 값과 어긋나지 않는다.
+  const { buffer, width, height } = await resizeToOutput(data.b64_json);
   const { assetUri } = await uploadAsset(buffer, "image/png", "character-sheet.png");
 
   return {
     asset: assetUri,
-    width: OUTPUT_SIZE.width,
-    height: OUTPUT_SIZE.height,
+    width,
+    height,
+    prompt,
   };
 }

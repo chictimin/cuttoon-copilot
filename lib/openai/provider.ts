@@ -17,12 +17,13 @@ export interface GeneratedImageResult {
   // previous_response_id)을 그대로 노출하지 않는다는 PRD 6절 조건을 따름.
   // 최종 이름·형태는 #18에서 확정되며, 그때 이 필드도 함께 갱신한다.
   continuationToken?: string
-  // 스텁이 받은 continueFrom을 그대로 되돌려 라우트가 실제로 그 값을 읽어
-  // 넘기는지 스모크 테스트로 확인할 수 있게 하는 진단용 필드 (#75 사고 재발
-  // 방지). 실제 모델 호출을 붙이면 이 필드는 사라진다.
-  receivedContinueFrom?: string | null
   // #60 규칙: 스텁 응답임을 나타내는 플래그. 실제 구현은 이 필드를 넣지 않는다.
   stub?: true
+  // 실제 생성에 쓰인 프롬프트. storyboard.schema.json의 cuts[].prompt_used(재생성·
+  // 디버깅용, required 아님, null 허용)에 그대로 저장할 수 있도록 제공한다 (#102) —
+  // 화면이 진짜 프롬프트를 받을 방법이 없어서 요약 문자열을 그 자리에 대신
+  // 채워 넣던 문제를 없앤다.
+  prompt?: string
 }
 
 export interface ImageProvider {
