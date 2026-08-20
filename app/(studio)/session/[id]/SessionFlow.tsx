@@ -117,6 +117,33 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [draftCaption, setDraftCaption] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [presetError, setPresetError] = useState<string | null>(null);
+
+  // issue #123: preset(상의 색 후보 palette 포함)을 브레인스토밍 진행과 병렬로
+  // 미리 받아둔다. 원래는 "cover" 단계(loadCoverVariants)에서만 fetch했는데, 그러면
+  // storyboard 조립 시점(assembleStoryboard 호출)에 palette 값이 없어서 주인공
+  // 상의 색을 세션당 1회로 고정할 수 없었다(#113 케이스 5 — 4컷 내내 색이 흔들림).
+  // presetId는 온보딩이 남겨둔 sessionStorage 값이라 마운트 시 바로 조회 가능하다.
+  useEffect(() => {
+    void loadPreset();
+  }, [sessionId]);
+
+  async function loadPreset() {
+    const presetId = window.sessionStorage.getItem("cuttoon:preset-id");
+    try {
+      const res = await fetch(`/api/preset?id=${presetId}`);
+      if (!res.ok) throw new Error("프리셋을 찾을 수 없습니다");
+      const { preset: loaded } = (await res.json()) as { preset: Preset };
+      setPreset(loaded);
+      setPresetError(null);
+    } catch {
+      setPresetError(
+        presetId
+          ? "프로젝트 정보를 불러오지 못했어요. 다시 시도해주세요"
+          : "먼저 온보딩에서 프로젝트를 만들어주세요"
+      );
+    }
+  }
 
   // issue #143: 마운트 시 이 id로 이미 저장된 세션이 있는지 확인한다. 있으면
   // (POST /api/session은 handleSave에서 골든패스 완주 후에만 호출되므로,
@@ -216,6 +243,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     if (step !== "assembling") return;
+    // preset(palette)이 아직 안 왔으면 기다린다 — 도착하면 이 effect가 preset을
+    // 의존성으로 다시 실행된다. presetError가 나면 아래 렌더링이 재시도를 보여준다.
+    if (!preset) return;
+
     const full: BrainstormAnswers = {
       protagonist: answers.protagonist ?? "",
       supporting:
@@ -226,12 +257,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     };
 
     const timer = setTimeout(() => {
-      setStoryboard(assembleStoryboard(subject, full));
+      setStoryboard(assembleStoryboard(subject, full, preset.style.palette));
       setStep("cover");
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+  }, [step, preset]);
 
   useEffect(() => {
     if (step !== "cover" || !storyboard || coverVariants) return;
@@ -240,22 +271,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   }, [step, storyboard]);
 
   async function loadCoverVariants() {
-    if (!storyboard) return;
+    // preset은 assembling effect가 "cover"로 넘어가기 전에 이미 기다렸으므로
+    // 이 시점엔 항상 준비돼 있다 — 여기서 다시 fetch하지 않는다(issue #123).
+    if (!storyboard || !preset) return;
     setGenError(null);
 
-    const presetId = window.sessionStorage.getItem("cuttoon:preset-id");
-    if (!presetId) {
-      setGenError("먼저 온보딩에서 프로젝트를 만들어주세요");
-      return;
-    }
-
     try {
-      const presetRes = await fetch(`/api/preset?id=${presetId}`);
-      if (!presetRes.ok) throw new Error("프리셋을 찾을 수 없습니다");
-      const { preset: loadedPreset } = (await presetRes.json()) as { preset: Preset };
-      setPreset(loadedPreset);
-
-      const { variants, requested } = await generateCoverVariants(storyboard, loadedPreset);
+      const { variants, requested } = await generateCoverVariants(storyboard, preset);
       setCoverVariants(variants);
       setCoverRequested(requested);
     } catch {
@@ -488,7 +510,19 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
-      {step === "assembling" && <Spinner text="이야기를 엮고 있어요..." />}
+      {step === "assembling" && !presetError && <Spinner text="이야기를 엮고 있어요..." />}
+      {step === "assembling" && presetError && (
+        <div className="flex flex-col items-center gap-3 text-center">
+          <p className="rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">{presetError}</p>
+          <button
+            type="button"
+            onClick={() => void loadPreset()}
+            className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
       {step === "cover" && !coverVariants && !genError && <Spinner text="표지 3안을 그리고 있어요..." />}
       {step === "generating" && <Spinner text="나머지 컷을 완성하고 있어요..." />}
 
