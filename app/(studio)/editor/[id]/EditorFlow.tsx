@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { assertStoryboardRuntimeInvariants } from "@/lib/llm/storyboard-guard";
 import type { CaptionPosition, Storyboard } from "../../session/[id]/storyboard-types";
 
@@ -140,18 +141,24 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
 
   if (phase === "not_found") {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-2 p-8 text-center">
+      <main className="flex min-h-screen flex-col items-center justify-center gap-3 p-8 text-center">
         <h1 className="text-xl font-semibold">아직 완성된 스토리보드가 없어요</h1>
         <p className="text-sm text-zinc-500">세션 화면에서 4컷을 먼저 완성해주세요</p>
+        <Link href="/" className="text-sm font-medium text-zinc-600 underline hover:text-zinc-900">
+          목록으로
+        </Link>
       </main>
     );
   }
 
   if (phase === "load_error" || !saved || !draft) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-2 p-8 text-center">
+      <main className="flex min-h-screen flex-col items-center justify-center gap-3 p-8 text-center">
         <h1 className="text-xl font-semibold">불러오지 못했어요</h1>
         <p className="text-sm text-zinc-500">잠시 후 새로고침해주세요</p>
+        <Link href="/" className="text-sm font-medium text-zinc-600 underline hover:text-zinc-900">
+          목록으로
+        </Link>
       </main>
     );
   }
@@ -294,6 +301,12 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
   return (
     <main className="flex min-h-screen flex-col items-center gap-6 p-8">
       <div className="flex w-full max-w-4xl flex-col items-center gap-1 text-center">
+        <Link
+          href="/"
+          className="self-start text-sm font-medium text-zinc-500 underline hover:text-zinc-900"
+        >
+          ← 목록으로
+        </Link>
         <h1 className="text-xl font-semibold">&ldquo;{draft.subject}&rdquo; 수정하기</h1>
         <p className="text-sm text-zinc-500">
           대사를 고치거나, 말풍선을 원하는 자리로 끌어다 놓으세요

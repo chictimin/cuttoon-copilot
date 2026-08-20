@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { assertStoryboardRuntimeInvariants } from "@/lib/llm/storyboard-guard";
 import type { Preset } from "@/lib/llm/preset-guard";
 // 타입만 가져온다 — lib/llm/brainstorm.ts 는 OPENAI_API_KEY 를 쓰는 서버 모듈이라
@@ -65,6 +66,10 @@ function promptForCut(subject: string, cut: Cut): string {
 
 export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [step, setStep] = useState<Step>("subject");
+  // issue #134: 에디터로 가는 링크가 실제 저장된 세션 id를 알아야 한다.
+  // sessionId prop은 저장 전 임시값일 수 있고 저장 후에도 window.history로만
+  // URL을 바꿔서 prop 자체는 갱신되지 않는다 — 그래서 저장 결과를 별도로 든다.
+  const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
   const [subject, setSubject] = useState("");
   const [turnIndex, setTurnIndex] = useState(0);
   const [turns, setTurns] = useState<BrainstormTurn[] | null>(null);
@@ -291,6 +296,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       if (savedId !== sessionId) {
         window.history.replaceState(null, "", `/session/${savedId}`);
       }
+      setSavedSessionId(savedId);
       setStep("saved");
     } catch {
       setSaveError("저장에 실패했어요. 다시 시도해주세요");
@@ -541,9 +547,15 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       )}
 
       {step === "saved" && storyboard && (
-        <div className="flex flex-col items-center gap-2 text-center">
+        <div className="flex flex-col items-center gap-4 text-center">
           <h1 className="text-xl font-semibold">저장됐습니다</h1>
           <p className="text-sm text-zinc-500">&ldquo;{storyboard.subject}&rdquo; 4컷이 준비됐어요</p>
+          <Link
+            href={`/editor/${savedSessionId ?? sessionId}`}
+            className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
+          >
+            대사·말풍선 수정하러 가기
+          </Link>
         </div>
       )}
     </main>
