@@ -90,7 +90,27 @@ export async function generateCoverVariants(
     result: Array<{ asset: string; continuationToken?: string }>;
     requested?: number;
   };
-  const variants = await Promise.all(result.map(toGeneratedCut));
+
+  // Promise.all이면 3안 중 URL 리졸브 하나만 실패해도 즉시 reject되어 이미
+  // 유료로 생성된 나머지 성공분까지 통째로 버려진다(PR #124 리뷰 지적) —
+  // 서버가 generateCoverVariants에서 allSettled로 성공분을 지키는 것(#104)과
+  // 같은 이유로, 여기서도 리졸브 실패 하나가 나머지를 끌고 내려가지 않게 한다.
+  // 이러면 서버 쪽 부족(#108)과 클라이언트 쪽 리졸브 실패가 같은
+  // "variants.length < requested" 배너(#117)로 합쳐진다.
+  const settled = await Promise.allSettled(result.map(toGeneratedCut));
+  const variants = settled
+    .filter((r): r is PromiseFulfilledResult<GeneratedCut> => r.status === "fulfilled")
+    .map((r) => r.value);
+  settled
+    .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+    .forEach((r) => console.error("[generateCoverVariants] 이미지 URL 리졸브 실패:", r.reason));
+
+  // 0개면 서버와 같은 규약대로 던진다 — 골라야 할 것이 아무것도 없는 빈
+  // 선택 화면을 보여주지 않는다.
+  if (variants.length === 0) {
+    throw new Error("표지 생성에 실패했습니다");
+  }
+
   return { variants, requested };
 }
 
