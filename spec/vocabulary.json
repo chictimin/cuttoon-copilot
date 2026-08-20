@@ -9,6 +9,7 @@
   "position": ["top_left", "top_right", "bottom_left", "bottom_right", "center"],
   "reserved_zone": ["top", "bottom", "left", "right"],
   "narrative_beat": ["hook", "problem", "solution", "cta", "question", "fact", "benefit", "before", "turning", "after"],
+  "_comment_prompt_hints": "issue #121. 세 가지를 지킬 것. (1) prompt_hints 의 값은 전부 객체여야 한다 — generate.ts 가 Record<string, Record<string,string>> 로 캐스팅하므로 문자열 항목을 넣으면 B① 빌드가 깨진다. 그래서 이 설명도 여기 최상위에 둔다. (2) narrative_beat 힌트는 'This panel is the \"{hint}\" beat of the story.' 문장 안에 들어간다 — 긴 서술문을 넣으면 문장이 깨지므로 enum 토큰을 앞에 두고 콤마로 역할을 덧붙이는 짧은 구를 유지할 것. (3) character_ratio 는 preset.schema.json 의 style 필드이고 이 파일의 최상위 값 목록에는 없다(#121 선택지 1번 — prompt_hints 에 preset 필드 항목도 허용해 B① 코드 변경을 0으로 둔다). 값 목록의 정본은 preset.schema.json 이고, 서술문은 '{hint} body proportions' 문맥에 들어가므로 절이 아니라 형용사구로 쓴다.",
   "prompt_hints": {
     "expression": {
       "neutral":    "relaxed face, no particular emotion, mouth closed",
@@ -22,7 +23,7 @@
     },
     "pose": {
       "stand":    "standing upright with both feet on the ground, arms at sides",
-      "sit":      "sitting on a chair, back straight, hands on lap or desk",
+      "sit":      "sitting with back straight, hands resting on the lap",
       "slump":    "shoulders drooped forward, head tilted down, curved back",
       "point":    "one arm extended forward, index finger pointing at something",
       "arms_up":  "both arms raised above head in celebration or stretching",
@@ -47,6 +48,24 @@
       "noon":    "bright overhead sunlight, short shadows, vivid clear colors",
       "evening": "warm orange-pink sunset glow, long shadows, golden hour tones",
       "night":   "dark blue sky, artificial indoor or street lighting, cool tones"
+    },
+    "narrative_beat": {
+      "hook":     "hook, the attention-grabbing opening moment",
+      "problem":  "problem, where the pain point surfaces",
+      "solution": "solution, where the fix is shown working",
+      "cta":      "cta, the closing call to action",
+      "question": "question, putting the issue to the reader",
+      "fact":     "fact, delivering concrete information plainly",
+      "benefit":  "benefit, emphasizing what the reader gains",
+      "before":   "before, the unresolved earlier situation",
+      "turning":  "turning, the moment the change begins",
+      "after":    "after, the improved later situation"
+    },
+    "character_ratio": {
+      "2head":     "two-heads-tall extreme chibi",
+      "2.5head":   "two-and-a-half-heads-tall compact cartoon",
+      "3head":     "three-heads-tall stylized cartoon",
+      "realistic": "seven-heads-tall naturalistic adult"
     }
   }
 }

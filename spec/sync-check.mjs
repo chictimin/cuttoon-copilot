@@ -100,9 +100,102 @@ for (const { vocabKey, schemaPath } of MAPPINGS) {
   }
 }
 
-if (hasError) {
-  console.error("\nvocabulary.json이 바뀐 뒤 storyboard.schema.json의 enum을 안 맞춰준 것으로 보임.");
+// ── prompt_hints 커버리지 ──────────────────────────────────────────────────
+//
+// issue #121: prompt_hints에 항목이 없으면 buildCutPrompt의 hint()가 enum 토큰을 그대로
+// 흘려보내고 모델이 못 알아듣는다 (codex 4회 검증: "Shot type: closeup."이 4/4 전신으로
+// 나왔고, 서술문으로 바꾼 뒤 4/4 통과). character_ratio는 그 상태로 4/4 무시됐다.
+//
+// 그 누락이 어떤 검사에도 안 걸리고 통과해 온 것이 원인이라 여기서 잡는다. 다만 모든 값
+// 목록이 힌트를 요구하지는 않는다 — 요구하지 않는 것은 이유와 함께 아래에 적어 두고,
+// 어느 쪽에도 분류되지 않은 값 목록이 생기면 그것도 실패로 잡는다. 새 enum을 추가하면서
+// 힌트 필요 여부를 결정하지 않고 넘어가는 것을 막는 장치다.
+
+const preset = JSON.parse(fs.readFileSync(path.join(SPEC_DIR, "preset.schema.json"), "utf8"));
+
+// 값 목록이 vocabulary.json 최상위에 있는 것은 vocabKey만, preset.schema.json의 enum인
+// 것은 schemaPath까지 적는다(#121 선택지 1번 — prompt_hints에 preset 필드 항목도 허용).
+const HINT_REQUIRED = [
+  { key: "expression" },
+  { key: "pose" },
+  { key: "shot_type" },
+  { key: "camera_angle" },
+  { key: "time_of_day" },
+  { key: "narrative_beat" },
+  {
+    key: "character_ratio",
+    schemaPath: ["properties", "style", "properties", "character_ratio"],
+  },
+];
+
+const HINT_NOT_REQUIRED = {
+  bubble_type: "말풍선은 생성 이미지에 넣지 않고 나중에 합성한다(B③) — 이미지 프롬프트에 안 들어감",
+  position: "캡션 위치도 텍스트 레이어 합성용이라 이미지 프롬프트에 안 들어감",
+  reserved_zone: "B①이 reservedZoneHint() 전용 서술문을 쓴다 — 프레임 안을 비우라는 지시라 일반 서술문과 성격이 다름",
+};
+
+const hints = vocabulary.prompt_hints ?? {};
+let hintError = false;
+
+for (const { key, schemaPath } of HINT_REQUIRED) {
+  const values = schemaPath ? getEnumAt(preset, schemaPath) : vocabulary[key];
+  const source = schemaPath ? `preset.schema.json ${schemaPath.join(".")}` : `vocabulary.json ${key}`;
+
+  if (!Array.isArray(values)) {
+    console.error(`FAIL ${source}에서 값 목록을 못 찾음`);
+    hintError = true;
+    continue;
+  }
+
+  const table = hints[key];
+  if (!table || typeof table !== "object") {
+    console.error(`FAIL prompt_hints에 "${key}" 항목이 없음 — enum 토큰이 프롬프트로 그대로 나간다`);
+    hintError = true;
+    continue;
+  }
+
+  const missing = values.filter((v) => typeof table[v] !== "string" || !table[v].trim());
+  const extra = Object.keys(table).filter((v) => !values.includes(v));
+
+  if (missing.length || extra.length) {
+    hintError = true;
+    console.error(`FAIL prompt_hints.${key} 불일치 (값 목록: ${source})`);
+    if (missing.length) console.error(`  힌트 없음: ${missing.join(", ")}`);
+    if (extra.length) console.error(`  값 목록에 없는 힌트: ${extra.join(", ")}`);
+  } else {
+    console.log(`OK   prompt_hints.${key} (${values.length}개)`);
+  }
+}
+
+// 분류되지 않은 값 목록 탐지. _comment_ 로 시작하는 키는 설명용이라 카테고리가 아니다.
+const classified = new Set([...HINT_REQUIRED.map((h) => h.key), ...Object.keys(HINT_NOT_REQUIRED)]);
+const unclassified = Object.keys(vocabulary).filter(
+  (k) => Array.isArray(vocabulary[k]) && !classified.has(k)
+);
+if (unclassified.length) {
+  hintError = true;
+  console.error(
+    `FAIL 힌트 필요 여부가 정해지지 않은 값 목록: ${unclassified.join(", ")}\n` +
+      `  이 스크립트의 HINT_REQUIRED 또는 HINT_NOT_REQUIRED에 이유와 함께 추가할 것.`
+  );
+}
+
+const strayComments = Object.keys(hints).filter(
+  (k) => !k.startsWith("_comment") && !classified.has(k)
+);
+if (strayComments.length) {
+  hintError = true;
+  console.error(`FAIL prompt_hints에 분류되지 않은 카테고리: ${strayComments.join(", ")}`);
+}
+
+if (hasError || hintError) {
+  if (hasError) {
+    console.error("\nvocabulary.json이 바뀐 뒤 storyboard.schema.json의 enum을 안 맞춰준 것으로 보임.");
+  }
+  if (hintError) {
+    console.error("\nprompt_hints 누락은 enum 토큰을 프롬프트에 그대로 흘려보낸다(issue #121).");
+  }
   process.exit(1);
 } else {
-  console.log("\n모든 값 목록이 vocabulary.json과 일치합니다.");
+  console.log("\n모든 값 목록이 vocabulary.json과 일치하고, prompt_hints 커버리지도 채워져 있습니다.");
 }
