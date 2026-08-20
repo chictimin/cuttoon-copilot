@@ -3,18 +3,61 @@
 import { useEffect, useState } from "react";
 import { assertStoryboardRuntimeInvariants } from "@/lib/llm/storyboard-guard";
 import type { Preset } from "@/lib/llm/preset-guard";
+// 타입만 가져온다 — lib/llm/brainstorm.ts 는 OPENAI_API_KEY 를 쓰는 서버 모듈이라
+// 런타임 import 는 클라이언트로 넘어오면 안 된다.
+import type { BrainstormTurn } from "@/lib/llm/brainstorm";
 import {
   assembleStoryboard,
-  BRAINSTORM_TURNS,
+  FLOW_OPTIONS,
+  FLOW_QUESTION,
   type BrainstormAnswers,
-  type BrainstormTurn,
-} from "./mock-brainstorm";
+} from "./storyboard-assembly";
 import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
 import type { Cut, Storyboard } from "./storyboard-types";
 
 type Step = "subject" | "brainstorm" | "assembling" | "cover" | "generating" | "cuts" | "saved";
 
 const NO_SUPPORTING_OPTION = "혼자 진행 (조연 없음)";
+
+const TURN_ORDER: BrainstormTurn["key"][] = ["protagonist", "supporting", "flow"];
+
+// LLM 응답을 화면이 쓸 수 있는 형태로 맞춘다. 모델 응답은 순서·개수·문자열을
+// 보장하지 않으므로 세 가지를 여기서 고정한다.
+//
+// 1. flow 턴은 LLM 선택지를 버리고 로컬 FLOW_OPTIONS 로 교체한다. 흐름 선택은
+//    자유 텍스트가 아니라 NarrativeBeat 템플릿을 고르는 것이라(스키마의
+//    narrative_beat enum), 임의 문자열이 오면 assembleStoryboard 가 조용히 첫
+//    템플릿으로 폴백해 어떤 흐름을 골라도 같은 4컷이 나온다.
+// 2. 조연 없이 진행하는 선택지는 PRD 6절의 필수 경로다(조연 유무가 cast 구성을
+//    바꾼다). 프롬프트가 그 문자열을 리터럴로 지시하지만 모델이 무시할 수 있어
+//    빠져 있으면 되살린다 — 사용자 입력을 덮어쓰는 게 아니라 사라진 선택지를
+//    복구하는 것이다.
+// 3. 순서를 protagonist → supporting → flow 로 맞추고 빠진 턴은 채운다.
+function normalizeTurns(turns: BrainstormTurn[]): BrainstormTurn[] {
+  const byKey = new Map(turns.map((turn) => [turn.key, turn]));
+
+  return TURN_ORDER.map((key) => {
+    if (key === "flow") {
+      return { key, question: FLOW_QUESTION, options: FLOW_OPTIONS };
+    }
+
+    const turn = byKey.get(key);
+    if (!turn || turn.options.length === 0) {
+      // 모델이 이 턴을 빼먹은 경우. 선택지를 만들 근거가 없으니 "직접 쓸게" 로만
+      // 진행하도록 빈 목록을 남긴다 — 임의 값을 지어내면 mock 으로 되돌아간다.
+      return { key, question: FALLBACK_QUESTION[key], options: [] };
+    }
+
+    return key === "supporting" && !turn.options.includes(NO_SUPPORTING_OPTION)
+      ? { ...turn, options: [...turn.options, NO_SUPPORTING_OPTION] }
+      : turn;
+  });
+}
+
+const FALLBACK_QUESTION: Record<"protagonist" | "supporting", string> = {
+  protagonist: "주인공은 누구인가요?",
+  supporting: "함께 등장할 인물이 있나요?",
+};
 
 function promptForCut(subject: string, cut: Cut): string {
   return `${subject} · ${cut.narrative_beat} · ${cut.shot_type}/${cut.camera_angle}`;
@@ -24,6 +67,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [step, setStep] = useState<Step>("subject");
   const [subject, setSubject] = useState("");
   const [turnIndex, setTurnIndex] = useState(0);
+  const [turns, setTurns] = useState<BrainstormTurn[] | null>(null);
+  const [turnsError, setTurnsError] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Partial<Record<BrainstormTurn["key"], string>>>({});
   const [customText, setCustomText] = useState("");
   const [isCustomOpen, setIsCustomOpen] = useState(false);
@@ -38,28 +83,72 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   function recordAnswer(value: string) {
-    const key = BRAINSTORM_TURNS[turnIndex].key;
+    if (!turns) return;
+    const key = turns[turnIndex].key;
     const next = { ...answers, [key]: value };
     setAnswers(next);
     setIsCustomOpen(false);
     setCustomText("");
 
-    if (turnIndex < BRAINSTORM_TURNS.length - 1) {
+    if (turnIndex < turns.length - 1) {
       setTurnIndex(turnIndex + 1);
     } else {
       setStep("assembling");
     }
   }
 
+  // 소재에 맞는 선택지를 실제 LLM 으로 받아온다 (issue #84). 이전에는 화면 안의
+  // 하드코딩 상수(BRAINSTORM_TURNS)를 썼다.
+  //
+  // draft 는 보내지 않는다 — 이 시점에는 답변이 하나도 없어 항상 빈 draft 이고,
+  // 소재 텍스트에서 슬롯을 채운 draft 를 만드는 단계가 아직 없다. 그래서 PRD 6절의
+  // "소재에 이미 정보가 있으면 해당 턴은 건너뛴다" 는 여기서 실현되지 않는다.
+  // 여기서 setTurnsError(null) 로 시작하지 않는다 — effect 가 이 함수를 부르는
+  // 경로에서 동기 setState 가 되어 cascading render 를 만든다
+  // (react-hooks/set-state-in-effect). 초기화는 재시도 버튼 쪽에서 한다.
+  async function loadTurns() {
+    const trimmed = subject.trim();
+    // 소재가 없으면 라우트가 400 을 준다 — 부르기 전에 끊는다. "다음" 버튼이
+    // 빈 소재를 막고 있어 실제로는 도달하지 않는다.
+    if (!trimmed) return;
+
+    try {
+      const res = await fetch("/api/brainstorm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: trimmed }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "선택지를 만들지 못했습니다");
+      }
+      const { turns: loaded } = (await res.json()) as { turns: BrainstormTurn[] };
+      if (!Array.isArray(loaded) || loaded.length === 0) {
+        throw new Error("선택지가 비어 있습니다");
+      }
+      setTurns(normalizeTurns(loaded));
+    } catch {
+      setTurnsError("선택지를 만드는 데 실패했어요. 다시 시도해주세요");
+    }
+  }
+
+  // 소재를 확정하는 사용자 액션에서 바로 요청을 띄운다. effect 로 옮기면
+  // cascading render 가 되고(react-hooks/set-state-in-effect), 이 요청은 화면
+  // 진입이 아니라 "다음" 클릭이라는 이벤트에 속한 일이다.
+  function startBrainstorm() {
+    setStep("brainstorm");
+    void loadTurns();
+  }
+
   useEffect(() => {
     if (step !== "assembling") return;
     const full: BrainstormAnswers = {
-      protagonist: answers.protagonist ?? BRAINSTORM_TURNS[0].options[0],
+      protagonist: answers.protagonist ?? "",
       supporting:
         answers.supporting && answers.supporting !== NO_SUPPORTING_OPTION
           ? answers.supporting
           : null,
-      flow: answers.flow ?? BRAINSTORM_TURNS[2].options[0],
+      flow: answers.flow ?? "",
     };
 
     const timer = setTimeout(() => {
@@ -225,7 +314,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           <button
             type="button"
             disabled={subject.trim().length === 0}
-            onClick={() => setStep("brainstorm")}
+            onClick={startBrainstorm}
             className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-40"
           >
             다음
@@ -233,15 +322,35 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
-      {step === "brainstorm" && (
+      {step === "brainstorm" && !turns && !turnsError && (
+        <Spinner text="소재에 맞는 선택지를 고르고 있어요..." />
+      )}
+
+      {step === "brainstorm" && turnsError && (
+        <div className="flex flex-col items-center gap-3 text-center">
+          <p className="text-sm text-red-600">{turnsError}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setTurnsError(null);
+              void loadTurns();
+            }}
+            className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
+
+      {step === "brainstorm" && turns && (
         <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
           <p className="text-xs text-zinc-400">
-            {turnIndex + 1} / {BRAINSTORM_TURNS.length}
+            {turnIndex + 1} / {turns.length}
           </p>
-          <h1 className="text-xl font-semibold">{BRAINSTORM_TURNS[turnIndex].question}</h1>
+          <h1 className="text-xl font-semibold">{turns[turnIndex].question}</h1>
 
           <div className="flex w-full flex-col gap-2">
-            {BRAINSTORM_TURNS[turnIndex].options.map((option) => (
+            {turns[turnIndex].options.map((option) => (
               <button
                 key={option}
                 type="button"
@@ -279,13 +388,16 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               >
                 직접 쓸게
               </button>
-              <button
-                type="button"
-                onClick={() => recordAnswer(BRAINSTORM_TURNS[turnIndex].options[0])}
-                className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-500 hover:bg-zinc-50"
-              >
-                알아서 해줘
-              </button>
+              {/* 선택지가 비면(모델이 그 턴을 빼먹은 경우) 고를 것이 없으니 감춘다 */}
+              {turns[turnIndex].options.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => recordAnswer(turns[turnIndex].options[0])}
+                  className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-500 hover:bg-zinc-50"
+                >
+                  알아서 해줘
+                </button>
+              )}
             </div>
           )}
         </div>
