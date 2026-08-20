@@ -105,8 +105,8 @@ export default function ProjectList() {
               key={project.projectId}
               className="flex items-center justify-between rounded-lg border border-zinc-200 p-4"
             >
-              <div className="flex flex-col gap-1">
-                <span className="font-medium">{project.projectName}</span>
+              <Link href={`/projects/${project.projectId}`} className="flex flex-col gap-1">
+                <span className="font-medium hover:underline">{project.projectName}</span>
                 <span className="text-xs text-zinc-500">
                   {project.sessionCount > 0
                     ? `컷툰 ${project.sessionCount}편`
@@ -114,7 +114,7 @@ export default function ProjectList() {
                   {" · "}
                   {new Date(project.updatedAt).toLocaleDateString("ko-KR")}
                 </span>
-              </div>
+              </Link>
               <button
                 type="button"
                 onClick={() => handleStartSession(project)}
