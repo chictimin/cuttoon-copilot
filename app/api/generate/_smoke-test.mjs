@@ -205,6 +205,21 @@ function checkStyleParity() {
     "지도사가 프레임에 없을 때의 문구가 없습니다 — 시트 동일성 문장이 항상 붙습니다 (#113)"
   );
 
+  // 폴백 규칙이 다시 인라인되지 않게 막는다. promptHint('character_ratio', …) 가
+  // ratioClause 밖에서 또 나오면 그 자리에 규칙이 복사된 것이고, 그게 #126·#129 로
+  // 두 번 사고가 난 형태다.
+  const ratioLookups = (src.match(/promptHint\(\s*['"]character_ratio['"]/g) ?? []).length;
+  assert.equal(
+    ratioLookups,
+    1,
+    `character_ratio 사전 조회가 ${ratioLookups}곳에 있습니다 — ratioClause 한 곳에만 있어야 합니다 (#126, #129)`
+  );
+  assert.match(
+    src,
+    /export function ratioClause/,
+    "ratioClause를 export하지 않습니다 — extract.ts가 폴백 규칙을 복사해야 합니다 (#128)"
+  );
+
   for (const [field, why] of [
     // #121 이 힌트를 추가하면 갈라지는 유일한 필드다 — 컷은 hint() 로 서술문을
     // 집어가는데 extract.ts 는 raw 토큰을 쓴다. 기준물(시트)이 5~6두신으로

@@ -148,6 +148,24 @@ function hint(category: string, value?: string): string | undefined {
   return promptHint(category, value) ?? value
 }
 
+// character_ratio 절. 폴백 규칙까지 한 곳에 둔다 — promptHint 로 사전만 공유했을 때는
+// 이 3줄이 두 파일에 복사돼 있었고, 규칙이 갈라지는 사고가 두 번 났다.
+//
+//   #126: extract.ts 가 기본값 먼저, generate.ts 가 promptHint 먼저 → 같은 preset 에서
+//         시트와 컷이 다른 비율 지시를 받았다
+//   #129: 그것을 발견해 generate.ts 를 맞췄는데, 그 사이 #128 이 내 잘못된 형태를
+//         복사해 와서 이번엔 시트가 후퇴할 뻔했다
+//
+// 순서가 중요하다: 기본값을 먼저 적용한 뒤 힌트를 찾는다. 반대로 하면 character_ratio
+// 가 비었을 때 힌트를 건너뛰고 토큰으로 떨어진다.
+//
+// 라벨을 뒤에 붙이는 것은 힌트가 없을 때만이다. 힌트 서술문은 그 자체로 완결된 구라서
+// 뒤에 " body proportions" 를 붙이면 문장이 깨진다 (#120 리뷰).
+export function ratioClause(value?: string): string {
+  const v = value ?? '2.5head'
+  return promptHint('character_ratio', v) ?? `${v} body proportions`
+}
+
 // 대사는 텍스트 레이어로 나중에 얹는다(PRD 6절) — 프롬프트에 caption 텍스트를
 // 절대 포함하지 않는다. reserved_zone만 전달해 자리를 비워두게 한다.
 function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cut?: MinimalCut): string {
@@ -169,8 +187,7 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   // 읽혀 배경 지시가 인물 비율 서술의 나열 항목처럼 묻힌다. 나머지 셋은 짧은 고정
   // 어휘라 앞에 두는 것이 맞고, 이 순서면 extract.ts 의 시트 문장과 문맥이 같아진다
   // (그쪽은 ratio 뒤가 바로 마침표다).
-  const ratioValue = s?.character_ratio ?? '2.5head'
-  const ratio = promptHint('character_ratio', ratioValue) ?? `${ratioValue} body proportions`
+  const ratio = ratioClause(s?.character_ratio)
   const styleStr = s
     ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${s.background_density ?? 'low'} background detail, ${ratio}`
     : 'default webtoon/comic style'
