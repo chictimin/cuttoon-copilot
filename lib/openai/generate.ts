@@ -455,6 +455,9 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   // 만들면 한쪽만 고쳐지는 일이 생긴다.
   const retry = retryEnabled()
   let attemptsLeft = retry ? input.count * 2 : input.count
+  // 조기 종료 원인을 남긴다. 루프를 빠져나오는 길이 둘이라(예산 소진 / 배치 전멸)
+  // retry 불리언만으로는 아래 미달 로그의 원인 라벨이 갈리지 않는다.
+  let abortedOnDeadBatch = false
 
   while (variants.length < input.count && attemptsLeft > 0) {
     const needed = input.count - variants.length
@@ -486,6 +489,7 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
     // 환경은 살아 있는 것이므로 부족분을 계속 채운다.
     if (gained === 0) {
       console.error('[generate] 배치가 통째로 실패해 재시도를 중단합니다 — 환경 문제로 보입니다')
+      abortedOnDeadBatch = true
       break
     }
   }
@@ -498,9 +502,18 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   // 사용자가 아무것도 못 고르는 것보다는 낫다. 다만 PRD 고정값(3안)과 어긋나는
   // 상태이니 반드시 로그로 남겨 모니터링에서 보이게 한다.
   if (variants.length < input.count) {
-    // 원인을 로그에 박는다 (#118). "재시도가 꺼져 있어서" 와 "재시도했는데도
-    // 실패해서" 는 대응이 다르다 — 앞은 설정을 켜면 되고 뒤는 환경을 봐야 한다.
-    const why = retry ? '재시도 한도 소진' : `재시도 꺼짐(${RETRY_ENV}=off)`
+    // 원인을 로그에 박는다 (#118). 셋이 서로 다른 대응을 요구한다 — 꺼짐은 설정을
+    // 켜면 되고, 한도 소진은 실패율을 봐야 하고, 배치 전멸은 환경(업로드·스토리지)을
+    // 봐야 한다.
+    //
+    // 세 갈래로 나눈 이유: retry 불리언만 보고 찍었더니 배치 전멸로 조기 break 한
+    // 경우도 '한도 소진' 으로 나왔다. 예산이 남아 있는데도 그렇게 찍힌다 — 요약 줄만
+    // 세어 통계를 내면 원인이 왜곡된다. #113 이 이 스위치를 측정용으로 쓴다.
+    const why = !retry
+      ? `재시도 꺼짐(${RETRY_ENV}=off)`
+      : abortedOnDeadBatch
+        ? '배치 전멸로 중단'
+        : '재시도 한도 소진'
     console.error(
       `[generate] 표지 ${input.count}안 중 ${variants.length}안만 확보(${why}) — PRD 고정값(#108) 미달`
     )

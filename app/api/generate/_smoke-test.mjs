@@ -111,6 +111,21 @@ function checkCoverVariantsSettled() {
     /attemptsLeft\s*=\s*retry\s*\?\s*input\.count\s*\*\s*2\s*:\s*input\.count/,
     "재시도 예산이 토글을 반영하지 않습니다 (#118)"
   );
+  // 미달 원인이 세 갈래로 찍혀야 한다. retry 불리언만 보고 찍으면 배치 전멸로 조기
+  // break 한 경우도 "한도 소진" 으로 나온다 — 예산이 남아 있는데도 그렇게 찍히고,
+  // #113 이 요약 줄만 세어 통계를 내면 원인이 왜곡된다.
+  //
+  // 변수명이 아니라 라벨 문자열로 검사한다. 등가 리팩터로 변수명이 바뀌어도 라벨이
+  // 남아 있으면 동작은 같다.
+  for (const label of ['배치 전멸로 중단', '재시도 한도 소진', '재시도 꺼짐']) {
+    assert.ok(fn.includes(label), `미달 원인 라벨 "${label}" 이 없습니다 — 원인이 뭉쳐 찍힙니다 (#118)`);
+  }
+  assert.match(
+    fn,
+    /gained === 0[\s\S]{0,300}=\s*true/,
+    "배치 전멸로 중단할 때 원인을 기록하지 않습니다 — '한도 소진' 으로 잘못 찍힙니다 (#118)"
+  );
+
   // 기본값은 on 이어야 한다. 오타('ture')가 조용히 off 로 떨어지면 시연에서
   // 3안이 2안으로 줄어드는 쪽으로 실패한다 — 끄는 값만 명시적으로 받는다.
   const toggle = src.slice(src.indexOf("function retryEnabled"));
