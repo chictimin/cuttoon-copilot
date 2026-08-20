@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { assertValidPreset, type Preset } from "@/lib/llm/preset-guard";
 import { analyzeStyle, type StyleAnalysisResult } from "./style-analysis";
 import DetailsStep, { type DetailsFormValue } from "./DetailsStep";
@@ -32,6 +33,7 @@ function validateFiles(files: File[]): { valid: File[]; error: string | null } {
 }
 
 export default function OnboardingFlow() {
+  const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
   const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -170,8 +172,12 @@ export default function OnboardingFlow() {
         return;
       }
 
-      const { presetId } = await res.json();
-      // 세션 화면이 어느 프리셋으로 시작할지 알아야 해서 id만 남긴다.
+      const { presetId, projectId } = await res.json();
+      // 세션 화면(handleSave, issue #41)이 projectId·presetId 둘 다 필요하다.
+      // ProjectList.tsx의 handleStartSession과 같은 관례 — 여기서 놓치면
+      // "다음" 버튼을 눌러도 세션 저장이 "먼저 온보딩에서 프로젝트를 만들어주세요"로
+      // 실패한다(issue #134에서 발견된 단절).
+      window.sessionStorage.setItem("cuttoon:project-id", projectId);
       window.sessionStorage.setItem("cuttoon:preset-id", presetId);
       setConfirmedName(preset.project_name);
       setStep("confirmed");
@@ -208,11 +214,18 @@ export default function OnboardingFlow() {
         <DetailsStep onConfirm={handleConfirmDetails} error={error} saving={saving} />
       )}
       {step === "confirmed" && (
-        <div className="flex flex-col items-center gap-2 text-center">
+        <div className="flex flex-col items-center gap-4 text-center">
           <h1 className="text-xl font-semibold">프리셋이 저장되었습니다</h1>
           <p className="text-sm text-zinc-500">
             &ldquo;{confirmedName}&rdquo; 프로젝트가 준비됐어요
           </p>
+          <button
+            type="button"
+            onClick={() => router.push(`/session/${crypto.randomUUID()}`)}
+            className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
+          >
+            지금 바로 컷툰 만들기
+          </button>
         </div>
       )}
     </main>
