@@ -20,7 +20,16 @@ const RUN_REAL = process.env.RUN_REAL_GENERATION === "1";
 // 바뀌면서 성공 경로가 유료가 되어 그 방식을 쓸 수 없게 됐다. 배선 자체는
 // 소스에서 확인할 수 있으므로 여기서 검사한다 — 무료이고 서버도 필요 없다.
 function checkWiring() {
-  const src = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
+  // 라인 주석을 먼저 걷어낸다. 이 전처리가 없으면 배선을 주석으로 바꾸기만 해도
+  // (`// continueFrom: 잠시 끊음`) 아래 검사가 그 주석 텍스트에 매칭돼 통과한다 —
+  // #75가 재발하는데도 조용히 넘어가는 미탐이다. 반대로 아래 doesNotMatch 쪽은
+  // 주석에 든 continueFrom 때문에 멀쩡한 코드가 실패하는 오탐이 났다.
+  // `://` 를 포함한 문자열 리터럴까지 잘라내긴 하지만, 그때는 검사가 실패하는
+  // 쪽으로 기울기 때문에 배선이 끊긴 채 통과하는 일은 없다.
+  const src = readFileSync(new URL("./route.ts", import.meta.url), "utf8").replace(
+    /\/\/.*$/gm,
+    ""
+  );
 
   const destructure = src.match(/const\s*\{([^}]*)\}\s*=\s*body/);
   assert.ok(destructure, "route.ts에서 body destructuring을 찾지 못했습니다");
