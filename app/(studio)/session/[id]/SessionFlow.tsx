@@ -475,12 +475,22 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             {storyboard.cuts.map((cut, i) => (
               <div key={cut.cut_index} className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
                 <div className="relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- mock placeholder, next/image 불필요 */}
-                  <img
-                    src={cutImageUrls[cut.cut_index] ?? ""}
-                    alt={`컷 ${cut.cut_index}`}
-                    className="aspect-square w-full rounded-md object-cover"
-                  />
+                  {cutImageUrls[cut.cut_index] ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
+                    <img
+                      src={cutImageUrls[cut.cut_index]}
+                      alt={`컷 ${cut.cut_index}`}
+                      className="aspect-square w-full rounded-md object-cover"
+                    />
+                  ) : (
+                    // #104: 생성 자체(유료 호출)는 성공했는데 URL 리졸브만 실패했을
+                    // 수 있다 — asset은 보존되고 저장에도 문제없으니 깨진 이미지
+                    // 대신 안내만 보여준다. 새로고침 후 에디터에서 다시 리졸브된다.
+                    <div className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-md bg-zinc-100 text-center">
+                      <span className="text-xs text-zinc-400">이미지를 불러오지 못했어요</span>
+                      <span className="text-xs text-zinc-400">저장 후 에디터에서 다시 확인해주세요</span>
+                    </div>
+                  )}
                   <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
                     {cut.cut_index}컷 · {cut.narrative_beat}
                   </span>
