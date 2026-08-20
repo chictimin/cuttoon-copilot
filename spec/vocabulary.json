@@ -9,6 +9,7 @@
   "position": ["top_left", "top_right", "bottom_left", "bottom_right", "center"],
   "reserved_zone": ["top", "bottom", "left", "right"],
   "narrative_beat": ["hook", "problem", "solution", "cta", "question", "fact", "benefit", "before", "turning", "after"],
+  "_comment_prompt_hints": "issue #121. 세 가지를 지킬 것. (1) prompt_hints 의 값은 전부 객체여야 한다 — generate.ts 가 Record<string, Record<string,string>> 로 캐스팅하므로 문자열 항목을 넣으면 B① 빌드가 깨진다. 그래서 이 설명도 여기 최상위에 둔다. (2) 모든 힌트는 라벨 뒤에 붙는 서술문 형태로 쓴다 — 'Framing: {hint}.' 'This panel's role in the story: {hint}.' 처럼 B① 이 라벨을 앞에 붙이므로 힌트 자체에 enum 토큰을 반복하지 않는다. B① 이 PR #120(a1301b0) 에서 문장 템플릿을 라벨 형태로 통일했다. (3) character_ratio 와 life_stage 는 preset.schema.json 의 필드이고 이 파일의 최상위 값 목록에는 없다(#121 선택지 1번 — prompt_hints 에 preset 필드 항목도 허용해 B① 코드 변경을 0으로 둔다). 값 목록의 정본은 preset.schema.json 이다. character_ratio 는 promptHint() 가 힌트 유무를 구분해서 힌트가 있으면 서술문만 쓰고 'body proportions' 라벨을 붙이지 않으므로(PR #120 d31bf47), 문구 안에 proportions 라는 말을 직접 넣어야 의미가 남는다.",
   "prompt_hints": {
     "expression": {
       "neutral":    "relaxed face, no particular emotion, mouth closed",
@@ -22,7 +23,7 @@
     },
     "pose": {
       "stand":    "standing upright with both feet on the ground, arms at sides",
-      "sit":      "sitting on a chair, back straight, hands on lap or desk",
+      "sit":      "sitting with back straight, hands resting on the lap",
       "slump":    "shoulders drooped forward, head tilted down, curved back",
       "point":    "one arm extended forward, index finger pointing at something",
       "arms_up":  "both arms raised above head in celebration or stretching",
@@ -47,6 +48,32 @@
       "noon":    "bright overhead sunlight, short shadows, vivid clear colors",
       "evening": "warm orange-pink sunset glow, long shadows, golden hour tones",
       "night":   "dark blue sky, artificial indoor or street lighting, cool tones"
+    },
+    "narrative_beat": {
+      "hook":     "the opening moment that grabs attention before the story starts",
+      "problem":  "the moment the pain point surfaces and the reader sees what is wrong",
+      "solution": "the fix shown working, the character actively doing the thing that helps",
+      "cta":      "the closing panel that invites the reader to act",
+      "question": "putting the issue to the reader as an open question",
+      "fact":     "delivering concrete information plainly, without dramatization",
+      "benefit":  "emphasizing what the reader gains, the payoff made visible",
+      "before":   "the unresolved earlier situation, nothing has changed yet",
+      "turning":  "the moment the change begins, the first step away from the problem",
+      "after":    "the improved later situation, the problem no longer present"
+    },
+    "character_ratio": {
+      "2head":     "extreme chibi proportions — the head is about half of the total body height, very short limbs, simplified hands and feet",
+      "2.5head":   "strongly stylized cartoon proportions — the head is about 40% of the total body height, short limbs",
+      "3head":     "cartoon proportions — the head is about one third of the total body height",
+      "realistic": "natural human proportions, roughly seven to eight heads tall"
+    },
+    "life_stage": {
+      "student":        "students still in school",
+      "job_seeker":     "people job hunting",
+      "early_career":   "people in the first years of their career",
+      "parent":         "parents raising children",
+      "business_owner": "people running their own business",
+      "retired":        "retired people"
     }
   }
 }

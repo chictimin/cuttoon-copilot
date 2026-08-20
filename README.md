@@ -71,29 +71,31 @@ cuttoon-copilot/
 
 | 단계 | 로직·API | 화면 | 상태 | 관련 이슈 |
 | --- | --- | --- | --- | --- |
-| 1. 레퍼런스 업로드 | `POST /api/upload` · `lib/asset-store.ts` | mock 사용 | 미연결 | #87 (낮은 우선순위) |
-| 2. 스타일 추출 | `lib/openai/extract.ts` (실제 호출) | mock 사용 | 반쪽 | #87 (낮은 우선순위) |
+| 1. 레퍼런스 업로드 | `POST /api/upload` · `lib/asset-store.ts` | 연결됨 | 완료 | — |
+| 2. 스타일 추출 | `lib/openai/extract.ts` (실제 호출) | 연결됨 | 완료 | — |
 | 3. 프리셋 자동 확정 | `lib/llm/preset-guard.ts` | 있음 | 완료 | — |
 | 4. 프리셋 저장 | `GET·POST /api/preset` | 연결됨 | 완료 | — |
 | 5. 캐릭터 시트 표시 | — | 있음 | 완료 | — |
 | 6. 프로젝트 목록 | `GET /api/preset` (id 없이) | 연결됨 | 완료 | — |
 | 7. 소재 입력 | — | 있음 | 있음 | — |
-| 8. 브레인스토밍 3턴 | PR #53 대기(미머지) | mock 사용 | 미구현 | #83 (머지) · #84 (화면 재연결) |
-| 9. 표지컷 3안 | `generateCoverVariants` 실제 호출 연결됨(PR #80) | mock 사용 | 반쪽 | #82 |
-| 10. 4컷 생성 | `POST /api/generate` 실제 호출 연결됨(PR #80) | mock 사용 | 반쪽 | #82 |
+| 8. 브레인스토밍 3턴 | `POST /api/brainstorm` · `lib/llm/brainstorm.ts` (PR #53) | mock 사용 | 반쪽 | #84 (화면 재연결) · PR #98 (route가 `draft` 미전달) |
+| 9. 표지컷 3안 | `kind: 'cover_variants'` (PR #81) | 연결됨 | 완료 | #102 · #104 (후속) |
+| 10. 4컷 생성 | `POST /api/generate` 체이닝 | 연결됨 | 완료 | #102 · #103 · #104 (후속) |
 | 11. 대사 수정 · 드래그 | — | 있음 | 완료 | — |
 | 12. v2 저장 · 되돌리기 | `/api/session` `/version` `/revert` | 연결됨 | 완료 | — |
-| 13. Export ZIP | `GET /api/session/export` 완료 | 없음 | 반쪽 | #85 (다운로드 버튼) |
+| 13. Export ZIP | `GET /api/session/export` | 연결됨 | 완료 | — |
 
-알아둘 것 네 가지다.
+알아둘 것 다섯 가지다.
 
 **저장·조회 계열은 화면까지 이어졌습니다.** 프로젝트 목록(`GET /api/preset`), 프리셋 저장(`POST /api/preset`), 세션 저장(`POST /api/session`), 에디터의 조회·버전 저장·되돌리기가 모두 실제 API를 부릅니다.
 
-**이미지 생성은 백엔드가 실제 모델 호출로 붙었지만(PR #80), 화면이 아직 그걸 안 부릅니다.** 세션 화면(`SessionFlow.tsx`)이 `lib/openai/generate.ts`/`POST /api/generate` 대신 화면 폴더 안의 로컬 mock(`mock-generate.ts`)을 직접 호출하고 있어서, 9·10번은 지금 실행해도 placeholder만 나옵니다(#82). 브레인스토밍(8번)도 같은 이유로 로컬 mock(`mock-brainstorm.ts`)을 쓰는데, 실제 구현은 PR #53에 이미 있고 아직 미머지 상태입니다(#83·#84).
+**이미지 생성이 화면까지 이어졌습니다(PR #100).** 세션 화면(`SessionFlow.tsx`)이 로컬 mock 대신 `generate-client.ts`를 통해 `POST /api/generate`를 부릅니다 — 표지 3안은 `kind: 'cover_variants'` 1회 호출(서버가 3회를 대신 처리), 나머지 3컷은 `continuationToken` 체이닝으로 순차 생성입니다. `mock-generate.ts`는 삭제됐습니다. Export ZIP(13번)도 같은 PR에서 에디터에 다운로드 버튼이 붙었습니다.
 
-**레퍼런스 업로드·스타일 추출(1·2번)은 낮은 우선순위로 미뤄뒀습니다.** `readAsset()`이 mock asset URI를 못 찾으면 조용히 `null`을 반환해서, 화면이 mock인 채로 있어도 이후 생성 단계가 크래시 없이 돕니다 — 캐릭터 동일성 품질만 떨어집니다(#87).
+**레퍼런스 업로드·스타일 추출(1·2번)도 화면까지 이어졌습니다(PR #91, #95).** 온보딩 화면(`OnboardingFlow.tsx`)이 `style-analysis.ts`를 통해 `POST /api/upload`(Supabase Storage 저장) → `POST /api/extract`(실제 GPT-4o 호출)를 부르고, 캐릭터 시트도 `generateCharacterSheet` 실제 호출로 생성합니다(#87 closed).
 
-**P0 게이트를 아직 화면에서 검증하지 못했습니다.** `PRD.md` 7절이 "P0의 두 게이트가 가장 중요한 판단점"이라고 못 박았는데(캐릭터 4컷 동일성 / 말풍선 억제), 백엔드는 실제 호출이 붙었지만 화면이 아직 mock을 쓰고 있어(#82) 화면에서 눈으로 검증할 수 없는 상태입니다.
+**브레인스토밍(8번)만 mock으로 남았습니다.** `POST /api/brainstorm`과 `lib/llm/brainstorm.ts`는 PR #53으로 머지됐는데, 세션 화면이 여전히 로컬 mock(`mock-brainstorm.ts`)을 씁니다(#84). 그리고 그 라우트가 본문에서 `draft`를 읽지 않아 PRD 6절의 턴 건너뛰기·종료 판정이 HTTP로 도달하지 못하는 상태입니다 — PR #98이 그걸 고칩니다. 화면을 붙일 때 `draft`를 함께 보내야 턴 건너뛰기가 실제로 동작합니다.
+
+**P0 게이트는 이제 화면에서 볼 수 있지만, 팀 판정 기록은 아직 없습니다.** `PRD.md` 7절이 "P0의 두 게이트가 가장 중요한 판단점"이라고 못 박았는데(캐릭터 4컷 동일성 / 말풍선 억제), PR #100이 실제 브라우저로 골든패스를 끝까지 돌려 4장이 생성되는 것까지 확인했습니다. 남은 것은 그 결과물을 눈으로 보고 두 게이트를 통과했는지 **판정하고 기록하는 일**입니다.
 
 이 표는 손으로 갱신합니다. 단계를 완료하는 PR을 올릴 때 함께 고쳐주세요.
 

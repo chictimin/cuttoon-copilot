@@ -215,12 +215,29 @@ function bubbleShapeSvg(
   return ellipsePath(cx, cy, rx, ry, tail);
 }
 
+const VALID_BUBBLE_TYPES: BubbleType[] = ["rounded", "rect", "cloud"];
+
 function captionSvg(caption: Caption, canvasW: number, canvasH: number): string {
-  // storyboard.schema.json의 enum 5개 밖의 값이 저장 시점 검증을 뚫고 들어올 수 있다
+  // storyboard.schema.json의 enum 밖의 값이 저장 시점 검증을 뚫고 들어올 수 있다
   // (app/api/session/validate.ts는 아직 필드별 enum까지는 안 봄, #70). lib/render/는
   // 라이브러리 계층이라 호출자가 무엇을 넘기든 예외로 죽지 않는 편이 맞다고 보고
-  // center로 폴백한다.
-  const box = POSITION_BOX[caption.position] ?? POSITION_BOX.center;
+  // center/rounded로 폴백한다.
+  //
+  // #79: 폴백된 값을 한 번만 정하고 이후(box·shape·tail) 전부 그 값을 써야 한다 —
+  // box만 폴백하고 tailSvg()엔 원본을 넘기면 몸통은 center인데 꼬리는 안 그려져야
+  // 할 자리에 그려지는 식으로 서로 어긋난다.
+  const position: Position = caption.position in POSITION_BOX ? caption.position : "center";
+  if (position !== caption.position) {
+    console.warn(`[compose] 알 수 없는 caption.position "${caption.position}" — center로 폴백`);
+  }
+  const bubbleType: BubbleType = VALID_BUBBLE_TYPES.includes(caption.bubble_type)
+    ? caption.bubble_type
+    : "rounded";
+  if (bubbleType !== caption.bubble_type) {
+    console.warn(`[compose] 알 수 없는 caption.bubble_type "${caption.bubble_type}" — rounded로 폴백`);
+  }
+
+  const box = POSITION_BOX[position];
   const x = box.x * canvasW;
   const maxWidth = box.w * canvasW;
   const maxHeight = canvasH * 0.3;
@@ -230,7 +247,10 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number): string 
   const bubbleH = textH + PADDING * 2;
   const y = box.y * canvasH;
 
-  const shape = bubbleShapeSvg(caption.bubble_type, x, y, maxWidth, bubbleH, caption.position, canvasW, canvasH);
+  // #79/#92 fallback을 여기서도 그대로 이어받는다 — bubbleShapeSvg에 원본 caption.*을
+  // 넘기면 몸통/꼬리 계산에 유효하지 않은 enum이 들어가 버리므로, 위에서 이미
+  // center/rounded로 정리한 position/bubbleType을 넘긴다.
+  const shape = bubbleShapeSvg(bubbleType, x, y, maxWidth, bubbleH, position, canvasW, canvasH);
 
   const cx = x + maxWidth / 2;
   const firstLineY = y + PADDING + fontSize * 0.85;

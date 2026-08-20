@@ -1,49 +1,31 @@
-// 세션(A②) 임시 브레인스토밍 mock. 3턴 슬롯채우기 LLM은 A①(lib/llm/) 소관이지만 아직
-// 없어서 내 폴더 안에 mock을 둔다 (담당 아닌 폴더에 임시 파일을 만들지 않는다 — 팀 브랜치
-// 규약). PRD.md 6절: "최대 3턴, 매 턴 선택지 3개 + 직접 쓸게 + 알아서 해줘. 종료 판정은
+// 세션(A②) 스토리보드 조립. 3턴 답변을 storyboard.schema.json 형태로 엮는다.
+//
+// 이 파일은 mock이 아니다 — 규칙 기반 조립이 실제 동작이다(issue #84로
+// mock-brainstorm.ts에서 이름을 바꿨다). 브레인스토밍 선택지 생성은 실제 LLM
+// (`POST /api/brainstorm`)으로 넘어갔고, 여기 남은 것은 그 답변을 4컷 구조로
+// 변환하는 결정적 로직이다.
+//
+// PRD.md 6절: "최대 3턴, 매 턴 선택지 3개 + 직접 쓸게 + 알아서 해줘. 종료 판정은
 // 필수 슬롯이 전부 찼는가로 결정적이어야 한다."
 
 import type { CastMember, Cut, NarrativeBeat, Storyboard } from "./storyboard-types";
 
-export interface BrainstormTurn {
-  key: "protagonist" | "supporting" | "flow";
-  question: string;
-  options: string[];
-}
-
-export const BRAINSTORM_TURNS: BrainstormTurn[] = [
-  {
-    key: "protagonist",
-    question: "주인공은 누구인가요?",
-    options: [
-      "무릎이 아픈 60대 어머니",
-      "다이어트 중인 20대 직장인",
-      "허리가 안 좋은 40대 아버지",
-    ],
-  },
-  {
-    key: "supporting",
-    question: "함께 등장할 인물이 있나요?",
-    options: ["노인운동 지도사", "가족 한 명", "혼자 진행 (조연 없음)"],
-  },
-  {
-    key: "flow",
-    question: "어떤 흐름으로 풀어볼까요?",
-    options: [
-      "문제 제기 → 이전 상황 → 해결 → CTA",
-      "질문 던지기 → 사실 전달 → 효과 강조 → CTA",
-      "이전 상황 → 전환 계기 → 이후 → CTA",
-    ],
-  },
-];
-
 const NO_SUPPORTING_OPTION = "혼자 진행 (조연 없음)";
 
+// 흐름 선택은 자유 텍스트가 아니라 NarrativeBeat 템플릿을 고르는 것이다. beat 값은
+// storyboard.schema.json의 narrative_beat enum에 묶여 있어서 임의 문자열로 대체할 수
+// 없다. 그래서 이 턴만은 LLM 생성 선택지를 쓰지 않고 여기 키를 그대로 화면에 낸다 —
+// 키가 어긋나면 아래 조립이 조용히 첫 템플릿으로 폴백해 흐름 선택이 무의미해진다.
 const FLOW_BEATS: Record<string, NarrativeBeat[]> = {
   "문제 제기 → 이전 상황 → 해결 → CTA": ["problem", "before", "solution", "cta"],
   "질문 던지기 → 사실 전달 → 효과 강조 → CTA": ["question", "fact", "benefit", "cta"],
   "이전 상황 → 전환 계기 → 이후 → CTA": ["before", "turning", "after", "cta"],
 };
+
+/** 화면의 flow 턴 선택지. FLOW_BEATS 키와 항상 일치해야 한다. */
+export const FLOW_OPTIONS = Object.keys(FLOW_BEATS);
+
+export const FLOW_QUESTION = "어떤 흐름으로 풀어볼까요?";
 
 const BEAT_EXPRESSION_POSE: Record<NarrativeBeat, { expression: Cut["characters_in_frame"][number]["expression"]; pose: Cut["characters_in_frame"][number]["pose"] }> = {
   hook: { expression: "surprised", pose: "stand" },
