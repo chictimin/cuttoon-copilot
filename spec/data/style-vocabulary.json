@@ -1,0 +1,39 @@
+{
+  "vocabulary_version": "1.0",
+  "_comment": "issue #15: style.keywords/rules.forbidden은 enum이 아닌 자유 태그라(preset.schema.json), 프롬프트 조립 시 모델이 못 알아듣는 한국어 단어가 섞일 위험이 있다. 여기 등재된 단어는 prompt_hints의 영문 표현으로 치환해 프롬프트에 넣는다. context.industry/context.main_subjects는 의도적으로 업종 종속 없는 자유 필드라(스키마 주석 참고) 대상에서 제외 — pass-through.",
+
+  "style.keywords": {
+    "귀여운": { "hint": "cute, endearing" },
+    "아기자기한": { "hint": "cute, delicate details" },
+    "파스텔": { "hint": "pastel color palette" },
+    "카툰": { "hint": "cartoon style" },
+    "심플": { "hint": "simple, minimal linework" },
+    "미니멀": { "hint": "minimal, clean design" },
+    "따뜻한": { "hint": "warm tone" },
+    "발랄한": { "hint": "cheerful, bright" },
+    "차분한": { "hint": "calm, muted tone" },
+    "동글동글": { "hint": "rounded, soft shapes" },
+    "선명한": { "hint": "vivid, high-contrast color" },
+    "말랑한": { "hint": "soft, plush look" },
+    "손그림": { "hint": "hand-drawn look" },
+    "수채화": { "hint": "watercolor texture" },
+    "레트로": { "hint": "retro style" },
+    "부드러운": { "hint": "soft shading" },
+    "빈티지": { "hint": "vintage tone" },
+    "모던": { "hint": "modern, clean design" }
+  },
+
+  "rules.forbidden": {
+    "무서운 표정": { "hint": "scary or frightening facial expressions" },
+    "사실적(실사) 렌더링": { "hint": "photorealistic rendering" },
+    "실사": { "hint": "photorealistic rendering" },
+    "폭력적인 이미지": { "hint": "violent imagery" },
+    "선정적인 노출": { "hint": "sexualized or revealing content" },
+    "특정 브랜드 로고": { "hint": "real brand logos or trademarks" },
+    "정치적 상징": { "hint": "political symbols" },
+    "종교적 상징": { "hint": "religious symbols" },
+    "실제 인물 얼굴": { "hint": "real identifiable human faces" },
+    "잔인한 장면": { "hint": "gory or graphic scenes" },
+    "어두운 분위기": { "hint": "dark, grim atmosphere" }
+  }
+}
