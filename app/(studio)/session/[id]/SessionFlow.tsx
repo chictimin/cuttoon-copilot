@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { assertStoryboardRuntimeInvariants } from "@/lib/llm/storyboard-guard";
+import type { Preset } from "@/lib/llm/preset-guard";
 import {
   assembleStoryboard,
   BRAINSTORM_TURNS,
   type BrainstormAnswers,
   type BrainstormTurn,
 } from "./mock-brainstorm";
-import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./mock-generate";
+import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
 import type { Cut, Storyboard } from "./storyboard-types";
 
 type Step = "subject" | "brainstorm" | "assembling" | "cover" | "generating" | "cuts" | "saved";
@@ -27,7 +28,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [customText, setCustomText] = useState("");
   const [isCustomOpen, setIsCustomOpen] = useState(false);
   const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
+  const [preset, setPreset] = useState<Preset | null>(null);
   const [coverVariants, setCoverVariants] = useState<GeneratedCut[] | null>(null);
+  const [cutImageUrls, setCutImageUrls] = useState<Record<number, string>>({});
+  const [genError, setGenError] = useState<string | null>(null);
   const [editingCutIndex, setEditingCutIndex] = useState<number | null>(null);
   const [draftCaption, setDraftCaption] = useState("");
   const [saving, setSaving] = useState(false);
@@ -74,43 +78,73 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   async function loadCoverVariants() {
     if (!storyboard) return;
-    const prompt = promptForCut(storyboard.subject, storyboard.cuts[0]);
-    const variants = await generateCoverVariants(prompt);
-    setCoverVariants(variants);
+    setGenError(null);
+
+    const presetId = window.sessionStorage.getItem("cuttoon:preset-id");
+    if (!presetId) {
+      setGenError("먼저 온보딩에서 프로젝트를 만들어주세요");
+      return;
+    }
+
+    try {
+      const presetRes = await fetch(`/api/preset?id=${presetId}`);
+      if (!presetRes.ok) throw new Error("프리셋을 찾을 수 없습니다");
+      const { preset: loadedPreset } = (await presetRes.json()) as { preset: Preset };
+      setPreset(loadedPreset);
+
+      const variants = await generateCoverVariants(storyboard, loadedPreset);
+      setCoverVariants(variants);
+    } catch {
+      setGenError("표지를 만드는 데 실패했어요. 다시 시도해주세요");
+    }
   }
 
   async function handleSelectCover(variant: GeneratedCut) {
-    if (!storyboard) return;
+    if (!storyboard || !preset) return;
+    const firstCutIndex = storyboard.cuts[0].cut_index;
     const updated: Storyboard = {
       ...storyboard,
       cuts: storyboard.cuts.map((cut, i) =>
-        i === 0 ? { ...cut, generated_image: variant.image, prompt_used: variant.prompt } : cut
+        i === 0
+          ? { ...cut, generated_image: variant.asset, prompt_used: promptForCut(storyboard.subject, cut) }
+          : cut
       ),
     };
     setStoryboard(updated);
+    setCutImageUrls((prev) => ({ ...prev, [firstCutIndex]: variant.image }));
     setStep("generating");
+    setGenError(null);
 
-    const remaining = updated.cuts.slice(1);
-    const generated = await generateChainedCuts(
-      remaining.map((cut) => promptForCut(updated.subject, cut))
-    );
+    try {
+      const generated = await generateChainedCuts(updated, preset, variant.continuationToken ?? "");
 
-    setStoryboard((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        cuts: prev.cuts.map((cut, i) =>
-          i === 0
-            ? cut
-            : {
-                ...cut,
-                generated_image: generated[i - 1].image,
-                prompt_used: generated[i - 1].prompt,
-              }
-        ),
-      };
-    });
-    setStep("cuts");
+      setStoryboard((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          cuts: prev.cuts.map((cut, i) =>
+            i === 0
+              ? cut
+              : {
+                  ...cut,
+                  generated_image: generated[i - 1].asset,
+                  prompt_used: promptForCut(prev.subject, cut),
+                }
+          ),
+        };
+      });
+      setCutImageUrls((prev) => {
+        const next = { ...prev };
+        updated.cuts.slice(1).forEach((cut, i) => {
+          next[cut.cut_index] = generated[i].image;
+        });
+        return next;
+      });
+      setStep("cuts");
+    } catch {
+      setGenError("나머지 컷 생성에 실패했어요. 다시 시도해주세요");
+      setStep("cover");
+    }
   }
 
   function updateCaption(index: number, text: string) {
@@ -258,10 +292,28 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       )}
 
       {step === "assembling" && <Spinner text="이야기를 엮고 있어요..." />}
-      {step === "cover" && !coverVariants && <Spinner text="표지 3안을 그리고 있어요..." />}
+      {step === "cover" && !coverVariants && !genError && <Spinner text="표지 3안을 그리고 있어요..." />}
       {step === "generating" && <Spinner text="나머지 컷을 완성하고 있어요..." />}
 
-      {step === "cover" && coverVariants && storyboard && (
+      {(step === "cover" || step === "generating") && genError && (
+        <div className="flex flex-col items-center gap-3 text-center">
+          <p className="rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">{genError}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setGenError(null);
+              setCoverVariants(null);
+              setStep("cover");
+              void loadCoverVariants();
+            }}
+            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
+
+      {step === "cover" && coverVariants && storyboard && !genError && (
         <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
           <h1 className="text-xl font-semibold">마음에 드는 표지를 골라주세요</h1>
           <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
@@ -304,7 +356,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 <div className="relative">
                   {/* eslint-disable-next-line @next/next/no-img-element -- mock placeholder, next/image 불필요 */}
                   <img
-                    src={cut.generated_image ?? ""}
+                    src={cutImageUrls[cut.cut_index] ?? ""}
                     alt={`컷 ${cut.cut_index}`}
                     className="aspect-square w-full rounded-md object-cover"
                   />
