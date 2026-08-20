@@ -1,4 +1,8 @@
-import { generateBrainstormTurns, type DraftStoryboard } from "@/lib/llm/brainstorm";
+import {
+  generateBrainstormTurns,
+  extractDraftFromSubject,
+  type DraftStoryboard,
+} from "@/lib/llm/brainstorm";
 
 export const runtime = "nodejs";
 
@@ -26,8 +30,15 @@ export async function POST(request: Request) {
       return Response.json({ error: "소재가 필요합니다" }, { status: 400 });
     }
 
-    const turns = await generateBrainstormTurns(subject.trim(), parseDraft(body.draft));
-    return Response.json({ turns });
+    // issue #119-1: 클라이언트가 draft를 보내는 경로는 아직 없다(첫 호출 시점엔
+    // 답변이 하나도 없어 만들 수 없다) — 대신 서버가 subject에서 자체 추출한다.
+    // body.draft가 명시적으로 오면(향후 확장 대비, 지금은 안 옴) 그걸 우선한다.
+    const suppliedDraft = parseDraft(body.draft);
+    const extracted = suppliedDraft ? undefined : await extractDraftFromSubject(subject.trim());
+    const draft = suppliedDraft ?? extracted?.draft;
+
+    const turns = await generateBrainstormTurns(subject.trim(), draft);
+    return Response.json({ turns, resolved: extracted?.resolved ?? [] });
   } catch (error) {
     console.error("브레인스토밍 에러:", error);
     return Response.json(

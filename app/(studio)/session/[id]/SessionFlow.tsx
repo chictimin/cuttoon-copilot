@@ -6,7 +6,10 @@ import { assertStoryboardRuntimeInvariants } from "@/lib/llm/storyboard-guard";
 import type { Preset } from "@/lib/llm/preset-guard";
 // 타입만 가져온다 — lib/llm/brainstorm.ts 는 OPENAI_API_KEY 를 쓰는 서버 모듈이라
 // 런타임 import 는 클라이언트로 넘어오면 안 된다.
-import type { BrainstormTurn } from "@/lib/llm/brainstorm";
+import type { BrainstormTurn, ExtractedSlot } from "@/lib/llm/brainstorm";
+// brainstorm.ts와는 별개 파일이다 — OPENAI_API_KEY를 쓰지 않는 순수 상수라
+// 값으로 import해도 위 규칙에 안 걸린다(lib/llm/brainstorm-options.ts 참고).
+import { NO_SUPPORTING_OPTION } from "@/lib/llm/brainstorm-options";
 import {
   assembleStoryboard,
   FLOW_OPTIONS,
@@ -17,8 +20,6 @@ import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from ".
 import type { Cut, Storyboard } from "./storyboard-types";
 
 type Step = "subject" | "brainstorm" | "assembling" | "cover" | "generating" | "cuts" | "saved";
-
-const NO_SUPPORTING_OPTION = "혼자 진행 (조연 없음)";
 
 const TURN_ORDER: BrainstormTurn["key"][] = ["protagonist", "supporting", "flow"];
 
@@ -104,6 +105,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [turnIndex, setTurnIndex] = useState(0);
   const [turns, setTurns] = useState<BrainstormTurn[] | null>(null);
   const [turnsError, setTurnsError] = useState<string | null>(null);
+  // issue #119-1: 소재에서 이미 파악된 슬롯 — 화면 안내 배너용. 서버가 answers를
+  // 대신 채워준 것이라 값 자체는 answers state에도 이미 들어가 있다.
+  const [resolvedSlots, setResolvedSlots] = useState<ExtractedSlot[]>([]);
   const [answers, setAnswers] = useState<Partial<Record<BrainstormTurn["key"], string>>>({});
   const [customText, setCustomText] = useState("");
   const [isCustomOpen, setIsCustomOpen] = useState(false);
@@ -117,6 +121,33 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [draftCaption, setDraftCaption] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [presetError, setPresetError] = useState<string | null>(null);
+
+  // issue #123: preset(상의 색 후보 palette 포함)을 브레인스토밍 진행과 병렬로
+  // 미리 받아둔다. 원래는 "cover" 단계(loadCoverVariants)에서만 fetch했는데, 그러면
+  // storyboard 조립 시점(assembleStoryboard 호출)에 palette 값이 없어서 주인공
+  // 상의 색을 세션당 1회로 고정할 수 없었다(#113 케이스 5 — 4컷 내내 색이 흔들림).
+  // presetId는 온보딩이 남겨둔 sessionStorage 값이라 마운트 시 바로 조회 가능하다.
+  useEffect(() => {
+    void loadPreset();
+  }, [sessionId]);
+
+  async function loadPreset() {
+    const presetId = window.sessionStorage.getItem("cuttoon:preset-id");
+    if (!presetId) {
+      setPresetError("먼저 온보딩에서 프로젝트를 만들어주세요");
+      return;
+    }
+    try {
+      const res = await fetch(`/api/preset?id=${presetId}`);
+      if (!res.ok) throw new Error("프리셋을 찾을 수 없습니다");
+      const { preset: loaded } = (await res.json()) as { preset: Preset };
+      setPreset(loaded);
+      setPresetError(null);
+    } catch {
+      setPresetError("프로젝트 정보를 불러오지 못했어요. 다시 시도해주세요");
+    }
+  }
 
   // issue #143: 마운트 시 이 id로 이미 저장된 세션이 있는지 확인한다. 있으면
   // (POST /api/session은 handleSave에서 골든패스 완주 후에만 호출되므로,
@@ -174,9 +205,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // 소재에 맞는 선택지를 실제 LLM 으로 받아온다 (issue #84). 이전에는 화면 안의
   // 하드코딩 상수(BRAINSTORM_TURNS)를 썼다.
   //
-  // draft 는 보내지 않는다 — 이 시점에는 답변이 하나도 없어 항상 빈 draft 이고,
-  // 소재 텍스트에서 슬롯을 채운 draft 를 만드는 단계가 아직 없다. 그래서 PRD 6절의
-  // "소재에 이미 정보가 있으면 해당 턴은 건너뛴다" 는 여기서 실현되지 않는다.
+  // issue #119-1: draft는 여전히 클라이언트가 만들어 보내지 않는다 — 이 시점엔
+  // 답변이 하나도 없다. 대신 서버(/api/brainstorm)가 subject만으로 자체 추출해서
+  // 이미 파악된 슬롯을 resolved로 함께 돌려준다. 그 값으로 answers를 미리 채우면
+  // generateBrainstormTurns가 이미 걸러낸 턴 배열(남은 것만)과 answers가 맞아
+  // 떨어진다 — PRD 6절 "소재에 이미 정보가 있으면 해당 턴은 건너뛴다"가 여기서
+  // 실현된다.
   // 여기서 setTurnsError(null) 로 시작하지 않는다 — effect 가 이 함수를 부르는
   // 경로에서 동기 setState 가 되어 cascading render 를 만든다
   // (react-hooks/set-state-in-effect). 초기화는 재시도 버튼 쪽에서 한다.
@@ -196,9 +230,20 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error ?? "선택지를 만들지 못했습니다");
       }
-      const { turns: loaded } = (await res.json()) as { turns: BrainstormTurn[] };
+      const { turns: loaded, resolved } = (await res.json()) as {
+        turns: BrainstormTurn[];
+        resolved?: ExtractedSlot[];
+      };
       if (!Array.isArray(loaded) || loaded.length === 0) {
         throw new Error("선택지가 비어 있습니다");
+      }
+      if (resolved && resolved.length > 0) {
+        setAnswers((prev) => {
+          const next = { ...prev };
+          for (const slot of resolved) next[slot.key] = slot.value;
+          return next;
+        });
+        setResolvedSlots(resolved);
       }
       setTurns(normalizeTurns(loaded));
     } catch {
@@ -216,6 +261,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     if (step !== "assembling") return;
+    // preset(palette)이 아직 안 왔으면 기다린다 — 도착하면 이 effect가 preset을
+    // 의존성으로 다시 실행된다. presetError가 나면 아래 렌더링이 재시도를 보여준다.
+    if (!preset) return;
+
     const full: BrainstormAnswers = {
       protagonist: answers.protagonist ?? "",
       supporting:
@@ -226,12 +275,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     };
 
     const timer = setTimeout(() => {
-      setStoryboard(assembleStoryboard(subject, full));
+      setStoryboard(assembleStoryboard(subject, full, preset.style.palette));
       setStep("cover");
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+  }, [step, preset]);
 
   useEffect(() => {
     if (step !== "cover" || !storyboard || coverVariants) return;
@@ -240,22 +289,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   }, [step, storyboard]);
 
   async function loadCoverVariants() {
-    if (!storyboard) return;
+    // preset은 assembling effect가 "cover"로 넘어가기 전에 이미 기다렸으므로
+    // 이 시점엔 항상 준비돼 있다 — 여기서 다시 fetch하지 않는다(issue #123).
+    if (!storyboard || !preset) return;
     setGenError(null);
 
-    const presetId = window.sessionStorage.getItem("cuttoon:preset-id");
-    if (!presetId) {
-      setGenError("먼저 온보딩에서 프로젝트를 만들어주세요");
-      return;
-    }
-
     try {
-      const presetRes = await fetch(`/api/preset?id=${presetId}`);
-      if (!presetRes.ok) throw new Error("프리셋을 찾을 수 없습니다");
-      const { preset: loadedPreset } = (await presetRes.json()) as { preset: Preset };
-      setPreset(loadedPreset);
-
-      const { variants, requested } = await generateCoverVariants(storyboard, loadedPreset);
+      const { variants, requested } = await generateCoverVariants(storyboard, preset);
       setCoverVariants(variants);
       setCoverRequested(requested);
     } catch {
@@ -384,6 +424,24 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
+      {/* issue #123: preset을 마운트 시점에 미리 받는데, 그 실패는 storyboard가
+          조립되기 전(subject·brainstorm·assembling 단계 전부) 어디서든 보여줘야
+          한다 — assembling까지 3턴을 다 진행한 뒤에야 알리면 너무 늦다.
+          checkingExisting은 위에서 이미 걸러졌고, storyboard가 있으면(복원된
+          세션이거나 이미 조립됐으면) preset 문제와 무관하니 띄우지 않는다. */}
+      {presetError && !storyboard && (
+        <div className="flex w-full max-w-xl flex-col items-center gap-3 rounded-md bg-red-50 px-4 py-3 text-center">
+          <p className="text-sm text-red-600">{presetError}</p>
+          <button
+            type="button"
+            onClick={() => void loadPreset()}
+            className="rounded-md bg-zinc-900 px-4 py-2 text-xs font-medium text-white hover:bg-zinc-700"
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
+
       {step === "subject" && (
         <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
           <h1 className="text-xl font-semibold">이번엔 어떤 이야기를 만들어볼까요?</h1>
@@ -429,6 +487,20 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
       {step === "brainstorm" && turns && (
         <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
+          {/* issue #119-1: 소재에서 이미 파악된 슬롯이 있으면 알려준다 — 3턴이
+              갑자기 줄어든 이유를 사용자가 알 수 있게. */}
+          {resolvedSlots.length > 0 && (
+            <div className="w-full rounded-md bg-zinc-50 px-4 py-2 text-left text-xs text-zinc-500">
+              <p>소재에서 몇 가지는 이미 파악했어요</p>
+              <ul className="mt-1 list-disc pl-4">
+                {resolvedSlots.map((slot) => (
+                  <li key={slot.key}>
+                    {slot.key === "protagonist" ? "주인공" : "조연"}: {slot.value}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <p className="text-xs text-zinc-400">
             {turnIndex + 1} / {turns.length}
           </p>
@@ -488,7 +560,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
-      {step === "assembling" && <Spinner text="이야기를 엮고 있어요..." />}
+      {step === "assembling" && !presetError && <Spinner text="이야기를 엮고 있어요..." />}
       {step === "cover" && !coverVariants && !genError && <Spinner text="표지 3안을 그리고 있어요..." />}
       {step === "generating" && <Spinner text="나머지 컷을 완성하고 있어요..." />}
 
