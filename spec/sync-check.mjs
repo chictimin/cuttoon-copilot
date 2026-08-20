@@ -126,6 +126,10 @@ const HINT_REQUIRED = [
     key: "character_ratio",
     schemaPath: ["properties", "style", "properties", "character_ratio"],
   },
+  {
+    key: "life_stage",
+    schemaPath: ["properties", "context", "properties", "life_stage", "items"],
+  },
 ];
 
 const HINT_NOT_REQUIRED = {
