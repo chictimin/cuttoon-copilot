@@ -16,10 +16,32 @@
 
 import { isValidCtaId } from "./cta-presets";
 
+export interface CastMember {
+  character_id: string;
+  role: "protagonist" | "supporting";
+  description?: string;
+}
+
 export interface StoryboardCut {
   cut_index: number;
   narrative_beat: string;
+  shot_type?: string;
+  camera_angle?: string;
+  characters_in_frame?: Array<{
+    character_id: string;
+    expression?: string;
+    pose?: string;
+  }>;
+  caption?: unknown;
+  time_of_day?: string;
   cta_override?: string | null;
+}
+
+export interface Storyboard {
+  storyboard_version: "1.0";
+  subject: string;
+  cast: CastMember[];
+  cuts: StoryboardCut[];
 }
 
 export class StoryboardValidationError extends Error {}
