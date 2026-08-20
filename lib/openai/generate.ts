@@ -234,13 +234,27 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
     `The story is about ${storyboard.subject ?? 'a person dealing with an everyday situation'}. ` +
       `Make that situation visible in the character's body, gesture and surroundings ` +
       `as far as the framing allows — not just as a mood on the face. ` +
-      // 소재가 옷 아래 신체 부위일 때(무릎·허리·어깨 등) 모델이 그 부위를 드러내려고
-      // 옷을 뚫는다 — codex 검증에서 바지 무릎 자리에 살색 구멍이 4/4 로 생겼고, 한 장은
-      // 찢어진 것처럼 보였다. 의학 일러스트의 습관에 가깝고 인스타툰 결과물로는 못 쓴다.
-      // 자세·손짓·효과선으로 전달하도록 못박는다.
-      `Convey it through posture, gesture and the surrounding scene only. ` +
-      `Clothing stays whole and opaque — never cut, tear, remove or see through it, ` +
-      `and never draw exposed skin or internal anatomy to point at the affected part.`
+      // "구체적으로 보이게 하라" 가 다른 제약과 부딪칠 때마다 새 형태로 터졌다. 세 번
+      // 같은 계열이었다.
+      //
+      //   1. 지시가 없을 때  -> 소재가 표정으로만 처리됨 (4/4 "걱정하는 얼굴")
+      //   2. 옷 아래 부위     -> 바지를 뚫어 무릎을 노출 (4/4, 한 장은 찢어진 형태)
+      //   3. 소재에 숫자      -> "87%" 를 도넛 그래프로 그림 (#146, 4컷 중 2컷)
+      //
+      // 예외를 하나씩 붙이면 네 번째가 나온다. 원인은 모델이 소재를 **설명하려 드는**
+      // 것이므로, 표현 통로를 좁게 열거하고 설명 장치를 통째로 막는다.
+      //
+      // 효과선은 허용한다 (#133 결정 6) — 그림의 관례이고 설명 장치가 아니다.
+      // 숫자·통계는 캡션 레이어의 몫이다: 대사를 고칠 때 이미지를 재생성하지 않는다는
+      // PRD 6절 원칙과 같은 이유로, 수치가 그림에 구워지면 안 된다.
+      `Convey it only through the character's expression, posture, gesture and the ` +
+      `physical setting they are in. This is a story panel, not an explanatory ` +
+      `illustration — never draw charts, graphs, gauges, diagrams, arrows, icons, ` +
+      `labels or cutaway views. Any number, statistic or comparison in the story ` +
+      `belongs to the caption layer, not to the drawing. Clothing stays whole and ` +
+      `opaque — never cut, tear, remove or see through it, and never draw exposed ` +
+      `skin or internal anatomy. Comic effect marks (pain flashes, motion lines, ` +
+      `sweat drops) are fine — they are drawing, not explanation.`
   )
 
   // 사용자가 온보딩에서 고른 타깃·업종. 값이 없으면 문장을 아예 넣지 않는다 —
