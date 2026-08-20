@@ -250,6 +250,11 @@ async function callImageGeneration(
 // extract.ts(B②)에 같은 헬퍼가 있지만 거기서 가져오면 순환 import 가 된다
 // (extract.ts 가 이미 이 파일의 OUTPUT_SIZE 를 가져다 쓴다). 나중에 공용 위치로
 // 옮길 수 있으면 한쪽으로 합치는 편이 낫다.
+//
+// ponytail: crop position 은 기본값(centre)이다. 비정사각형 출력에서 중앙 크롭이
+// reserved_zone 과 같은 축에 걸리면 말풍선 여백이 깎인다 — compose.ts(B③)가
+// reserved_zone 을 아직 읽지 않아 지금은 비활성이고, 읽기 시작할 때 position 을
+// zone 반대쪽으로 지정해야 한다. #105 에서 추적한다.
 async function resizeToOutput(base64: string): Promise<Buffer> {
   return sharp(Buffer.from(base64, 'base64'))
     .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: 'cover' })
@@ -284,7 +289,10 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   const cut = storyboard.cuts?.[0]
   const prompt = buildCutPrompt(storyboard, preset, cut)
 
-  const variants = await Promise.all(
+  // allSettled 인 이유: 3안은 각각 별도 유료 호출이다. Promise.all 이면 한 안이
+  // 후처리(sharp·업로드)에서 실패할 때 이미 성공한 나머지 안까지 같이 버려져
+  // 성공분 생성비가 그대로 날아간다 (#104). 성공한 것만 살려서 돌려준다.
+  const settled = await Promise.allSettled(
     Array.from({ length: input.count }, async (): Promise<GeneratedImageResult> => {
       const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets)
       const buffer = await resizeToOutput(base64)
@@ -297,6 +305,18 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
       }
     })
   )
+
+  const variants = settled
+    .filter((r): r is PromiseFulfilledResult<GeneratedImageResult> => r.status === 'fulfilled')
+    .map((r) => r.value)
+
+  for (const r of settled) {
+    if (r.status === 'rejected') console.error('[generate] 표지 안 하나 실패', r.reason)
+  }
+
+  // 전부 실패면 던진다 — 빈 배열을 돌려주면 호출부가 "생성됐는데 0안"으로 읽어
+  // 조용히 빈 선택 화면을 띄운다. route.ts 가 500 으로 바꾼다.
+  if (variants.length === 0) throw new Error('표지 3안 생성이 모두 실패했습니다')
 
   return variants
 }

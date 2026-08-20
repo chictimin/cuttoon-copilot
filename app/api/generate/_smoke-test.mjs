@@ -64,11 +64,43 @@ function checkWiring() {
   );
 }
 
+// #104: 3안은 각각 별도 유료 호출이다. Promise.all 로 되돌리면 한 안의 후처리
+// 실패가 이미 성공한 안의 생성비까지 날린다. 실제 동작은 유료 호출이 필요해
+// 확인할 수 없으므로 되돌림만 막는다 — 이 검사는 필터 로직의 정확성은 보증하지 않는다.
+function checkCoverVariantsSettled() {
+  const src = readFileSync(
+    new URL("../../../lib/openai/generate.ts", import.meta.url),
+    "utf8"
+  ).replace(/\/\/.*$/gm, "");
+
+  const at = src.indexOf("export const generateCoverVariants");
+  assert.notEqual(at, -1, "generate.ts에서 generateCoverVariants를 찾지 못했습니다");
+  const fn = src.slice(at);
+  assert.match(
+    fn,
+    /Promise\.allSettled/,
+    "generateCoverVariants가 Promise.allSettled를 쓰지 않습니다 — 한 안의 실패가 성공한 안의 생성비를 날립니다 (#104)"
+  );
+  assert.doesNotMatch(
+    fn,
+    /Promise\.all\(/,
+    "generateCoverVariants에 Promise.all(이 남아 있습니다 (#104)"
+  );
+}
+
 let failed = 0;
 
 try {
   checkWiring();
   console.log("ok   [정적] route가 continueFrom을 읽어 generateCut에 전달");
+} catch (err) {
+  failed++;
+  console.error(`FAIL [정적] ${err.message}`);
+}
+
+try {
+  checkCoverVariantsSettled();
+  console.log("ok   [정적] 표지 3안이 allSettled로 성공분을 보존");
 } catch (err) {
   failed++;
   console.error(`FAIL [정적] ${err.message}`);
@@ -131,7 +163,7 @@ for (const [name, init, status, check] of cases) {
   }
 }
 
-const total = cases.length + 1; // + 정적 배선 검사
+const total = cases.length + 2; // + 정적 검사 2건
 if (failed > 0) {
   console.error(`\n${failed}건 실패`);
   process.exit(1);
