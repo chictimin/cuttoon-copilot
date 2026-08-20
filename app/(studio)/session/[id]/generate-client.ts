@@ -58,13 +58,24 @@ async function callGenerateCut(input: {
   return toGeneratedCut(result);
 }
 
+export interface CoverVariantsResult {
+  variants: GeneratedCut[];
+  /**
+   * 요청한 안 개수(항상 3, #50). generateCoverVariants가 allSettled라 일부
+   * 안이 후처리에서 실패하면 variants.length가 이보다 작을 수 있다(#108) —
+   * 화면이 variants.length < requested로 부족분을 판단한다(issue #117).
+   * 구버전 서버 호환으로 응답에 없을 수 있어 optional이다.
+   */
+  requested?: number;
+}
+
 // 표지 3안 — 독립 호출(PRD 6절: 체이닝하면 2안이 1안에 끌려가 서로 닮아버림).
 // storyboard는 cuts[0].generated_image가 아직 null인 상태로 넘겨야 한다.
 // count=3은 서버 계약이 리터럴로 고정하므로 여기서 따로 받지 않는다.
 export async function generateCoverVariants(
   storyboard: Storyboard,
   preset: Preset
-): Promise<GeneratedCut[]> {
+): Promise<CoverVariantsResult> {
   const referenceAssets = referenceAssetsOf(preset);
   const res = await fetch("/api/generate", {
     method: "POST",
@@ -75,10 +86,12 @@ export async function generateCoverVariants(
     const body = await res.json().catch(() => null);
     throw new Error(body?.error ?? "표지 생성에 실패했습니다");
   }
-  const { result } = (await res.json()) as {
+  const { result, requested } = (await res.json()) as {
     result: Array<{ asset: string; continuationToken?: string }>;
+    requested?: number;
   };
-  return Promise.all(result.map(toGeneratedCut));
+  const variants = await Promise.all(result.map(toGeneratedCut));
+  return { variants, requested };
 }
 
 // 표지 선택 이후 나머지 3컷 — continuationToken(previous_response_id) 체이닝으로

@@ -75,6 +75,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
   const [preset, setPreset] = useState<Preset | null>(null);
   const [coverVariants, setCoverVariants] = useState<GeneratedCut[] | null>(null);
+  const [coverRequested, setCoverRequested] = useState<number | undefined>(undefined);
   const [cutImageUrls, setCutImageUrls] = useState<Record<number, string>>({});
   const [genError, setGenError] = useState<string | null>(null);
   const [editingCutIndex, setEditingCutIndex] = useState<number | null>(null);
@@ -181,8 +182,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       const { preset: loadedPreset } = (await presetRes.json()) as { preset: Preset };
       setPreset(loadedPreset);
 
-      const variants = await generateCoverVariants(storyboard, loadedPreset);
+      const { variants, requested } = await generateCoverVariants(storyboard, loadedPreset);
       setCoverVariants(variants);
+      setCoverRequested(requested);
     } catch {
       setGenError("표지를 만드는 데 실패했어요. 다시 시도해주세요");
     }
@@ -415,6 +417,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             onClick={() => {
               setGenError(null);
               setCoverVariants(null);
+              setCoverRequested(undefined);
               setStep("cover");
               void loadCoverVariants();
             }}
@@ -428,6 +431,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       {step === "cover" && coverVariants && storyboard && !genError && (
         <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
           <h1 className="text-xl font-semibold">마음에 드는 표지를 골라주세요</h1>
+          {coverRequested != null && coverVariants.length < coverRequested && (
+            <p className="w-full max-w-md rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-700">
+              {coverRequested}안 중 {coverVariants.length}안만 만들어졌어요. 다시 뽑기를 눌러보세요
+            </p>
+          )}
           <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
             {coverVariants.map((variant, i) => (
               <button
@@ -445,6 +453,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             type="button"
             onClick={() => {
               setCoverVariants(null);
+              setCoverRequested(undefined);
               void loadCoverVariants();
             }}
             className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
