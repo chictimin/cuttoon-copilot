@@ -8,6 +8,7 @@
 // PRD.md 6절: "최대 3턴, 매 턴 선택지 3개 + 직접 쓸게 + 알아서 해줘. 종료 판정은
 // 필수 슬롯이 전부 찼는가로 결정적이어야 한다."
 
+import { pickShirtColor } from "@/lib/llm/session-cast";
 import type { CastMember, Cut, NarrativeBeat, Storyboard } from "./storyboard-types";
 
 const NO_SUPPORTING_OPTION = "혼자 진행 (조연 없음)";
@@ -74,12 +75,29 @@ export interface BrainstormAnswers {
 }
 
 // TODO(A①): 실제 3턴 슬롯채우기 LLM 호출로 교체. 지금은 즉석에서 조립만 한다.
-export function assembleStoryboard(subject: string, answers: BrainstormAnswers): Storyboard {
+//
+// issue #123 (축소판): 주인공 상의 색을 세션당 1회 뽑아 cast[].description에 실어
+// 4컷·표지 3안이 같은 값을 참조하게 한다. 케이스 5 실측(#113)에서 이 배정이 없어
+// 4컷 내내 색이 흔들리는 것을 확인했다 — 팔레트가 "색의 집합"만 정하고 "배정"을
+// 정하지 않아서다. 조연(자유 입력 유지, #123 결정)에는 붙이지 않는다 — 원래
+// session-cast.ts의 설계(고정 마스코트에는 의상을 안 건드린다)와 같은 이유로,
+// 조연은 프로젝트 마스코트가 아니라 그때그때 자유 입력되는 인물이라 의상을
+// 고정할 근거(세션 내내 같은 인물이라는 전제) 자체가 없다.
+export function assembleStoryboard(
+  subject: string,
+  answers: BrainstormAnswers,
+  palette: string[] = []
+): Storyboard {
   const beats = FLOW_BEATS[answers.flow] ?? FLOW_BEATS["문제 제기 → 이전 상황 → 해결 → CTA"];
   const hasSupporting = answers.supporting !== null && answers.supporting !== NO_SUPPORTING_OPTION;
 
+  const shirtColor = pickShirtColor(palette);
+  const protagonistDescription = shirtColor
+    ? [answers.protagonist, `상의 ${shirtColor}`].filter(Boolean).join(", ")
+    : answers.protagonist;
+
   const cast: CastMember[] = [
-    { character_id: "protagonist", role: "protagonist", description: answers.protagonist },
+    { character_id: "protagonist", role: "protagonist", description: protagonistDescription },
   ];
   if (hasSupporting && answers.supporting) {
     cast.push({ character_id: "supporting", role: "supporting", description: answers.supporting });
