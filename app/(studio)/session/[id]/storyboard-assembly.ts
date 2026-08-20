@@ -9,22 +9,22 @@
 // 필수 슬롯이 전부 찼는가로 결정적이어야 한다."
 
 import { pickShirtColor } from "@/lib/llm/session-cast";
+import { getBeatsForFlow, getFlowOptions } from "@/lib/llm/narrative-flow";
 import type { CastMember, Cut, NarrativeBeat, Storyboard } from "./storyboard-types";
 
 const NO_SUPPORTING_OPTION = "혼자 진행 (조연 없음)";
 
-// 흐름 선택은 자유 텍스트가 아니라 NarrativeBeat 템플릿을 고르는 것이다. beat 값은
-// storyboard.schema.json의 narrative_beat enum에 묶여 있어서 임의 문자열로 대체할 수
-// 없다. 그래서 이 턴만은 LLM 생성 선택지를 쓰지 않고 여기 키를 그대로 화면에 낸다 —
-// 키가 어긋나면 아래 조립이 조용히 첫 템플릿으로 폴백해 흐름 선택이 무의미해진다.
-const FLOW_BEATS: Record<string, NarrativeBeat[]> = {
-  "문제 제기 → 이전 상황 → 해결 → CTA": ["problem", "before", "solution", "cta"],
-  "질문 던지기 → 사실 전달 → 효과 강조 → CTA": ["question", "fact", "benefit", "cta"],
-  "이전 상황 → 전환 계기 → 이후 → CTA": ["before", "turning", "after", "cta"],
-};
+// issue #119-2 (갈래 3): 흐름 템플릿 3종(키·beats 시퀀스)은 spec/data/narrative-flow.json
+// 으로 옮겼다 — 값은 하나도 안 바뀌었다(lib/llm/narrative-flow.ts 참고). 흐름 선택은
+// 자유 텍스트가 아니라 NarrativeBeat 템플릿을 고르는 것이라(storyboard.schema.json의
+// narrative_beat enum), 이 턴만은 여전히 LLM 생성 선택지를 쓰지 않고 데이터 파일의
+// 키를 그대로 화면에 낸다 — 키가 어긋나면 아래 조립이 조용히 첫 템플릿으로 폴백해
+// 흐름 선택이 무의미해진다. LLM이 이 키를 직접 고르게 하는 것은 #113/#133 판정
+// 케이스(흐름 3종 전제, 케이스 2·4 아직 미실행)와 얽혀 있어 이번 변경 범위 밖이다.
+const DEFAULT_FLOW_KEY = "문제 제기 → 이전 상황 → 해결 → CTA";
 
-/** 화면의 flow 턴 선택지. FLOW_BEATS 키와 항상 일치해야 한다. */
-export const FLOW_OPTIONS = Object.keys(FLOW_BEATS);
+/** 화면의 flow 턴 선택지. narrative-flow.json의 키와 항상 일치한다. */
+export const FLOW_OPTIONS = getFlowOptions();
 
 export const FLOW_QUESTION = "어떤 흐름으로 풀어볼까요?";
 
@@ -88,7 +88,7 @@ export function assembleStoryboard(
   answers: BrainstormAnswers,
   palette: string[] = []
 ): Storyboard {
-  const beats = FLOW_BEATS[answers.flow] ?? FLOW_BEATS["문제 제기 → 이전 상황 → 해결 → CTA"];
+  const beats = (getBeatsForFlow(answers.flow) ?? getBeatsForFlow(DEFAULT_FLOW_KEY)!) as NarrativeBeat[];
   const hasSupporting = answers.supporting !== null && answers.supporting !== NO_SUPPORTING_OPTION;
 
   const shirtColor = pickShirtColor(palette);
