@@ -175,6 +175,23 @@ function checkStyleParity() {
   assert.notEqual(end, -1, "buildCutPrompt의 끝 경계를 찾지 못했습니다");
   const fn = src.slice(at, end);
 
+  // #113: 시트는 고정 마스코트(지도사) 한 명만 담는다. "시트 인물과 일치시켜라" 를
+  // 무조건 붙이면 지도사가 없는 컷에서 주인공이 시트 쪽으로 끌려간다.
+  assert.match(
+    fn,
+    /role === 'supporting'/,
+    "프레임 안에 시트 인물이 있는지 판정하지 않습니다 — 지도사 없는 컷에서 주인공이 시트로 끌려갑니다 (#113)"
+  );
+  // 분기의 존재를 정규식으로 잡으려 했더니 미탐이 났다 — `sheetPersonInFrame` 선언문
+  // 안의 `?.`(옵셔널 체이닝)에 걸려서 삼항 분기를 지워도 통과했다. 그래서 분기 모양이
+  // 아니라 "지도사가 없을 때 나가는 문구" 자체가 있는지 본다. 그 문구가 없으면 조건
+  // 분기가 사라진 것이다.
+  assert.match(
+    fn,
+    /different character from the one drawn/,
+    "지도사가 프레임에 없을 때의 문구가 없습니다 — 시트 동일성 문장이 항상 붙습니다 (#113)"
+  );
+
   for (const [field, why] of [
     ["palette", "색상 팔레트를 컷 프롬프트가 읽지 않습니다 — 시트와 색이 어긋납니다"],
     ["keywords", "사용자가 입력한 그림체 키워드를 컷 프롬프트가 읽지 않습니다"],

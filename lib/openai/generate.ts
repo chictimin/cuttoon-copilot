@@ -146,8 +146,35 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
     ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${hint('character_ratio', s.character_ratio) ?? '2.5head'} body proportions, ${s.background_density ?? 'low'} background detail`
     : 'default webtoon/comic style'
 
+  const castById = new Map(
+    (storyboard.cast ?? []).filter((m) => m.character_id).map((m) => [m.character_id!, m])
+  )
+
+  // 첨부하는 시트는 고정 마스코트(지도사) 한 명만 담는다 — 주인공·어르신 등은
+  // 시트가 없는 가변 인물이고, storyboard.schema.json 의 character_id 서술이
+  // "role=supporting 이 지도사를 가리킬 때만 character_sheet 와 연결된다" 고 정한다.
+  //
+  // 그래서 "시트 인물과 일치시켜라" 를 무조건 붙이면 안 된다. 샘플 4컷 중 지도사가
+  // 나오는 것은 한 컷뿐인데, 나머지 컷에서 그 문장이 붙으면 60대 어머니를 그려야
+  // 하는 자리에서 지도사 시트를 따라가라고 지시하는 셈이 된다.
+  //
+  // ponytail: role === 'supporting' 로 판정한다. 스키마에 "이 인물이 시트를 갖는다"
+  // 를 표현하는 필드가 없어서 서술 규약에 코드를 묶는 것이고, 조연이 둘이 되면
+  // 조용히 틀린다. A① 이 character_pool 에 그 자리를 만들면 그것으로 바꾼다 (#113).
+  //
+  // 판정이 안 되는 경우(cut 이 없어 프레임 인물을 모를 때)는 기존 문장을 쓴다 —
+  // 그때는 프롬프트에 인물 서술 자체가 없어서 끌려갈 대상이 없고, 반대로 지도사
+  // 컷에서 동일성 문장을 잃는 것이 P0 게이트에 더 해롭다.
+  const framed = cut?.characters_in_frame
+  const sheetPersonInFrame =
+    !framed || framed.some((c) => c.character_id && castById.get(c.character_id)?.role === 'supporting')
+
   const parts = [
-    `Single webtoon/comic panel, consistent with the attached character reference sheet.`,
+    sheetPersonInFrame
+      ? `Single webtoon/comic panel, consistent with the attached character reference sheet.`
+      : `Single webtoon/comic panel. Match the art style, line weight and coloring of the attached ` +
+        `reference sheet, but the person in this panel is a different character from the one drawn ` +
+        `on that sheet — follow the character description below for who they are.`,
     `Style: ${styleStr}.`,
   ]
 
@@ -212,9 +239,6 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
     // 실측: 서술 없이 4회 생성했을 때 "60대 어머니"가 4/4 어린아이로 나왔고
     // 헤어스타일·복장·복장색·화면 내 크기가 전부 달라졌다. 서술을 넣은 뒤
     // 4/4 로 정확히 나왔다.
-    const castById = new Map(
-      (storyboard.cast ?? []).filter((m) => m.character_id).map((m) => [m.character_id!, m])
-    )
     for (const c of cut.characters_in_frame ?? []) {
       const desc = c.character_id ? castById.get(c.character_id)?.description : undefined
       const traits = [hint('expression', c.expression), hint('pose', c.pose)].filter(Boolean).join(', ')
