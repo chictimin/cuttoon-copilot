@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import sharp from "sharp";
 import { uploadAsset } from "../asset-store";
-import { OUTPUT_SIZE, promptHint } from "./generate";
+import { OUTPUT_SIZE, ratioClause } from "./generate";
 import type { GeneratedImageResult } from "./provider";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -83,21 +83,15 @@ export function buildCharacterPrompt(preset: PresetInput): string {
   const ageStr = c.age_band?.length ? c.age_band.join(", ") : "all ages";
   const lifeStr = c.life_stage?.length ? c.life_stage.join(", ") : "general";
 
-  // 컷 프롬프트(generate.ts buildCutPrompt)와 **표현식까지 같게** 둔다. 시트는 매 컷
+  // 컷 프롬프트(generate.ts buildCutPrompt)와 같은 지시를 받아야 한다. 시트는 매 컷
   // reference 로 주입되는 기준물이라, 비율 지시가 갈라지면 기준물과 컷이 서로 다른
   // 비율로 그려져 P0 게이트 1(캐릭터 동일성)의 "비율" 항목을 오독하게 된다 (#113).
   //
-  // promptHint() 는 B① 이 이 용도로 export 한 것이다 — 두 파일이 vocabulary.json 을
-  // 각자 읽으면 폴백 규칙이 갈라진다.
-  //
-  // 순서가 중요하다: 기본값을 **먼저** 적용한 뒤 힌트를 찾는다. promptHint() 는
-  // 값이 없으면 undefined 를 주므로, 힌트 조회를 먼저 하면 미지정 케이스가 토큰
-  // 폴백으로 떨어져 서술문을 못 받는다. 힌트를 넣은 이유(모델이 `2head` 같은
-  // 토큰을 못 알아듣는다 — #121 실측 4/4 무시)는 기본값에도 그대로 적용된다.
-  // B① 도 같은 결론으로 컷 쪽 순서를 맞췄다 (#129).
-  const ratioValue = s.character_ratio ?? "2.5head";
-  const ratio =
-    promptHint("character_ratio", ratioValue) ?? `${ratioValue} body proportions`;
+  // ratioClause() 는 B① 이 export 한 것이다(PR #130, 8fc0dbc) — 폴백 규칙(기본값
+  // 적용 순서 포함) 자체를 공유해 규칙이 두 파일에 복사되는 것을 막는다. 이 자리에
+  // 규칙을 인라인으로 다시 쓰면 세 번째로 갈라진다 — #126 에서 생기고 #129 에서
+  // 발견된 것과 같은 실수다.
+  const ratio = ratioClause(s.character_ratio);
 
   return `Character reference sheet for a webtoon/comic series.
 
