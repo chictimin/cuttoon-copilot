@@ -131,6 +131,103 @@ async function getLatestVersion(
   return { version: data.version, storyboard: data.storyboard as Storyboard };
 }
 
+export interface SessionSummary {
+  sessionId: string;
+  projectId: string;
+  presetId: string;
+  subject: string;
+  version: number;
+  /** cuts[].generated_image가 전부 채워졌는지로 계산한다. 컬럼으로 저장하지 않는다 —
+   *  생성 중 프로세스가 죽으면 status=complete인데 이미지가 없는 행이 남을 수 있어서다. */
+  status: "complete" | "in_progress";
+  cutsDone: number;
+  cutsTotal: number;
+  /** 첫 컷의 generated_image. 없으면 null. */
+  thumbnail: string | null;
+  updatedAt: string;
+}
+
+/**
+ * cuts에서 완료/진행 상태와 썸네일을 뽑는다. StoryboardCut에는 generated_image가
+ * 선언돼 있지 않아(스키마 소유권이 A①) app/api/session/export/route.ts의
+ * toRenderCuts와 같은 방식으로 런타임에 좁혀 읽는다.
+ */
+function summarizeCuts(cuts: StoryboardCut[]): {
+  status: "complete" | "in_progress";
+  cutsDone: number;
+  cutsTotal: number;
+  thumbnail: string | null;
+} {
+  const images = cuts.map((cut) => {
+    const raw = (cut as { generated_image?: unknown }).generated_image;
+    return typeof raw === "string" ? raw : null;
+  });
+
+  const cutsDone = images.filter((img) => img !== null).length;
+
+  return {
+    status: cutsDone === images.length && images.length > 0 ? "complete" : "in_progress",
+    cutsDone,
+    cutsTotal: images.length,
+    thumbnail: images.find((img) => img !== null) ?? null,
+  };
+}
+
+/**
+ * 세션 목록. 프로젝트를 열었을 때 그 프로젝트의 컷툰만 보여주기 위해 projectId
+ * 필터를 받는다 — 프로젝트 안에 컷툰(세션)이 여러 개인 구조라 필터가 없으면
+ * 남의 프로젝트 세션까지 섞인다.
+ *
+ * storyboard 전체는 담지 않는다 — 세션이 늘면 응답이 그만큼 커진다. 파생값만
+ * listProjects(lib/db/presets.ts)와 같은 이유로 요약해서 내려준다.
+ *
+ * 최신 버전만 본다는 점은 getSession과 같다. getLatestVersion을 세션마다
+ * 순회하지 않고 DISTINCT ON으로 한 번에 가져온다 — N+1을 피하기 위해서다.
+ */
+export async function listSessions(params?: { projectId?: string }): Promise<SessionSummary[]> {
+  let query = getDb()
+    .from("sessions")
+    .select(
+      "id, project_id, preset_id, subject, updated_at, session_versions(version, storyboard)"
+    )
+    .order("updated_at", { ascending: false });
+
+  if (params?.projectId) {
+    query = query.eq("project_id", params.projectId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) throw new Error(`세션 목록 조회 실패: ${error.message}`);
+  if (!data) return [];
+
+  return data.map((row) => {
+    const versions = (row.session_versions ?? []) as Array<{
+      version: number;
+      storyboard: Storyboard;
+    }>;
+    // getLatestVersion과 같은 규칙: version 내림차순으로 가장 큰 것 하나.
+    const latest = versions.slice().sort((a, b) => b.version - a.version)[0];
+
+    const storyboard = latest
+      ? withCanonicalSubject(latest.storyboard, row.subject)
+      : null;
+    const summary = storyboard
+      ? summarizeCuts(storyboard.cuts)
+      : { status: "in_progress" as const, cutsDone: 0, cutsTotal: 0, thumbnail: null };
+
+    return {
+      sessionId: row.id,
+      projectId: row.project_id,
+      presetId: row.preset_id,
+      subject: row.subject,
+      version: latest?.version ?? 0,
+      updatedAt: row.updated_at,
+      ...summary,
+    };
+  });
+}
+
 /**
  * 새 버전을 쌓는다. 되돌리기를 위해 이전 버전을 지우지 않는다.
  *
