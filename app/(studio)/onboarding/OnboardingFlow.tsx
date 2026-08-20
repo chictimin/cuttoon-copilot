@@ -2,15 +2,10 @@
 
 import { useRef, useState } from "react";
 import { assertValidPreset, type Preset } from "@/lib/llm/preset-guard";
-import { mergeStyleValues } from "@/lib/llm/style-merge";
-import {
-  analyzeStyle,
-  CHARACTER_SHEET_PREVIEW,
-  type StyleAnalysisResult,
-} from "./mock-style-analysis";
+import { analyzeStyle, type StyleAnalysisResult } from "./style-analysis";
 import DetailsStep, { type DetailsFormValue } from "./DetailsStep";
 
-type Step = "upload" | "analyzing" | "result" | "keywords" | "details" | "confirmed";
+type Step = "upload" | "analyzing" | "result" | "details" | "confirmed";
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png"];
 const MAX_FILES = 5;
@@ -30,20 +25,20 @@ function validateFiles(files: File[]): { valid: File[]; error: string | null } {
 
 export default function OnboardingFlow() {
   const [step, setStep] = useState<Step>("upload");
-  const [referenceCount, setReferenceCount] = useState(0);
+  const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<StyleAnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [confirmedName, setConfirmedName] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [userKeywords, setUserKeywords] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function runAnalysis(count: number) {
+  async function runAnalysis(files: File[]) {
     setError(null);
     setStep("analyzing");
     try {
-      const result = await analyzeStyle(count);
+      const result = await analyzeStyle(files);
       setAnalysis(result);
       setStep("result");
     } catch {
@@ -64,47 +59,69 @@ export default function OnboardingFlow() {
       return;
     }
 
-    setReferenceCount(valid.length);
-    void runAnalysis(valid.length);
+    setReferenceFiles(valid);
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(valid[0]);
+    });
+    void runAnalysis(valid);
   }
 
   function handleRetry() {
-    if (referenceCount === 0) return;
-    void runAnalysis(referenceCount);
+    if (referenceFiles.length === 0) return;
+    void runAnalysis(referenceFiles);
   }
 
   function handleConfirmStyle() {
     setStep("details");
   }
 
-  function handleSkipReference() {
-    setReferenceCount(0);
-    setStep("keywords");
-  }
-
-  function handleConfirmKeywords(keywords: string[]) {
-    setUserKeywords(keywords);
-    const merged = mergeStyleValues(null, keywords);
-    const analysisResult: StyleAnalysisResult = {
-      style: {
-        keywords,
-        ...merged,
-      },
-      characterSheetAsset: "asset://default-character-sheet",
-      styleRefAssets: [],
-    };
-    setAnalysis(analysisResult);
-    setStep("details");
-  }
-
   async function handleConfirmDetails(details: DetailsFormValue) {
     if (!analysis) return;
+
+    setError(null);
+    setSaving(true);
+
+    // 캐릭터 시트는 style(분석 단계)과 context(이 폼)가 둘 다 있어야 만들 수
+    // 있어서 여기서 생성한다 — 프로젝트 생성 시 1회(#19 결정: 세션마다 다시
+    // 만들지 않음).
+    let characterSheetAsset: string;
+    try {
+      const sheetRes = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "character_sheet",
+          preset: {
+            style: analysis.style,
+            context: {
+              industry: details.industry,
+              age_band: details.ageBand,
+              life_stage: details.lifeStage,
+              main_subjects: details.mainSubjects,
+            },
+          },
+        }),
+      });
+      if (!sheetRes.ok) {
+        const body = await sheetRes.json().catch(() => null);
+        setError(body?.error ?? "캐릭터 시트 생성에 실패했어요. 다시 시도해주세요");
+        return;
+      }
+      const { result } = (await sheetRes.json()) as { result: { asset: string } };
+      characterSheetAsset = result.asset;
+    } catch {
+      setError("캐릭터 시트 생성에 실패했어요. 다시 시도해주세요");
+      return;
+    } finally {
+      setSaving(false);
+    }
 
     const preset: Preset = {
       preset_version: "1.1",
       project_name: details.projectName,
       assets: {
-        character_sheet: analysis.characterSheetAsset,
+        character_sheet: characterSheetAsset,
         style_refs: analysis.styleRefAssets,
         reference_asset_ids: [],
       },
@@ -122,19 +139,9 @@ export default function OnboardingFlow() {
       },
     };
 
-    try {
-      // 스키마와 실제로 맞는지 마지막에 한 번 더 확인 (조립 실수 방지)
-      assertValidPreset(preset);
-    } catch {
-      // mock을 실제 스타일 분석 API로 교체하면 이 경로가 실제로 발생할 수 있다
-      // (PR #22 리뷰, chictimin). 검증 실패를 그냥 던지면 "프리셋 확정" 버튼이 반응
-      // 없는 것처럼 보이므로, Result 단계로 되돌려 "다시 뽑기"로 복구하게 한다.
-      setError("분석 결과에 문제가 있어요. 다시 뽑아주세요");
-      setStep("result");
-      return;
-    }
+    // 스키마와 실제로 맞는지 마지막에 한 번 더 확인 (조립 실수 방지)
+    assertValidPreset(preset);
 
-    setError(null);
     setSaving(true);
     try {
       const res = await fetch("/api/preset", {
@@ -170,20 +177,16 @@ export default function OnboardingFlow() {
           fileInputRef={fileInputRef}
           onDragStateChange={setIsDragging}
           onFilesSelected={handleFilesSelected}
-          onSkipReference={handleSkipReference}
         />
       )}
       {step === "analyzing" && <AnalyzingStep />}
       {step === "result" && analysis && (
         <ResultStep
           analysis={analysis}
-          error={error}
+          previewUrl={previewUrl}
           onRetry={handleRetry}
           onConfirm={handleConfirmStyle}
         />
-      )}
-      {step === "keywords" && (
-        <KeywordsStep onConfirm={handleConfirmKeywords} />
       )}
       {step === "details" && (
         <DetailsStep onConfirm={handleConfirmDetails} error={error} saving={saving} />
@@ -206,14 +209,12 @@ function UploadStep({
   fileInputRef,
   onDragStateChange,
   onFilesSelected,
-  onSkipReference,
 }: {
   error: string | null;
   isDragging: boolean;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onDragStateChange: (dragging: boolean) => void;
   onFilesSelected: (files: FileList | File[]) => void;
-  onSkipReference: () => void;
 }) {
   return (
     <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
@@ -263,14 +264,6 @@ function UploadStep({
           }}
         />
       </label>
-
-      <button
-        type="button"
-        onClick={onSkipReference}
-        className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
-      >
-        레퍼런스 건너뛰기
-      </button>
     </div>
   );
 }
@@ -300,12 +293,12 @@ const SATURATION_LABEL: Record<string, string> = {
 
 function ResultStep({
   analysis,
-  error,
+  previewUrl,
   onRetry,
   onConfirm,
 }: {
   analysis: StyleAnalysisResult;
-  error: string | null;
+  previewUrl: string | null;
   onRetry: () => void;
   onConfirm: () => void;
 }) {
@@ -315,21 +308,21 @@ function ResultStep({
     <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
       <h1 className="text-xl font-semibold">이런 스타일로 만들었어요</h1>
 
-      {error && (
-        <p className="w-full max-w-md rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">
-          {error}
-        </p>
-      )}
-
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
         <figure className="flex flex-col items-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element -- data URI placeholder, next/image 불필요 */}
-          <img
-            src={CHARACTER_SHEET_PREVIEW}
-            alt="캐릭터 시트"
-            className="aspect-square w-full rounded-lg object-cover"
-          />
-          <figcaption className="text-sm text-zinc-500">캐릭터 시트</figcaption>
+          {previewUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- 사용자가 방금 올린 파일의 blob URL, next/image 불필요
+            <img
+              src={previewUrl}
+              alt="업로드한 레퍼런스"
+              className="aspect-square w-full rounded-lg object-cover"
+            />
+          ) : (
+            <div className="aspect-square w-full rounded-lg bg-zinc-100" />
+          )}
+          <figcaption className="text-sm text-zinc-500">
+            업로드한 레퍼런스 · 캐릭터 시트는 다음 단계 확정 후 생성돼요
+          </figcaption>
         </figure>
 
         <figure className="flex flex-col items-center gap-2">
@@ -370,46 +363,6 @@ function ResultStep({
           이걸로 할게
         </button>
       </div>
-    </div>
-  );
-}
-
-function KeywordsStep({
-  onConfirm,
-}: {
-  onConfirm: (keywords: string[]) => void;
-}) {
-  const [input, setInput] = useState("");
-
-  return (
-    <div className="flex w-full max-w-xl flex-col items-center gap-4">
-      <h1 className="text-xl font-semibold">
-        스타일을 설명해주세요
-      </h1>
-      <p className="text-sm text-zinc-500">
-        쉼표로 구분된 단어들을 입력하세요
-      </p>
-
-      <textarea
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder="예: pastel, 2head, rounded, vivid"
-        className="w-full rounded-md border border-zinc-300 p-3 text-sm"
-        rows={4}
-      />
-
-      <button
-        type="button"
-        onClick={() => {
-          const keywords = input.split(",").map(k => k.trim()).filter(k => k);
-          if (keywords.length > 0) {
-            onConfirm(keywords);
-          }
-        }}
-        className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-      >
-        계속
-      </button>
     </div>
   );
 }

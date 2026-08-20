@@ -1,7 +1,12 @@
-import { generateCharacterSheet, generateCut } from '@/lib/openai/generate'
+import { generateCut, generateCoverVariants } from '@/lib/openai/generate'
+// #19 결정: generateCharacterSheet는 B②(extract.ts) 소유 — extractStyle과 결합도가 높음.
+import { generateCharacterSheet } from '@/lib/openai/extract'
+import type { PresetInput } from '@/lib/openai/extract'
 
 // POST /api/generate
-// body: { kind: 'character_sheet', preset } | { kind: 'cut', storyboard, preset, referenceAssets }
+// body: { kind: 'character_sheet', preset }
+//     | { kind: 'cover_variants', storyboard, preset, referenceAssets }
+//     | { kind: 'cut', storyboard, preset, referenceAssets, continueFrom? }
 export async function POST(request: Request) {
   let body: unknown
   try {
@@ -13,28 +18,56 @@ export async function POST(request: Request) {
   if (typeof body !== 'object' || body === null) {
     return Response.json({ error: '본문은 객체여야 합니다' }, { status: 400 })
   }
-  const { kind, preset, storyboard, referenceAssets } = body as Record<string, unknown>
+  const { kind, preset, storyboard, referenceAssets, continueFrom } = body as Record<string, unknown>
 
   if (!preset) {
     return Response.json({ error: 'preset이 필요합니다' }, { status: 400 })
   }
 
-  switch (kind) {
-    case 'character_sheet':
-      return Response.json({ result: await generateCharacterSheet(preset) })
-    case 'cut':
-      // storyboard 검증은 spec/storyboard.schema.json이 채워진 뒤 A① 계약에 맞춰 추가한다
-      return Response.json({
-        result: await generateCut({
-          storyboard,
-          preset,
-          referenceAssets: Array.isArray(referenceAssets) ? referenceAssets : [],
-        }),
-      })
-    default:
-      return Response.json(
-        { error: "kind는 'character_sheet' 또는 'cut'이어야 합니다" },
-        { status: 400 },
-      )
+  // 생성 호출은 try로 감싼다. 실제 모델 호출로 교체되면 네트워크 실패·rate
+  // limit·타임아웃이 이 자리에서 나는데, 감싸지 않으면 위쪽 400들과 달리
+  // { error } JSON을 주지 못해 호출부의 res.json().error 가 깨진다.
+  try {
+    switch (kind) {
+      case 'character_sheet':
+        // preset 구조 검증은 아직 없음 — storyboard와 같은 기존 관례를 따라 여기서는
+        // 캐스팅만 한다. 확정 검증은 lib/llm/preset-guard.ts 쪽 후속 작업으로 남긴다.
+        return Response.json({ result: await generateCharacterSheet(preset as PresetInput) })
+      case 'cover_variants':
+        // 표지 3안. count 는 계약이 리터럴 3 으로 고정한다 — 호출부가 안 개수를
+        // 임의로 늘리지 못하게 한 것이므로(#50) 본문에서 받지 않는다.
+        // 체이닝 토큰도 받지 않는다: 3안은 독립 호출이어야 한다 (PRD 6절).
+        return Response.json({
+          result: await generateCoverVariants({
+            storyboard,
+            preset,
+            referenceAssets: Array.isArray(referenceAssets) ? referenceAssets : [],
+            count: 3,
+          }),
+        })
+      case 'cut':
+        // storyboard 검증은 lib/llm/storyboard-guard.ts(A① 소유)가 담당한다.
+        // route에서 중복 구현하지 않고, 실제 생성을 붙이는 시점에 연결한다.
+        return Response.json({
+          result: await generateCut({
+            storyboard,
+            preset,
+            referenceAssets: Array.isArray(referenceAssets) ? referenceAssets : [],
+            // 체이닝 토큰. 문자열이 아니면 넘기지 않는다 — 첫 컷은 이어받을
+            // 대상이 없어 생략되는 것이 정상이다.
+            continueFrom: typeof continueFrom === 'string' ? continueFrom : undefined,
+          }),
+        })
+      default:
+        return Response.json(
+          { error: "kind는 'character_sheet' · 'cover_variants' · 'cut' 중 하나여야 합니다" },
+          { status: 400 },
+        )
+    }
+  } catch (e) {
+    // 에러 원문은 응답에 넣지 않는다 — 프로바이더 에러 메시지에 요청
+    // 파라미터나 조직 정보가 섞여 나올 수 있다.
+    console.error('[POST /api/generate] 생성 실패:', e)
+    return Response.json({ error: '이미지 생성에 실패했습니다' }, { status: 500 })
   }
 }
