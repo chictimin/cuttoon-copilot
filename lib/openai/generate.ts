@@ -174,31 +174,25 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
     (storyboard.cast ?? []).filter((m) => m.character_id).map((m) => [m.character_id!, m])
   )
 
-  // 첨부하는 시트는 고정 마스코트(지도사) 한 명만 담는다 — 주인공·어르신 등은
-  // 시트가 없는 가변 인물이고, storyboard.schema.json 의 character_id 서술이
-  // "role=supporting 이 지도사를 가리킬 때만 character_sheet 와 연결된다" 고 정한다.
+  // 첨부하는 시트는 컷에 등장하는 인물을 그린 것이 아니다. 런타임 시트는
+  // buildCharacterPrompt(extract.ts)가 preset.context — 타깃 독자 프로필 — 로만
+  // 인물을 정해 그리므로, cast 의 누구와도 대응하지 않는 제3의 인물이다.
+  // (spec/samples 의 kriee-fairy-instructor.png 는 손으로 만든 fixture 이고 런타임
+  //  파이프라인이 만드는 애셋이 아니다. #113 에서 확인.)
   //
-  // 그래서 "시트 인물과 일치시켜라" 를 무조건 붙이면 안 된다. 샘플 4컷 중 지도사가
-  // 나오는 것은 한 컷뿐인데, 나머지 컷에서 그 문장이 붙으면 60대 어머니를 그려야
-  // 하는 자리에서 지도사 시트를 따라가라고 지시하는 셈이 된다.
+  // 그래서 "시트 인물과 일치시켜라" 가 참이 되는 컷이 없다. 시트는 스타일 앵커로만
+  // 쓰고, 인물은 아래 Character 서술이 정한다. 조건 분기를 두지 않는 이유는 지금
+  // 참이 될 수 없는 조건을 남기면 다음 사람이 그것을 계약으로 읽기 때문이다 —
+  // 이 파일에서 그 실수를 두 번 했다(preset.schema.json 의 stale 문구, 샘플 fixture).
   //
-  // ponytail: role === 'supporting' 로 판정한다. 스키마에 "이 인물이 시트를 갖는다"
-  // 를 표현하는 필드가 없어서 서술 규약에 코드를 묶는 것이고, 조연이 둘이 되면
-  // 조용히 틀린다. A① 이 character_pool 에 그 자리를 만들면 그것으로 바꾼다 (#113).
-  //
-  // 판정이 안 되는 경우(cut 이 없어 프레임 인물을 모를 때)는 기존 문장을 쓴다 —
-  // 그때는 프롬프트에 인물 서술 자체가 없어서 끌려갈 대상이 없고, 반대로 지도사
-  // 컷에서 동일성 문장을 잃는 것이 P0 게이트에 더 해롭다.
-  const framed = cut?.characters_in_frame
-  const sheetPersonInFrame =
-    !framed || framed.some((c) => c.character_id && castById.get(c.character_id)?.role === 'supporting')
-
+  // ponytail: #123 이 조연을 프로젝트 마스코트로 고정하고 시트가 그 인물을 그리게
+  // 되면, 프레임에 그 인물이 있는 컷에서만 동일성 문장으로 되돌린다. 그때 판정 값은
+  // role 서술 규약이 아니라 preset 쪽 매핑 필드여야 한다 — role === 'supporting' 은
+  // 조연이 둘이 되면 조용히 틀린다.
   const parts = [
-    sheetPersonInFrame
-      ? `Single webtoon/comic panel, consistent with the attached character reference sheet.`
-      : `Single webtoon/comic panel. Match the art style, line weight and coloring of the attached ` +
-        `reference sheet, but the person in this panel is a different character from the one drawn ` +
-        `on that sheet — follow the character description below for who they are.`,
+    `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
+      `attached reference sheet, but the person in this panel is a different character from ` +
+      `the one drawn on that sheet — follow the character description below for who they are.`,
     `Style: ${styleStr}.`,
   ]
 
