@@ -54,7 +54,7 @@ flowchart TD
 |---|---|---|---|
 | 1 | `startBrainstorm` → `loadTurns` | `SessionFlow.tsx:257,217` | `POST /api/brainstorm` |
 | 2 | (route, A①) | `app/api/brainstorm/route.ts` | `body.draft` 없으면 `extractDraftFromSubject`(`brainstorm.ts:259`) 먼저 호출 |
-| 3 | `generateBrainstormTurns` | `brainstorm.ts:78` | 내부 `isSlotFilled`(:26)·`areAllSlotsComplete`(:57)로 draft 기준 남은 턴만 생성. gpt-4o 텍스트 호출(A① 소유 — 세부는 4-1번 참고) |
+| 3 | `generateBrainstormTurns` | `brainstorm.ts:78` | 내부 `isSlotFilled`(:26)·`areAllSlotsComplete`(:57)로 draft 기준 남은 턴만 생성. gpt-4o 텍스트 호출(A① 소유 — 세부는 5-1번 참고) |
 | 4 | 응답의 `resolved` | `SessionFlow.tsx` `loadTurns` | `setAnswers`로 선반영 (#154) |
 | 5 | `recordAnswer` 반복 | `SessionFlow.tsx:190` | 3턴(또는 축소된 턴) 완료 시 `assembling`으로 전이 |
 | 6 | assembling effect | `SessionFlow.tsx:262` | `assembleStoryboard`(`storyboard-assembly.ts:86`) |
@@ -71,9 +71,13 @@ flowchart TD
 | 2 | 대사·말풍선 편집 | `EditorFlow.tsx` | 로컬 state만, 호출 없음 |
 | 3 | `handleSave` | `EditorFlow.tsx:193` | `POST /api/session/version` (A③) |
 | 4 | `handleRevert` | `EditorFlow.tsx:228` | `POST /api/session/revert` (A③) |
-| 5 | `handleExport` | `EditorFlow.tsx:260` | `GET /api/session/export` — B③ 경계, 4-2번 참고 |
+| 5 | `handleExport` | `EditorFlow.tsx:260` | `GET /api/session/export` — B③ 경계, 5-2번 참고 |
 
-## 4-1. 텍스트/이미지 생성 (B① — 작성 대기)
+## 5. B 소유 파트 (작성 대기)
+
+아래 두 절은 특정 A 단계(온보딩·세션·에디터)의 하위가 아니다 — 이미지 생성(5-1)은 온보딩·세션 양쪽에서 쓰이고, 합성·Export(5-2)는 에디터에서 쓰인다. B 소유자가 채울 자리다.
+
+### 5-1. 텍스트/이미지 생성 (B①)
 
 A가 넘기는 것과 받는 것(계약)만 적었다. 내부에서 어떤 모델을 쓰는지, 프롬프트를 어떻게 조립하는지는 B① 작성 대기.
 
@@ -87,13 +91,13 @@ A가 넘기는 것과 받는 것(계약)만 적었다. 내부에서 어떤 모�
 
 작성 대기 항목(B①): 실제 사용 모델·API, 세션당 실호출 횟수, 프롬프트 조립 로직, 체이닝 내부 처리.
 
-## 4-2. 텍스트 레이어 합성·Export (B③ — 작성 대기)
+### 5-2. 텍스트 레이어 합성·Export (B③)
 
 - **`GET /api/session/export`**(`app/api/session/export/route.ts`, A③ 소유 라우트) — 세션의 `storyboard.cuts`를 받아 최종 합성 이미지 ZIP을 반환한다. 내부에서 `lib/render/`(B③)의 합성·zip 로직을 호출한다.
 
 작성 대기 항목(B③): `lib/render/`의 실제 함수·호출 순서, 캡션/말풍선 합성 방식, ZIP 구성 방식.
 
-## 5. 데이터 파일 vs 코드 (A 소유분)
+## 6. 데이터 파일 vs 코드 (A 소유분)
 
 **`spec/data/`로 이미 분리된 것**
 
@@ -114,7 +118,7 @@ A가 넘기는 것과 받는 것(계약)만 적었다. 내부에서 어떤 모�
 | `CUT_SHOT_PLAN` | :57 | 컷별 shot_type·camera_angle 고정 시퀀스 |
 | `CAPTION_POSITIONS` | :64 | 컷별 캡션 위치 고정 시퀀스 |
 
-## 6. 소유 경계 (`README.md` 폴더 소유권 표 기준)
+## 7. 소유 경계 (`README.md` 폴더 소유권 표 기준)
 
 | 경로 | 담당 |
 |---|---|
@@ -125,7 +129,7 @@ A가 넘기는 것과 받는 것(계약)만 적었다. 내부에서 어떤 모�
 | `lib/openai/extract.ts` | B② |
 | `lib/render/` | B③ |
 
-## 7. 구현은 있으나 호출자가 없는 함수 (전부 A① 소유)
+## 8. 구현은 있으나 호출자가 없는 함수 (전부 A① 소유)
 
 | 함수 | 위치 | 실제 호출자 | 관련 이슈 |
 |---|---|---|---|
