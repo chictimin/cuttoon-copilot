@@ -44,6 +44,17 @@ const cases = [
     200,
     (r) => assert.match(r.assetUri, /^asset:\/\//),
   ],
+  [
+    // #78 재현: file.type은 image/png로 선언하지만 실제 내용은 SVG(XSS 벡터).
+    // validateFileContent()의 매직바이트 확인이 없으면 이 케이스가 그대로 통과해
+    // public 버킷에 image/png contentType으로 저장된 SVG가 만들어진다.
+    "MIME 위장 (선언: image/png, 실제: SVG)",
+    formDataWith(
+      new File(["<svg onload=\"alert(1)\"></svg>"], "payload.svg", { type: "image/png" })
+    ),
+    400,
+    (r) => assert.equal(r.error, "파일 내용이 선언한 이미지 형식과 일치하지 않습니다"),
+  ],
 ];
 
 let failed = 0;
