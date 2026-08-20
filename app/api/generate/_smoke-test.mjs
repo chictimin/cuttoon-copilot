@@ -62,6 +62,15 @@ function checkWiring() {
     /continueFrom/,
     "표지 3안은 독립 호출이어야 합니다 — continueFrom을 넘기면 안 됩니다 (PRD 6절)"
   );
+
+  // #108: allSettled 라 1~2안만 돌아올 수 있다. 화면이 배열 길이대로 그리므로
+  // 요청 개수를 같이 내려보내지 않으면 조용히 줄어든 상태가 된다.
+  const coverCase = src.slice(src.indexOf("case 'cover_variants'"), src.indexOf("case 'cut'"));
+  assert.match(
+    coverCase,
+    /requested:\s*3/,
+    "cover_variants 응답에 requested가 없습니다 — 화면이 부족분을 알 수 없습니다 (#108)"
+  );
 }
 
 // #104: 3안은 각각 별도 유료 호출이다. Promise.all 로 되돌리면 한 안의 후처리
@@ -86,6 +95,48 @@ function checkCoverVariantsSettled() {
     /Promise\.all\(/,
     "generateCoverVariants에 Promise.all(이 남아 있습니다 (#104)"
   );
+
+  // #114 의 부족분 재시도(#108)에 붙인 안전장치. 배치가 통째로 실패하는 것은
+  // 이미지별 문제가 아니라 환경 문제라(업로드 계열) 재시도해도 같이 실패하고
+  // 생성비만 두 배가 된다 — #67 이 그 상황이었다. 그 상태에서 멈추는지 본다.
+  assert.match(
+    fn,
+    /gained === 0[\s\S]{0,400}break/,
+    "배치가 통째로 실패해도 재시도를 계속합니다 — 환경 문제에 생성비를 두 배로 씁니다 (#67)"
+  );
+}
+
+// 캐릭터 동일성(P0 게이트)의 방어선이 켜져 있는지 확인한다. reference 이미지가
+// 0장인 채로 유료 호출이 나가면 4컷이 다 나온 뒤에야 드러난다.
+//
+// 실제 동작(시트를 못 읽을 때 정말 던지는지)은 HTTP 로 구분할 수 없다 — route.ts
+// 가 원인을 감추고 일괄 500 을 주기 때문에 조기 차단이든 모델 호출 실패든 같은
+// 응답이다. 그래서 배선만 검사한다.
+function checkReferenceGuard() {
+  const src = readFileSync(
+    new URL("../../../lib/openai/generate.ts", import.meta.url),
+    "utf8"
+  ).replace(/\/\/.*$/gm, "");
+
+  assert.match(
+    src,
+    /preset\.assets\?\.character_sheet/,
+    "호출부가 referenceAssets를 빼먹었을 때 preset.assets.character_sheet로 채우지 않습니다"
+  );
+
+  const at = src.indexOf("async function toInputImages");
+  assert.notEqual(at, -1, "generate.ts에서 toInputImages를 찾지 못했습니다");
+  const fn = src.slice(at, src.indexOf("\n}", at));
+  assert.match(
+    fn,
+    /images\.length === 0[\s\S]*throw/,
+    "reference 이미지가 0장일 때 던지지 않습니다 — 동일성 방어선 없이 유료 호출이 나갑니다"
+  );
+  assert.match(
+    fn,
+    /console\.(error|warn)/,
+    "readAsset 실패를 조용히 넘깁니다 — 방어선이 꺼진 것을 아무도 모릅니다 (#67)"
+  );
 }
 
 let failed = 0;
@@ -106,11 +157,30 @@ try {
   console.error(`FAIL [정적] ${err.message}`);
 }
 
+try {
+  checkReferenceGuard();
+  console.log("ok   [정적] reference 0장이면 유료 호출 전에 차단");
+} catch (err) {
+  failed++;
+  console.error(`FAIL [정적] ${err.message}`);
+}
+
 const json = (body) => ({
   method: "POST",
   headers: { "content-type": "application/json" },
   body,
 });
+
+// cut·cover_variants 는 reference 이미지를 하나도 못 읽으면 유료 호출 전에 던진다
+// (캐릭터 동일성이 P0 게이트라 시트 없이 만든 이미지는 어차피 버린다). 실제 호출
+// 케이스는 읽을 수 있는 시트 애셋이 있어야 하므로 URI 를 환경변수로 받는다.
+const SHEET = process.env.SMOKE_SHEET_ASSET;
+if (RUN_REAL && !SHEET) {
+  console.error(
+    "FAIL RUN_REAL_GENERATION=1 인데 SMOKE_SHEET_ASSET 이 없습니다 — 읽을 수 있는 asset:// 시트 URI를 지정하세요"
+  );
+  process.exit(1);
+}
 
 // [설명, fetch 옵션, 기대 status, 응답 검사, 실제 API 호출 여부]
 const cases = [
@@ -123,7 +193,9 @@ const cases = [
   ],
   [
     "cut (실제 호출)",
-    json('{"kind":"cut","preset":{},"storyboard":{"cuts":[{"cut_index":1,"generated_image":null}]},"referenceAssets":[]}'),
+    json(
+      `{"kind":"cut","preset":{"assets":{"character_sheet":"${SHEET}"}},"storyboard":{"cuts":[{"cut_index":1,"generated_image":null}]},"referenceAssets":[]}`
+    ),
     200,
     (r) => assert.match(r.result.asset, /^asset:\/\//),
     true,
@@ -131,11 +203,15 @@ const cases = [
   [
     // 3장을 생성하므로 다른 실제 호출 케이스보다 비싸다.
     "cover_variants (실제 호출 3장)",
-    json('{"kind":"cover_variants","preset":{},"storyboard":{"cuts":[{"cut_index":1}]},"referenceAssets":[]}'),
+    json(
+      `{"kind":"cover_variants","preset":{"assets":{"character_sheet":"${SHEET}"}},"storyboard":{"cuts":[{"cut_index":1}]},"referenceAssets":[]}`
+    ),
     200,
     (r) => {
       assert.ok(Array.isArray(r.result), "result가 배열이 아닙니다");
-      assert.equal(r.result.length, 3, `3안이어야 합니다 (받음: ${r.result.length})`);
+      // allSettled 로 바뀌어 1~3안이 올 수 있다. 유료 결과를 버리지 않는 것이
+      // 목적이므로 개수 자체는 3 이하를 허용하고 0 만 실패로 본다 (#104).
+      assert.ok(r.result.length >= 1 && r.result.length <= 3, `1~3안이어야 합니다 (받음: ${r.result.length})`);
       for (const v of r.result) assert.match(v.asset, /^asset:\/\//);
     },
     true,
@@ -163,7 +239,7 @@ for (const [name, init, status, check] of cases) {
   }
 }
 
-const total = cases.length + 2; // + 정적 검사 2건
+const total = cases.length + 3; // + 정적 검사 3건
 if (failed > 0) {
   console.error(`\n${failed}건 실패`);
   process.exit(1);
