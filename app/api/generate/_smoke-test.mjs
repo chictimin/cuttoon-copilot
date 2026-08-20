@@ -62,6 +62,15 @@ function checkWiring() {
     /continueFrom/,
     "표지 3안은 독립 호출이어야 합니다 — continueFrom을 넘기면 안 됩니다 (PRD 6절)"
   );
+
+  // #108: allSettled 라 1~2안만 돌아올 수 있다. 화면이 배열 길이대로 그리므로
+  // 요청 개수를 같이 내려보내지 않으면 조용히 줄어든 상태가 된다.
+  const coverCase = src.slice(src.indexOf("case 'cover_variants'"), src.indexOf("case 'cut'"));
+  assert.match(
+    coverCase,
+    /requested:\s*3/,
+    "cover_variants 응답에 requested가 없습니다 — 화면이 부족분을 알 수 없습니다 (#108)"
+  );
 }
 
 // #104: 3안은 각각 별도 유료 호출이다. Promise.all 로 되돌리면 한 안의 후처리

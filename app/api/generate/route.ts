@@ -37,6 +37,13 @@ export async function POST(request: Request) {
         // 표지 3안. count 는 계약이 리터럴 3 으로 고정한다 — 호출부가 안 개수를
         // 임의로 늘리지 못하게 한 것이므로(#50) 본문에서 받지 않는다.
         // 체이닝 토큰도 받지 않는다: 3안은 독립 호출이어야 한다 (PRD 6절).
+        //
+        // requested 를 같이 내려보내는 이유(#108): generateCoverVariants 가
+        // allSettled 라 한 안이 후처리에서 실패하면 1~2안만 돌아온다. 성공분
+        // 생성비를 지키려면 그게 맞지만, 화면이 배열 길이대로 그리기 때문에
+        // "왜 2안인지" 알 방법이 없으면 조용히 줄어든 상태가 된다. 부족분을
+        // 화면이 말할 수 있게 요청 개수를 응답에 드러낸다 — 표시 자체는 A② 소유고
+        // 여기서는 result.length < requested 로 판단할 근거만 넘긴다.
         return Response.json({
           result: await generateCoverVariants({
             storyboard,
@@ -44,6 +51,7 @@ export async function POST(request: Request) {
             referenceAssets: Array.isArray(referenceAssets) ? referenceAssets : [],
             count: 3,
           }),
+          requested: 3,
         })
       case 'cut':
         // storyboard 검증은 lib/llm/storyboard-guard.ts(A① 소유)가 담당한다.
