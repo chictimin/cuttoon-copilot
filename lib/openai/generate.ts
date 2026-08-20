@@ -159,9 +159,13 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   //
   // 그래서 힌트가 있으면 서술문만 쓰고, 없을 때만 토큰 + 라벨로 폴백한다. 다른
   // 힌트(Framing·Camera·Lighting)는 라벨이 앞에 있어 이 문제가 없다 (PR #120 리뷰).
-  const ratio =
-    promptHint('character_ratio', s?.character_ratio) ??
-    `${s?.character_ratio ?? '2.5head'} body proportions`
+  //
+  // 기본값을 먼저 적용한 뒤 힌트를 찾는다. 순서가 반대면 character_ratio 가 비었을 때
+  // 힌트를 건너뛰고 토큰(`2.5head body proportions`)으로 떨어진다 — extract.ts 는
+  // 기본값에도 힌트를 붙이므로 그 상태로는 시트와 컷이 다른 지시를 받는다. 실측으로
+  // 갈리는 것을 확인했다 (PR #126 머지 후).
+  const ratioValue = s?.character_ratio ?? '2.5head'
+  const ratio = promptHint('character_ratio', ratioValue) ?? `${ratioValue} body proportions`
   const styleStr = s
     ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${ratio}, ${s.background_density ?? 'low'} background detail`
     : 'default webtoon/comic style'
