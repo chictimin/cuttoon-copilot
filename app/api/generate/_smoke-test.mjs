@@ -104,6 +104,22 @@ function checkCoverVariantsSettled() {
     /gained === 0[\s\S]{0,400}break/,
     "배치가 통째로 실패해도 재시도를 계속합니다 — 환경 문제에 생성비를 두 배로 씁니다 (#67)"
   );
+
+  // #118: 재시도 토글. 예산 하나로 표현해야 한다 — 분기를 따로 두면 한쪽만 고쳐진다.
+  assert.match(
+    fn,
+    /attemptsLeft\s*=\s*retry\s*\?\s*input\.count\s*\*\s*2\s*:\s*input\.count/,
+    "재시도 예산이 토글을 반영하지 않습니다 (#118)"
+  );
+  // 기본값은 on 이어야 한다. 오타('ture')가 조용히 off 로 떨어지면 시연에서
+  // 3안이 2안으로 줄어드는 쪽으로 실패한다 — 끄는 값만 명시적으로 받는다.
+  const toggle = src.slice(src.indexOf("function retryEnabled"));
+  assert.notEqual(src.indexOf("function retryEnabled"), -1, "retryEnabled를 찾지 못했습니다 (#118)");
+  assert.match(
+    toggle.slice(0, 400),
+    /return\s*!\(/,
+    "retryEnabled가 기본 on 이 아닙니다 — 끄는 값만 받아야 합니다 (#118)"
+  );
 }
 
 // 캐릭터 동일성(P0 게이트)의 방어선이 켜져 있는지 확인한다. reference 이미지가

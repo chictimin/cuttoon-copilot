@@ -348,6 +348,21 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   }
 }
 
+// #118: 부족분 재시도 on/off. 기본은 on 이다 — 정상 경로에서는 재시도가 아예
+// 일어나지 않아 평시 비용이 같고, PRD 6절의 표지 3안 고정값을 지키는 쪽이 안전하다.
+// 리허설을 반복할 때처럼 시간·비용을 아끼고 3안이 2안으로 줄어도 무방한 상황에서만 끈다.
+//
+// 호출 시점에 읽는다. 모듈 로드 시점에 캐시하면 값을 바꿔도 프로세스를 다시 띄울
+// 때까지 안 먹는데, 이 값은 상황에 따라 켜고 끄는 용도라 그게 함정이 된다.
+const RETRY_ENV = 'COVER_VARIANT_RETRY'
+
+function retryEnabled(): boolean {
+  const v = process.env[RETRY_ENV]?.trim().toLowerCase()
+  // 안 정했으면 on. 끄는 것만 명시적으로 받는다 — 오타('yes', 'ture')가 조용히
+  // off 로 떨어지면 시연에서 3안이 2안으로 줄어드는 쪽으로 실패한다.
+  return !(v === '0' || v === 'false' || v === 'off')
+}
+
 // #108: allSettled(#104)만으로는 부족하다 — 3개 중 하나가 실패하면 조용히 2개만
 // 돌아온다. provider.ts의 count: 3 리터럴과 PRD 6절("표지컷만 3안")은 고정값이라
 // 사용자에게 "왜 2안만 떴는지" 설명 없이 개수가 줄어드는 걸 허용하지 않는다.
@@ -380,9 +395,14 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   const prompt = buildCutPrompt(storyboard, preset, cut)
 
   const variants: GeneratedImageResult[] = []
-  // count(3)만큼 더 실패해도 재시도할 수 있게 여유를 둔다 — 무한 재시도로 인한
-  // 과금 폭주는 막으면서, 가끔 한두 개 실패하는 정도는 채울 수 있게 한다.
-  let attemptsLeft = input.count * 2
+  // 재시도를 켜면 count(3)만큼 더 실패해도 채울 수 있게 여유를 둔다 — 무한 재시도로
+  // 인한 과금 폭주는 막으면서, 가끔 한두 개 실패하는 정도는 채운다.
+  //
+  // 끄면 예산이 정확히 count 라서 배치가 한 번만 돌고 부족분은 그대로 반환된다
+  // (PR #97 시점 동작). 분기를 따로 두지 않고 예산 하나로 표현한다 — 두 경로를
+  // 만들면 한쪽만 고쳐지는 일이 생긴다.
+  const retry = retryEnabled()
+  let attemptsLeft = retry ? input.count * 2 : input.count
 
   while (variants.length < input.count && attemptsLeft > 0) {
     const needed = input.count - variants.length
@@ -426,8 +446,11 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   // 사용자가 아무것도 못 고르는 것보다는 낫다. 다만 PRD 고정값(3안)과 어긋나는
   // 상태이니 반드시 로그로 남겨 모니터링에서 보이게 한다.
   if (variants.length < input.count) {
+    // 원인을 로그에 박는다 (#118). "재시도가 꺼져 있어서" 와 "재시도했는데도
+    // 실패해서" 는 대응이 다르다 — 앞은 설정을 켜면 되고 뒤는 환경을 봐야 한다.
+    const why = retry ? '재시도 한도 소진' : `재시도 꺼짐(${RETRY_ENV}=off)`
     console.error(
-      `[generate] 표지 ${input.count}안 중 ${variants.length}안만 확보(재시도 한도 소진) — PRD 고정값(#108) 미달`
+      `[generate] 표지 ${input.count}안 중 ${variants.length}안만 확보(${why}) — PRD 고정값(#108) 미달`
     )
   }
 
