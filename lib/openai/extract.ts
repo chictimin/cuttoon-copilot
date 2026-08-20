@@ -66,7 +66,12 @@ export interface PresetInput {
   };
 }
 
-function buildCharacterPrompt(preset: PresetInput): string {
+// export 하는 이유: 시트와 컷의 프롬프트가 **문구 수준으로** 같은 스타일 지시를
+// 내는지 대조하려면 두 파일에서 실제로 조립한 문자열을 비교해야 한다. #120 의
+// checkStyleParity() 는 "컷이 그 필드를 읽는가" 까지만 보고, 그 한계 때문에
+// character_ratio 폴백 차이가 두 번 통과했다(#126 → #129). B① 요청에 따라 열어
+// 스모크 테스트가 이 함수를 직접 부를 수 있게 한다.
+export function buildCharacterPrompt(preset: PresetInput): string {
   // preset 구조를 저장 시점에 검증하는 곳이 아직 없다(route.ts 주석 참고) — 배열
   // 필드가 비어 있거나 아예 빠진 채로 들어와도 여기서 죽지 않게 방어한다.
   const s = preset.style ?? ({} as PresetInput["style"]);
@@ -83,12 +88,16 @@ function buildCharacterPrompt(preset: PresetInput): string {
   // 비율로 그려져 P0 게이트 1(캐릭터 동일성)의 "비율" 항목을 오독하게 된다 (#113).
   //
   // promptHint() 는 B① 이 이 용도로 export 한 것이다 — 두 파일이 vocabulary.json 을
-  // 각자 읽으면 폴백 규칙이 갈라진다. 실제로 갈라져 있었다: 이전 구현은 값이 없을 때
-  // 기본값 "2.5head" 를 채운 뒤 힌트를 찾아서, #121 이 힌트를 추가하면 시트는 서술문·
-  // 컷은 raw 토큰을 받았다. 여기서는 컷과 같은 순서(힌트 → 없으면 토큰+라벨)를 쓴다.
+  // 각자 읽으면 폴백 규칙이 갈라진다.
+  //
+  // 순서가 중요하다: 기본값을 **먼저** 적용한 뒤 힌트를 찾는다. promptHint() 는
+  // 값이 없으면 undefined 를 주므로, 힌트 조회를 먼저 하면 미지정 케이스가 토큰
+  // 폴백으로 떨어져 서술문을 못 받는다. 힌트를 넣은 이유(모델이 `2head` 같은
+  // 토큰을 못 알아듣는다 — #121 실측 4/4 무시)는 기본값에도 그대로 적용된다.
+  // B① 도 같은 결론으로 컷 쪽 순서를 맞췄다 (#129).
+  const ratioValue = s.character_ratio ?? "2.5head";
   const ratio =
-    promptHint("character_ratio", s.character_ratio) ??
-    `${s.character_ratio ?? "2.5head"} body proportions`;
+    promptHint("character_ratio", ratioValue) ?? `${ratioValue} body proportions`;
 
   return `Character reference sheet for a webtoon/comic series.
 
