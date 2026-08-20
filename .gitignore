@@ -46,3 +46,6 @@ CLAUDE.md
 
 # lib/render 방식 검증용 임시 산출물 (schema 확정 전 POC)
 .demo-output/
+
+# Playwright MCP 브라우저 세션 산출물 (스크린샷·트레이스)
+.playwright-mcp/
