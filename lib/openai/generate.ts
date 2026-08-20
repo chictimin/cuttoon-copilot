@@ -77,6 +77,19 @@ interface MinimalPreset {
     character_ratio?: string
     background_density?: string
   }
+  // 온보딩에서 사용자가 직접 고른 값이다(골든 패스 2·3단계). 장면 연출에 쓴다 —
+  // 50대 부모가 등장하는 헬스케어 장면과 20대 취준생 IT 장면은 배경·소품이 다르다.
+  //
+  // main_subjects 와 interests 는 일부러 읽지 않는다.
+  // - main_subjects: preset.schema.json 주석이 "컷툰 한 편의 실제 소재는 여기가
+  //   아니라 세션에서 받는다" 고 못박았고, 이미 storyboard.subject 를 쓰고 있다.
+  //   둘을 같이 넣으면 소재가 두 겹이 돼 장면이 흐려진다.
+  // - interests: 마케팅 목적 축이라 컷 연출보다 CTA 쪽 값이다.
+  context?: {
+    industry?: string[]
+    age_band?: string[]
+    life_stage?: string[]
+  }
 }
 
 // "Leave the top edge empty" 로 쓰면 모델이 그림 위에 별도의 흰 띠를 붙인다 —
@@ -120,6 +133,29 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
     `Style: ${styleStr}.`,
     `Subject: ${storyboard.subject ?? 'a person dealing with an everyday situation'}.`,
   ]
+
+  // 사용자가 온보딩에서 고른 타깃·업종. 값이 없으면 문장을 아예 넣지 않는다 —
+  // "general" 같은 채움말을 넣으면 모델이 그걸 지시로 읽는다.
+  //
+  // "who this is for" 로 못박는 이유: 타깃과 등장 인물이 다를 수 있다. KRIEE
+  // 샘플이 그 경우다 — 타깃은 30~40대 지도사인데 컷에 나오는 인물은 60대
+  // 어머니다. 그냥 "audience in their 30s" 로 쓰면 모델이 인물 나이 지시로
+  // 읽어 cast 서술과 충돌한다.
+  //
+  // life_stage 값은 스네이크케이스 enum 이라 밑줄을 공백으로 바꿔 넣는다.
+  // prompt_hints 에 life_stage 항목이 없어 서술문이 없다(spec/ 은 A① 소유).
+  const ctx = preset.context
+  const audience = [
+    ctx?.industry?.length ? `${ctx.industry.join(' / ')} field` : undefined,
+    ctx?.age_band?.length ? `readers in their ${ctx.age_band.join(', ')}` : undefined,
+    ctx?.life_stage?.length ? ctx.life_stage.map((v) => v.replace(/_/g, ' ')).join(', ') : undefined,
+  ].filter(Boolean)
+  if (audience.length) {
+    parts.push(
+      `Who this comic is made for (not who appears in the panel): ${audience.join('; ')}. ` +
+        `Choose setting, props and tone that resonate with those readers.`
+    )
+  }
 
   if (cut) {
     const shot = hint('shot_type', cut.shot_type)
