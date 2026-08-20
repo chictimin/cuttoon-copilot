@@ -71,8 +71,8 @@ cuttoon-copilot/
 
 | 단계 | 로직·API | 화면 | 상태 | 관련 이슈 |
 | --- | --- | --- | --- | --- |
-| 1. 레퍼런스 업로드 | `POST /api/upload` · `lib/asset-store.ts` | mock 사용 | 미연결 | #87 (낮은 우선순위) |
-| 2. 스타일 추출 | `lib/openai/extract.ts` (실제 호출) | mock 사용 | 반쪽 | #87 (낮은 우선순위) |
+| 1. 레퍼런스 업로드 | `POST /api/upload` · `lib/asset-store.ts` | 연결됨 | 완료 | — |
+| 2. 스타일 추출 | `lib/openai/extract.ts` (실제 호출) | 연결됨 | 완료 | — |
 | 3. 프리셋 자동 확정 | `lib/llm/preset-guard.ts` | 있음 | 완료 | — |
 | 4. 프리셋 저장 | `GET·POST /api/preset` | 연결됨 | 완료 | — |
 | 5. 캐릭터 시트 표시 | — | 있음 | 완료 | — |
@@ -91,7 +91,7 @@ cuttoon-copilot/
 
 **이미지 생성은 백엔드가 실제 모델 호출로 붙었지만(PR #80), 화면이 아직 그걸 안 부릅니다.** 세션 화면(`SessionFlow.tsx`)이 `lib/openai/generate.ts`/`POST /api/generate` 대신 화면 폴더 안의 로컬 mock(`mock-generate.ts`)을 직접 호출하고 있어서, 9·10번은 지금 실행해도 placeholder만 나옵니다(#82). 브레인스토밍(8번)도 같은 이유로 로컬 mock(`mock-brainstorm.ts`)을 쓰는데, 실제 구현은 PR #53에 이미 있고 아직 미머지 상태입니다(#83·#84).
 
-**레퍼런스 업로드·스타일 추출(1·2번)은 낮은 우선순위로 미뤄뒀습니다.** `readAsset()`이 mock asset URI를 못 찾으면 조용히 `null`을 반환해서, 화면이 mock인 채로 있어도 이후 생성 단계가 크래시 없이 돕니다 — 캐릭터 동일성 품질만 떨어집니다(#87).
+**레퍼런스 업로드·스타일 추출(1·2번)도 화면까지 이어졌습니다(PR #91, #95).** 온보딩 화면(`OnboardingFlow.tsx`)이 `style-analysis.ts`를 통해 `POST /api/upload`(Supabase Storage 저장) → `POST /api/extract`(실제 GPT-4o 호출)를 부르고, 캐릭터 시트도 `generateCharacterSheet` 실제 호출로 생성합니다(#87 closed).
 
 **P0 게이트를 아직 화면에서 검증하지 못했습니다.** `PRD.md` 7절이 "P0의 두 게이트가 가장 중요한 판단점"이라고 못 박았는데(캐릭터 4컷 동일성 / 말풍선 억제), 백엔드는 실제 호출이 붙었지만 화면이 아직 mock을 쓰고 있어(#82) 화면에서 눈으로 검증할 수 없는 상태입니다.
 
