@@ -2,11 +2,7 @@
 
 import { useRef, useState } from "react";
 import { assertValidPreset, type Preset } from "@/lib/llm/preset-guard";
-import {
-  analyzeStyle,
-  CHARACTER_SHEET_PREVIEW,
-  type StyleAnalysisResult,
-} from "./mock-style-analysis";
+import { analyzeStyle, type StyleAnalysisResult } from "./style-analysis";
 import DetailsStep, { type DetailsFormValue } from "./DetailsStep";
 
 type Step = "upload" | "analyzing" | "result" | "details" | "confirmed";
@@ -30,6 +26,7 @@ function validateFiles(files: File[]): { valid: File[]; error: string | null } {
 export default function OnboardingFlow() {
   const [step, setStep] = useState<Step>("upload");
   const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<StyleAnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -63,6 +60,10 @@ export default function OnboardingFlow() {
     }
 
     setReferenceFiles(valid);
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(valid[0]);
+    });
     void runAnalysis(valid);
   }
 
@@ -78,11 +79,49 @@ export default function OnboardingFlow() {
   async function handleConfirmDetails(details: DetailsFormValue) {
     if (!analysis) return;
 
+    setError(null);
+    setSaving(true);
+
+    // 캐릭터 시트는 style(분석 단계)과 context(이 폼)가 둘 다 있어야 만들 수
+    // 있어서 여기서 생성한다 — 프로젝트 생성 시 1회(#19 결정: 세션마다 다시
+    // 만들지 않음).
+    let characterSheetAsset: string;
+    try {
+      const sheetRes = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "character_sheet",
+          preset: {
+            style: analysis.style,
+            context: {
+              industry: details.industry,
+              age_band: details.ageBand,
+              life_stage: details.lifeStage,
+              main_subjects: details.mainSubjects,
+            },
+          },
+        }),
+      });
+      if (!sheetRes.ok) {
+        const body = await sheetRes.json().catch(() => null);
+        setError(body?.error ?? "캐릭터 시트 생성에 실패했어요. 다시 시도해주세요");
+        return;
+      }
+      const { result } = (await sheetRes.json()) as { result: { asset: string } };
+      characterSheetAsset = result.asset;
+    } catch {
+      setError("캐릭터 시트 생성에 실패했어요. 다시 시도해주세요");
+      return;
+    } finally {
+      setSaving(false);
+    }
+
     const preset: Preset = {
       preset_version: "1.1",
       project_name: details.projectName,
       assets: {
-        character_sheet: analysis.characterSheetAsset,
+        character_sheet: characterSheetAsset,
         style_refs: analysis.styleRefAssets,
         reference_asset_ids: [],
       },
@@ -103,7 +142,6 @@ export default function OnboardingFlow() {
     // 스키마와 실제로 맞는지 마지막에 한 번 더 확인 (조립 실수 방지)
     assertValidPreset(preset);
 
-    setError(null);
     setSaving(true);
     try {
       const res = await fetch("/api/preset", {
@@ -143,7 +181,12 @@ export default function OnboardingFlow() {
       )}
       {step === "analyzing" && <AnalyzingStep />}
       {step === "result" && analysis && (
-        <ResultStep analysis={analysis} onRetry={handleRetry} onConfirm={handleConfirmStyle} />
+        <ResultStep
+          analysis={analysis}
+          previewUrl={previewUrl}
+          onRetry={handleRetry}
+          onConfirm={handleConfirmStyle}
+        />
       )}
       {step === "details" && (
         <DetailsStep onConfirm={handleConfirmDetails} error={error} saving={saving} />
@@ -250,10 +293,12 @@ const SATURATION_LABEL: Record<string, string> = {
 
 function ResultStep({
   analysis,
+  previewUrl,
   onRetry,
   onConfirm,
 }: {
   analysis: StyleAnalysisResult;
+  previewUrl: string | null;
   onRetry: () => void;
   onConfirm: () => void;
 }) {
@@ -265,13 +310,19 @@ function ResultStep({
 
       <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
         <figure className="flex flex-col items-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element -- data URI placeholder, next/image 불필요 */}
-          <img
-            src={CHARACTER_SHEET_PREVIEW}
-            alt="캐릭터 시트"
-            className="aspect-square w-full rounded-lg object-cover"
-          />
-          <figcaption className="text-sm text-zinc-500">캐릭터 시트</figcaption>
+          {previewUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- 사용자가 방금 올린 파일의 blob URL, next/image 불필요
+            <img
+              src={previewUrl}
+              alt="업로드한 레퍼런스"
+              className="aspect-square w-full rounded-lg object-cover"
+            />
+          ) : (
+            <div className="aspect-square w-full rounded-lg bg-zinc-100" />
+          )}
+          <figcaption className="text-sm text-zinc-500">
+            업로드한 레퍼런스 · 캐릭터 시트는 다음 단계 확정 후 생성돼요
+          </figcaption>
         </figure>
 
         <figure className="flex flex-col items-center gap-2">
