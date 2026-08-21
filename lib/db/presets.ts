@@ -74,6 +74,36 @@ export async function getPreset(presetId: string): Promise<SavedPreset | null> {
   };
 }
 
+/** 프로젝트 이름만 바꾼다. project_name의 정본은 이 컬럼이다(issue #7). */
+export async function renameProject(projectId: string, name: string): Promise<void> {
+  const { data, error } = await getDb()
+    .from("projects")
+    .update({ name })
+    .eq("id", projectId)
+    .select("id");
+
+  if (error) throw new Error(`프로젝트 이름 변경 실패: ${error.message}`);
+  if (!data?.length) throw new Error("존재하지 않는 프로젝트입니다");
+}
+
+/**
+ * 프로젝트를 목록에서 숨긴다(issue #161). 하드 삭제가 아니라 `archived_at`을
+ * 채우는 소프트 삭제다 — projects 삭제는 presets·sessions까지 cascade되어
+ * (schema.sql) 컷툰 완성본이 함께 사라지기 때문. listProjects()가 이 값을
+ * 기준으로 걸러낸다. 세션 직접 접근(`/session/{id}`)은 이 값을 보지 않으므로
+ * 비활성화해도 저장된 컷툰 자체는 그대로 열린다.
+ */
+export async function archiveProject(projectId: string): Promise<void> {
+  const { data, error } = await getDb()
+    .from("projects")
+    .update({ archived_at: new Date().toISOString() })
+    .eq("id", projectId)
+    .select("id");
+
+  if (error) throw new Error(`프로젝트 비활성화 실패: ${error.message}`);
+  if (!data?.length) throw new Error("존재하지 않는 프로젝트입니다");
+}
+
 export interface ProjectSummary {
   projectId: string;
   projectName: string;
@@ -94,11 +124,15 @@ export interface ProjectSummary {
  * 스키마상 프로젝트 하나에 프리셋이 여러 개 달릴 수 있지만(presets.project_id),
  * savePreset은 프로젝트당 하나만 만든다. 나중에 프리셋을 갱신하는 경로가 생기면
  * 여러 개가 될 수 있으므로 가장 최근 것 하나를 고른다.
+ *
+ * archiveProject()로 비활성화된 프로젝트는 여기서 걸러진다(issue #161) — 목록
+ * 화면 전용 필터라, 세션 직접 접근이나 GET /api/session에는 영향이 없다.
  */
 export async function listProjects(): Promise<ProjectSummary[]> {
   const { data, error } = await getDb()
     .from("projects")
     .select("id, name, created_at, updated_at, presets(id, version, created_at), sessions(count)")
+    .is("archived_at", null)
     .order("updated_at", { ascending: false });
 
   if (error) throw new Error(`프로젝트 목록 조회 실패: ${error.message}`);

@@ -24,6 +24,10 @@ create table if not exists projects (
   -- preset JSON의 project_name은 API가 출력할 때 이 값으로 채워 내려보낸다.
   -- 목록 화면에서 jsonb를 파싱하지 않아도 되고, 이름을 바꿀 때 JSON을 다시 쓰지 않는다.
   name        text not null check (length(name) > 0),
+  -- null이면 활성, 값이 있으면 비활성(issue #161) — 목록 화면에서만 숨긴다.
+  -- 하드 삭제로 하지 않는 이유: projects 삭제가 presets·sessions까지
+  -- cascade되어(아래 FK) 컷툰 완성본이 함께 사라진다.
+  archived_at timestamptz,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
@@ -132,6 +136,14 @@ drop trigger if exists projects_set_updated_at on projects;
 create trigger projects_set_updated_at
   before update on projects
   for each row execute function set_updated_at();
+
+-- ─────────────────────────────────────────────────────────────
+-- 증분 마이그레이션 — 이미 이 파일로 테이블을 만든 환경에 적용
+-- (create table if not exists는 기존 테이블에 컬럼을 추가하지 않는다)
+-- ─────────────────────────────────────────────────────────────
+
+-- issue #161: 프로젝트 목록 정리 — 하드 삭제 대신 비활성화.
+alter table projects add column if not exists archived_at timestamptz;
 
 drop trigger if exists sessions_set_updated_at on sessions;
 create trigger sessions_set_updated_at
