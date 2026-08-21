@@ -129,28 +129,38 @@ export interface HeadTarget {
 
 const DEFAULT_HEAD_TARGET: HeadTarget = { x: 0.5, y: 0.42 };
 
-// 길이는 "몸통 경계선에서부터 얼마나 튀어나오는가"로 고정한다(TAIL_PROTRUDE, 캔버스
-// 세로 기준 비율) — 처음엔 "중심→목표점 거리의 85%"로 길이를 잡았더니 구석
-// 자리에서 꼬리가 지나치게 길어졌고(팀 피드백), 그다음 "중심에서부터 절대 길이로
-// 상한"을 시도했더니 타원이 큰 경우(긴 대사라 bubbleH가 큰 경우) 그 상한이 타원
-// 반지름보다 작아서 꼬리 끝이 몸통 안에 파묻혀 아예 안 보이는 문제가 생겼다.
-// 몸통 경계선 기준으로 튀어나오는 길이를 고정하면 몸통 크기와 무관하게 항상 일정한
-// 길이로 보인다.
-const TAIL_PROTRUDE_RATIO = 0.045;
+// 꼬리 길이 — 처음엔 "중심→목표점 거리의 85%"로 잡았더니 구석 자리에서 지나치게
+// 길어졌고(팀 피드백), 그다음 "몸통 경계선에서 고정된 짧은 길이만 튀어나오게"
+// 바꿨더니 이번엔 반대로 목표점(대개 인물 머리)까지 못 미치고 허공에서 끝나
+// "머리를 안 향하는 것처럼" 보이는 문제가 생겼다(인선님 피드백 2026-08-20).
+//
+// 그래서 "몸통 경계선부터 목표점까지 남은 거리의 REACH_RATIO만큼"으로 정한다 —
+// 목표점에 가까이 다가가되(REACH_RATIO를 1 미만으로 둬서 얼굴에 완전히 박히진
+// 않게) 몸통·목표점 사이 거리에 비례하므로, 말풍선이 인물과 가까우면 짧게, 멀면
+// 길게 자동으로 맞춰진다. 다만 목표점이 아주 멀리 있는 극단적 배치까지 대비해
+// MAX_PROTRUDE_RATIO로 절대 길이 상한도 같이 둔다.
+const TAIL_REACH_RATIO = 0.4;
+const MAX_PROTRUDE_RATIO = 0.12;
 
 function tailGeometry(canvasW: number, canvasH: number, cx: number, cy: number, headTarget: HeadTarget) {
   const targetX = canvasW * headTarget.x;
   const targetY = canvasH * headTarget.y;
   const angle = Math.atan2(targetY - cy, targetX - cx);
-  const protrude = canvasH * TAIL_PROTRUDE_RATIO;
-  return { angle, protrude };
+  const totalDist = Math.hypot(targetX - cx, targetY - cy);
+  const maxProtrude = canvasH * MAX_PROTRUDE_RATIO;
+  return { angle, totalDist, maxProtrude };
 }
 
-type Tail = { angle: number; protrude: number };
+type Tail = { angle: number; totalDist: number; maxProtrude: number };
 
-// 타원 테두리 중 꼬리가 나갈 좁은 구간만 갈라서, 그 경계점에서 protrude만큼 튀어나온
-// 뾰족한 끝(tip)을 끼워 넣은, 하나로 이어진 폐곡선. instacut 참고자료의 아이디어
-// (그림/텍스트는 재사용 안 함, 수학만 참고).
+function protrudeFrom(boundaryDist: number, tail: Tail): number {
+  const remaining = Math.max(tail.totalDist - boundaryDist, 0);
+  return Math.min(remaining * TAIL_REACH_RATIO, tail.maxProtrude);
+}
+
+// 타원 테두리 중 꼬리가 나갈 좁은 구간만 갈라서, 그 경계점에서 목표점 쪽으로
+// protrudeFrom()만큼 튀어나온 뾰족한 끝(tip)을 끼워 넣은, 하나로 이어진 폐곡선.
+// instacut 참고자료의 아이디어(그림/텍스트는 재사용 안 함, 수학만 참고).
 function ellipsePath(cx: number, cy: number, rx: number, ry: number, tail: Tail | null): string {
   if (!tail) {
     const steps = 64;
@@ -170,14 +180,17 @@ function ellipsePath(cx: number, cy: number, rx: number, ry: number, tail: Tail 
   }
   const boundaryX = cx + rx * Math.cos(tail.angle);
   const boundaryY = cy + ry * Math.sin(tail.angle);
-  const tipX = boundaryX + Math.cos(tail.angle) * tail.protrude;
-  const tipY = boundaryY + Math.sin(tail.angle) * tail.protrude;
+  const boundaryDist = Math.hypot(boundaryX - cx, boundaryY - cy);
+  const protrude = protrudeFrom(boundaryDist, tail);
+  const tipX = boundaryX + Math.cos(tail.angle) * protrude;
+  const tipY = boundaryY + Math.sin(tail.angle) * protrude;
   pts.push(`${tipX},${tipY}`);
   return `<polygon points="${pts.join(" ")}" ${FILL} ${STROKE}/>`;
 }
 
 // 사각형(rect/cloud 바탕)도 같은 원리 — 중심에서 꼬리 방향으로 쏜 광선이 변과 만나는
-// 지점을 찾아, 그 경계점에서 protrude만큼 튀어나온 끝을 그 자리에 갈라 끼운다.
+// 지점을 찾아, 그 경계점에서 목표점 쪽으로 protrudeFrom()만큼 튀어나온 끝을 그
+// 자리에 갈라 끼운다.
 function rectPath(x: number, y: number, w: number, h: number, rx: number, tail: Tail | null): string {
   const corners: [number, number][] = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
   if (!tail) {
@@ -195,8 +208,9 @@ function rectPath(x: number, y: number, w: number, h: number, rx: number, tail: 
   const t = Math.min(tX, tY);
   const exitX = cx + dx * t;
   const exitY = cy + dy * t;
-  const tipX = exitX + dx * tail.protrude;
-  const tipY = exitY + dy * tail.protrude;
+  const protrude = protrudeFrom(t, tail);
+  const tipX = exitX + dx * protrude;
+  const tipY = exitY + dy * protrude;
   const onVerticalEdge = tX < tY; // 좌/우 변에서 나감 -> 세로 방향이 그 변의 접선
   const spread = Math.min(w, h) * 0.045;
   const tangent: [number, number] = onVerticalEdge ? [0, 1] : [1, 0];
