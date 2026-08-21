@@ -87,7 +87,18 @@ flowchart TD
 | `generateCoverVariants` | `generate.ts:513` | 표지 3안 생성 |
 | `OUTPUT_SIZE` | `generate.ts:39` | `{width:1024,height:1024}`. `extract.ts` 가 시트 크기로 가져간다 |
 | `promptHint` | `generate.ts:141` | `prompt_hints` 조회. 없으면 `undefined` — 힌트 유무를 구분해야 하는 자리를 위해 `hint()`(`:146`)와 나눠 뒀다 |
-| `ratioClause` | `generate.ts:164` | `character_ratio` 절. 폴백 규칙까지 한 곳에 둔다 (5-1b절 참고) |
+| `ratioClause` | `generate.ts:164` | `character_ratio` 절. **폴백 규칙까지** 한 곳에 둔다 — 아래 참고 |
+
+`ratioClause(value)` 가 규칙 자체를 담는다. `extract.ts`(B②)도 이것을 가져다 써서 시트와 컷이 항상 같은 비율 지시를 받는다.
+
+```ts
+const v = value ?? '2.5head'
+return promptHint('character_ratio', v) ?? `${v} body proportions`
+```
+
+**순서가 중요하다: 기본값을 먼저 적용한 뒤 힌트를 찾는다.** 반대로 하면 `character_ratio` 가 비었을 때 힌트를 건너뛰고 토큰으로 떨어진다. 그리고 라벨(`body proportions`)은 **힌트가 없을 때만** 붙인다 — 힌트 서술문은 그 자체로 완결된 구라서 뒤에 라벨을 또 붙이면 문장이 깨진다.
+
+`promptHint` 만 공유하고 이 세 줄을 각 파일에 복사해 뒀을 때 규칙이 갈라지는 사고가 두 번 났다(#126 에서 생기고 #129 에서 발견, PR #128·#130 으로 절 자체를 공유해 닫음). 스모크의 정적 검사가 `promptHint('character_ratio', …)` 가 **몇 곳에 나오는지** 세는 이유다.
 
 `generateCharacterSheet` 는 이 파일이 아니라 `extract.ts`(B②) 소유다 — `extractStyle` 과 결합도가 높아 #19 로 그렇게 정했다. `route.ts` 가 `kind:'character_sheet'` 를 그쪽으로 넘긴다.
 
