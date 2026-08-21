@@ -79,17 +79,103 @@ flowchart TD
 
 ### 5-1. 텍스트/이미지 생성 (B①)
 
-A가 넘기는 것과 받는 것(계약)만 적었다. 내부에서 어떤 모델을 쓰는지, 프롬프트를 어떻게 조립하는지는 B① 작성 대기.
+`app/api/generate/route.ts` · `lib/openai/generate.ts` · `lib/openai/provider.ts` 소유. `generate.ts` 가 내보내는 것은 아래 다섯 개다.
 
-- **`extractStyle(refs: Buffer[])`** — B②. `POST /api/extract`가 A①/A②가 올린 `assetUris`를 `readAsset`로 buffer화해 넘긴다. 반환 `StyleExtractionResult`(`extract.ts`). 내부 동작은 5-1b절.
-- **`ImageProvider`**(`lib/openai/provider.ts`, B①) — A가 실제로 부르는 계약:
-  - `generateCharacterSheet(preset: unknown): Promise<GeneratedImageResult>`
-  - `generateCoverVariants(input: { storyboard, preset, referenceAssets, count: 3 }): Promise<GeneratedImageResult[]>` — `count`가 리터럴 타입 `3`으로 고정돼 있어 호출부가 다른 값을 넘길 수 없다
-  - `generateCut(input: { storyboard, preset, referenceAssets, continueFrom?: string }): Promise<GeneratedImageResult>` — `continueFrom`은 프로바이더 중립 체이닝 토큰
-  - 공통 반환 `GeneratedImageResult`: `{ asset, width, height, reserved_zone?, continuationToken?, stub?, prompt? }`
-- **`POST /api/generate`**(`app/api/generate/route.ts`, B①) — body `{ kind: 'character_sheet'|'cover_variants'|'cut', ... }`로 위 세 함수에 매핑. `kind`별 body 필드는 각 함수 입력과 동일.
+| export | 위치 | 용도 |
+|---|---|---|
+| `generateCut` | `generate.ts:452` | 컷 1장 생성 |
+| `generateCoverVariants` | `generate.ts:513` | 표지 3안 생성 |
+| `OUTPUT_SIZE` | `generate.ts:39` | `{width:1024,height:1024}`. `extract.ts` 가 시트 크기로 가져간다 |
+| `promptHint` | `generate.ts:141` | `prompt_hints` 조회. 없으면 `undefined` — 힌트 유무를 구분해야 하는 자리를 위해 `hint()`(`:146`)와 나눠 뒀다 |
+| `ratioClause` | `generate.ts:164` | `character_ratio` 절. 폴백 규칙까지 한 곳에 둔다 (5-1b절 참고) |
 
-작성 대기 항목(B①): 실제 사용 모델·API, 세션당 실호출 횟수, 프롬프트 조립 로직, 체이닝 내부 처리.
+`generateCharacterSheet` 는 이 파일이 아니라 `extract.ts`(B②) 소유다 — `extractStyle` 과 결합도가 높아 #19 로 그렇게 정했다. `route.ts` 가 `kind:'character_sheet'` 를 그쪽으로 넘긴다.
+
+**모델·API — B② 와 다르다**
+
+`client.responses.create`(`generate.ts:385`), 모델 `gpt-5`(`RESPONSES_MODEL`, `:19`), 이미지는 내장 도구 `tools: [{ type:'image_generation', size:'1024x1024' }]`(`:394`)로 만든다. 응답에서 `image_generation_call` 출력을 찾아 base64 를 꺼낸다(`:401`).
+
+B② 의 `generateCharacterSheet` 는 `client.images.generate`(Images API)를 쓴다. **같은 이미지 모델을 부르는 두 경로가 공존한다** — 체이닝(`previous_response_id`)이 Responses API 에만 있어서 컷 쪽은 이 경로여야 한다. SDK(^7.5.0) 의 Responses 타입이 도구 옵션을 못 따라와 `as any` 로 우회하고 있다(`:383` 주석).
+
+**세션당 이미지 호출 횟수 (판정 예산)**
+
+| 단계 | 호출 | 비고 |
+|---|---|---|
+| 표지 3안 | **3회** (병렬) | `Promise.allSettled` — 한 안이 실패해도 성공분을 버리지 않는다 (#104) |
+| 나머지 3컷 | **3회** (순차) | 체이닝이라 병렬 불가 |
+| **골든 패스 합계** | **6회** | 캐릭터 시트 1회는 온보딩 소관(5-1b) |
+
+표지 3안에는 **부족분 재시도**가 있다(#108·#118). 예산은 `count * 2 = 6` 회이고, 한 배치가 통째로 실패하면 그 자리에서 멈춘다(`gained === 0`) — 남은 실패 원인이 업로드 계열, 즉 환경 문제라 재시도해도 같이 실패하기 때문이다(#67 이 그 상황이었다).
+
+```bash
+COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
+```
+
+**판정·측정 때는 끄는 것을 권한다.** 재시도가 부족분을 채워버리면 "3안 중 2안" 이라는 수치가 보이지 않는다. 부족분이 생기면 원인이 세 갈래로 찍힌다 — `재시도 꺼짐` / `재시도 한도 소진` / `배치 전멸로 중단`.
+
+**호출 순서 (세션 1회, 재시도 없는 골든 패스)**
+
+A② 소유 파일은 **함수명만 적는다** — 5-1b 절과 같은 이유다.
+
+| 순서 | 함수 | 위치 | 호출 대상 |
+|---|---|---|---|
+| 1 | `handleSelectCover` → `generateCoverVariants` | `generate-client.ts` | `POST /api/generate {kind:"cover_variants"}` → **`generateCoverVariants`** ×1 (내부 3회) |
+| 2 | `handleSelectCover` → `generateChainedCuts` | `generate-client.ts` | `POST /api/generate {kind:"cut"}` ×3 → **`generateCut`** ×3 |
+
+`kind:'cover_variants'` 응답에는 `requested: 3` 이 함께 실린다(`route.ts`, #108). `allSettled` 라 배열이 1~3 개일 수 있어서, 화면이 `result.length < requested` 로 부족분을 판단한다(#117).
+
+**프롬프트 조립 — `buildCutPrompt`(`generate.ts:171`)**
+
+표지 3안과 4컷이 **같은 함수**를 쓴다. 표지는 `cuts[0]`, 컷은 `nextUngeneratedCut`(`:336`)이 고른 컷을 넘긴다.
+
+넣는 순서는 이렇다.
+
+| # | 조각 | 근거 |
+|---|---|---|
+| 1 | 시트는 **그림체만** 따르고 인물은 아래 서술을 따른다 | 런타임 시트는 `preset.context`(타깃 독자)로 그려진 제3의 인물이라 컷 인물과 대응하지 않는다 (#113) |
+| 2 | `Style:` — `line_weight` · `saturation` · `background_density` · `ratioClause` | `character_ratio` 가 문장 끝이다. 힌트 서술문이 길어서 뒤에 절이 붙으면 배경 지시가 묻힌다 (#131) |
+| 3 | `Color palette:` · `Style keywords:` | 값이 없으면 문장을 넣지 않는다 — 채움말이 지시로 읽힌다 |
+| 4 | 소재 + **설명 장치 금지** | 차트·그래프·화살표·아이콘·라벨·해부 도해 금지, 숫자는 캡션 레이어 몫 (#146). 효과선은 허용 (#133 결정 6) |
+| 5 | 타깃 독자 (`Who this comic is made for — not who appears in the panel`) | 타깃과 등장 인물이 다를 수 있다 |
+| 6 | `narrative_beat` · `shot_type` · `camera_angle` · `time_of_day` | 전부 `hint()` 경유 — enum 토큰을 그대로 넣으면 모델이 못 알아듣는다 |
+| 7 | `Character:` — `cast[].description` + 표정·포즈 | 서술을 앞세운다. 없으면 나이·성별이 컷마다 바뀐다 |
+| 8 | `reserved_zone` 지시 | 프레임 **안**을 비운다 — 흰 띠를 붙이는 것이 아니다 |
+| 9 | `rules.forbidden` → `Do not include:` | 사용자가 적은 금지 요소 |
+| 10 | 말풍선·글자 억제 | P0 게이트 2 |
+
+`spec/vocabulary.json` 의 `prompt_hints` 를 쓰는 자리가 6·2번이다. 힌트가 없는 값은 토큰이 그대로 나가므로, 새 enum 값이 생기면 힌트도 같이 넣어야 한다 — `npm run spec:sync-check` 가 커버리지를 검사한다.
+
+**reference 주입 (캐릭터 동일성 방어선)**
+
+`referenceUris`(`:344`)가 호출부의 `referenceAssets` 에 `preset.assets.character_sheet` 를 합친다 — 호출부가 빼먹어도 시트가 들어간다. `toInputImages`(`:351`)가 `readAsset` 으로 읽고, **못 읽은 것은 로그에 남기고**, 결과가 0장이면 **유료 호출 전에 던진다.** 시트 없이 만든 이미지는 P0 게이트를 통과할 수 없어 생성비만 버리는 것이기 때문이다.
+
+`style_refs` 는 일부러 넣지 않는다 — reference 이미지를 늘리면 시트의 비중이 묽어진다. 스타일은 프롬프트의 `Style:` 문장이 담당한다.
+
+**체이닝**
+
+`GeneratedImageResult.continuationToken` ↔ `previous_response_id`. PRD 6절이 프로바이더 중립을 요구해서 `chatSession`·`previous_response_id` 를 계약에 노출하지 않는다.
+
+**표지 3안은 체이닝하지 않는다** — 세션에 누적하면 2안이 1안에 끌려가 서로 닮는다. `generateCoverVariants` 시그니처가 `continueFrom` 을 받지 않는 것으로 그 독립성을 타입에 드러낸다(#50).
+
+"몇 번째 컷인지" 를 별도 파라미터로 받지 않는다. 호출부가 `storyboard.cuts[].generated_image` 를 채워 다시 넘기면 `nextUngeneratedCut` 이 다음 컷을 고른다 — 그래서 리졸브가 실패해도 **raw `asset` 으로 그 필드를 채우면** 체이닝이 끊기지 않는다(#104, PR #135). 같은 필드가 세션 목록의 완료 판정 근거이기도 하다(#136·#137).
+
+**출력 크기**
+
+`resizeToOutput`(`:429`)이 `sharp` 로 `OUTPUT_SIZE` 를 강제한다. 모델이 요청한 `size` 와 다른 크기를 낼 때가 있고(실측 `1536x1024` · `1199x1312`), 그러면 계약 ④ 의 `width`/`height` 가 실제 픽셀과 어긋난다. 리사이즈가 실패하면 원본을 살리고 `sharp.metadata()` 로 실제 크기를 다시 읽어 반환한다 — 유료 결과를 버리지 않는다(#104).
+
+`fit:'cover'` 의 crop position 은 기본값(`centre`)이다. 비정사각형 출력에서 중앙 크롭이 `reserved_zone` 과 같은 축에 걸리면 말풍선 여백이 깎이는데, `compose.ts` 가 아직 `reserved_zone` 을 읽지 않아 지금은 비활성이다 — #105 에서 추적한다.
+
+**1024×1024 인 이유**
+
+정사각형은 산출물이 인스타툰이기 때문이다 — 인스타그램이 완전히 지원하는 비율 범위 안이고, 4컷을 같은 틀로 이어 붙일 수 있다. 1024 는 인스타툰 요구와 모델 제약이 겹치는 유일한 값이다: 인스타그램은 320~1080px 원본을 보존하고, `gpt-image-1` 의 고정 3종에 1080 이 없고, `gpt-image-2` 는 양변이 16의 배수여야 해서 `1080/16 = 67.5` 가 실패한다. 처음 1080 으로 넣었다가 이 근거로 정정했다(#63).
+
+**검증**
+
+`app/api/generate/_smoke-test.mjs` — 표준 라이브러리만 쓰고 테스트 러너를 추가하지 않는다. 정적 배선 검사 4건은 **서버도 크레딧도 필요 없다.** 실제 생성 경로는 유료라 `RUN_REAL_GENERATION=1` 게이트 뒤에 있고, 읽을 수 있는 시트 URI 를 `SMOKE_SHEET_ASSET` 으로 받아야 돈다.
+
+정적 검사가 지키는 것은 과거에 실제로 났던 사고들이다 — `continueFrom` 배선 누락(#75), `Promise.all` 복귀(#104), reference 0장 미차단(#67), 시트·컷 스타일 필드 불일치(#126·#129).
+
+프롬프트 문구 품질은 정적 검사로 잡히지 않는다. **codex 환경(의뢰사 크레딧 0)에서 같은 프롬프트를 4회씩 돌려 육안 판정**하는 방식으로 검증했고, 결과는 #121 · #146 · #113 에 기록돼 있다.
 
 ### 5-1b. 스타일 분석 · 캐릭터 시트 생성 (B②)
 
