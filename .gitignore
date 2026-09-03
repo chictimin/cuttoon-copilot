@@ -49,3 +49,4 @@ CLAUDE.md
 
 # Playwright MCP 브라우저 세션 산출물 (스크린샷·트레이스)
 .playwright-mcp/
+.env
