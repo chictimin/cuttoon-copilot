@@ -2,151 +2,177 @@
 
 기업 연계 프로젝트. 4컷 컷툰 생성 코파일럿.
 
+골든패스: 온보딩(레퍼런스 업로드 → 스타일 추출 → 스타일 확인·재추출 → 상세 입력 확인 → 캐릭터 시트 → 프리셋 저장) → 세션(소재 입력 → 브레인스토밍 3턴 → 표지 3안 → 나머지 3컷) → 에디터(대사 수정 · 되돌리기 → Export ZIP).
+
 ## 문서
 
 | 문서 | 담는 것 | 변경 권한 |
 | --- | --- | --- |
 | [`PRD.md`](./PRD.md) | 제품 요구사항 · 제약 · 제외 기능 · 아키텍처 결정 | chictimin 승인 (5-1절 의존성 목록은 예외 — 승인 불필요) |
 | `README.md` (이 문서) | 스택 · 폴더 소유권 · 브랜치 · git 규칙 | chictimin 승인 |
-| `spec/*.schema.json` | 데이터 계약(필드·enum) | A① 승인 |
-| [`docs/pipeline.md`](./docs/pipeline.md) | 온보딩→세션→에디터 호출 순서 · A/B 소유 경계 · 파이프라인 사실 정리 | A① 승인 |
-| [`docs/gate-evidence/`](./docs/gate-evidence/) | P0 게이트(캐릭터 동일성 · 말풍선 억제) 판정 근거 이미지 | A① 승인 |
-| `spec/data/*.json`(`cta_presets.json`·`narrative-flow.json`·`style-vocabulary.json`) | 값 목록 데이터 파일(CTA 문구 · 서사 흐름 템플릿 · 스타일 키워드 매핑) | A① 승인 |
-| `spec/vocabulary.json` | enum별 프롬프트 힌트(영문 서술) | A① 승인 |
+| `spec/*.schema.json` | 데이터 계약(필드·enum) | chictimin 승인 |
+| [`docs/pipeline.md`](./docs/pipeline.md) | 온보딩→세션→에디터 호출 순서 · 소유 경계 · 파이프라인 사실 정리 | chictimin 승인 |
+| [`docs/gate-evidence/`](./docs/gate-evidence/) | P0 게이트(캐릭터 동일성 · 말풍선 억제) 판정 근거 이미지 | chictimin 승인 |
+| `spec/data/*.json`(`cta_presets.json`·`narrative-flow.json`·`style-vocabulary.json`) | 값 목록 데이터 파일(CTA 문구 · 서사 흐름 템플릿 · 스타일 키워드 매핑) | chictimin 승인 |
+| `spec/vocabulary.json` | enum별 프롬프트 힌트(영문 서술) | chictimin 승인 |
 
 **구현 전에 `PRD.md`를 확인한다.** 개인 로컬 문서(각자의 PRD 초안·노트)는 정본이 아니다.
 
-## 스택
+## 2차 일정 · 팀
 
-| 영역 | 선택 |
+10-02(금) 시작 → 10-14(수) 기능 동결 → 10-15(목) 마감 → 10-16(금) 발표. 10-09(한글날) 휴일, 작업일 9일.
+
+| 팀원 | 맡는 곳 |
 | --- | --- |
-| 앱 | Next.js (App Router) |
-| 언어 | TypeScript |
-| 이미지 | OpenAI (gpt-image / Responses API) |
-| 텍스트 | OpenAI |
-| DB·스토리지 | Supabase |
+| chictimin | 스키마 · 데이터 계약 · LLM · 백엔드 (`spec/` 변경 승인권자) |
+| JEON-DAEJIN | 화면 전체 |
+| joniverse-ai | 이미지 생성 · 추출 · 캐릭터 시트 |
+| smartman3514 | 렌더링 버그 수정 + QA 검증(모든 기능·버그 PR의 머지 전 동작 확인) |
 
-## 폴더 구조
-
-```
-cuttoon-copilot/
-├─ app/
-│  ├─ (studio)/                화면 전체                      A②
-│  │   ├─ page.tsx             프로젝트 목록
-│  │   ├─ onboarding/          온보딩 + 프리셋 생성 ← A/B 접점
-│  │   ├─ session/[id]/        소재 입력 → 3안 → 4컷 완성
-│  │   └─ editor/[id]/         대사 수정 · 드래그 · 되돌리기
-│  └─ api/
-│      ├─ preset/              프리셋 CRUD                    A③
-│      ├─ session/             세션 관리 · Export             A③
-│      ├─ brainstorm/          브레인스토밍 3턴                A①
-│      └─ generate/            이미지 생성 (maxDuration=300)  B①
-├─ lib/
-│  ├─ llm/                     브레인스토밍 3턴 · 캡션         A①
-│  ├─ openai/
-│  │   ├─ generate.ts          컷 생성 (멀티턴 세션 관리)      B①
-│  │   ├─ extract.ts           레퍼런스 VLM 추출              B②
-│  │   └─ provider.ts          ImageProvider 인터페이스        B①
-│  ├─ render/                  텍스트 레이어 합성 · ZIP        B③
-│  └─ db/                      Supabase 클라이언트 · 쿼리      A③
-├─ spec/                       계약 (변경은 A① 승인)          A①
-│  ├─ preset.schema.json
-│  ├─ storyboard.schema.json
-│  ├─ vocabulary.json          계약 ⑤ 어휘 사전
-│  └─ samples/                 샘플 응답 JSON + 이미지
-└─ public/
-   └─ demo-cache/              발표용 캐시 폴백
-```
-
-## 폴더 소유권
-
-| 폴더 | 담당 |
-| --- | --- |
-| `app/(studio)/` | A② |
-| `app/api/preset/`, `app/api/session/` | A③ (chictimin) |
-| `lib/llm/`, `app/api/brainstorm/`, `spec/` | A① (dabi) |
-| `app/api/generate/`, `lib/openai/generate.ts` | B① |
-| `lib/openai/extract.ts` | B② |
-| `lib/render/` | B③ |
-
-## 구현 현황
-
-골든 패스 각 단계가 지금 어디까지 됐는지. **2026-08-20 기준, main에 머지된 것만** 센다 — 열려 있는 PR은 포함하지 않는다.
-
-| 단계 | 로직·API | 화면 | 상태 | 관련 이슈 |
-| --- | --- | --- | --- | --- |
-| 1. 레퍼런스 업로드 | `POST /api/upload` · `lib/asset-store.ts` | 연결됨 | 완료 | — |
-| 2. 스타일 추출 | `lib/openai/extract.ts` (실제 호출) | 연결됨 | 완료 | — |
-| 3. 프리셋 자동 확정 | `lib/llm/preset-guard.ts` | 있음 | 완료 | — |
-| 4. 프리셋 저장 | `GET·POST /api/preset` | 연결됨 | 완료 | — |
-| 5. 캐릭터 시트 표시 | — | 있음 | 완료 | — |
-| 6. 프로젝트 목록 | `GET /api/preset` (id 없이) | 연결됨 | 완료 | — |
-| 7. 소재 입력 | — | 있음 | 있음 | — |
-| 8. 브레인스토밍 3턴 | `POST /api/brainstorm` · `lib/llm/brainstorm.ts` (PR #112) | 연결됨 | 완료 | #119(소재 → draft 추출, PR #154로 1번 항목 완료·2번 항목은 흐름 템플릿 데이터 분리만) |
-| 9. 표지컷 3안 | `kind: 'cover_variants'` (PR #81) | 연결됨 | 완료 | #102 · #104 (후속) |
-| 10. 4컷 생성 | `POST /api/generate` 체이닝 | 연결됨 | 완료 | #102 · #103 · #104 (후속) |
-| 11. 대사 수정 · 드래그 | — | 있음 | 완료 | — |
-| 12. v2 저장 · 되돌리기 | `/api/session` `/version` `/revert` | 연결됨 | 완료 | — |
-| 13. Export ZIP | `GET /api/session/export` | 연결됨 | 완료 | — |
-
-알아둘 것 다섯 가지다.
-
-**저장·조회 계열은 화면까지 이어졌습니다.** 프로젝트 목록(`GET /api/preset`), 프리셋 저장(`POST /api/preset`), 세션 저장(`POST /api/session`), 에디터의 조회·버전 저장·되돌리기가 모두 실제 API를 부릅니다.
-
-**이미지 생성이 화면까지 이어졌습니다(PR #100).** 세션 화면(`SessionFlow.tsx`)이 로컬 mock 대신 `generate-client.ts`를 통해 `POST /api/generate`를 부릅니다 — 표지 3안은 `kind: 'cover_variants'` 1회 호출(서버가 3회를 대신 처리), 나머지 3컷은 `continuationToken` 체이닝으로 순차 생성입니다. `mock-generate.ts`는 삭제됐습니다. Export ZIP(13번)도 같은 PR에서 에디터에 다운로드 버튼이 붙었습니다.
-
-**레퍼런스 업로드·스타일 추출(1·2번)도 화면까지 이어졌습니다(PR #91, #95).** 온보딩 화면(`OnboardingFlow.tsx`)이 `style-analysis.ts`를 통해 `POST /api/upload`(Supabase Storage 저장) → `POST /api/extract`(실제 GPT-4o 호출)를 부르고, 캐릭터 시트도 `generateCharacterSheet` 실제 호출로 생성합니다(#87 closed).
-
-**브레인스토밍(8번)은 실제 LLM 호출로 연결됐습니다(PR #112).** 세션 화면이 `POST /api/brainstorm`을 불러 소재에 맞는 선택지를 받습니다. PRD 6절의 턴 건너뛰기도 실현됐습니다 — 소재 텍스트에서 주인공·조연을 자체 추출(`extractDraftFromSubject`, PR #154)해 이미 파악된 턴을 건너뜁니다. 다만 흐름(flow) 턴은 이번 추출 범위 밖이라 항상 물어보고, 흐름 템플릿 자체는 여전히 화면이 로컬 값으로 강제합니다(`spec/data/narrative-flow.json`으로 데이터만 분리됨, PR #153) — LLM 자유 선택 전환은 `#119`에 보류 상태로 남아 있습니다.
-
-**P0 게이트 판정이 부분적으로 진행됐습니다 — "완료"가 아닙니다.** `PRD.md` 7절이 "P0의 두 게이트가 가장 중요한 판단점"이라고 못 박은 것(캐릭터 4컷 동일성 / 말풍선 억제)에 대해, 케이스 1·5·3을 실행하고 기록을 남겼습니다(`#113`, 근거 이미지 `docs/gate-evidence/`).
-
-- 그림체 동일성: 3/3 통과
-- 주인공 동일성: 케이스 5가 처음엔 실패(상의 색이 4컷 내내 흔들림)했는데, 원인(팔레트가 색의 집합만 정하고 배정을 안 정함)이 특정돼 PR #148로 고쳐졌고 축소 재검증은 통과했습니다. **다만 `4/5` 본 판정 기준은 케이스 2·4가 아직 실행되지 않아 미완입니다**
-- 게이트 2(말풍선·텍스트 억제): 케이스 1·5는 4/4 클린, 케이스 3(텍스트 유혹 소재)은 2/4 위반 — 원인이 특정돼 `#146`으로 분리됐습니다
-- 남은 것: 케이스 2·4 실행과 `4/5` 최종 판정입니다. 실행 시점은 B②가 판단합니다
-
-이 표는 손으로 갱신합니다. 단계를 완료하는 PR을 올릴 때 함께 고쳐주세요.
-
-## 브랜치
-
-1인 1브랜치: `feat/a1` `feat/a2` `feat/a3` `feat/b1` `feat/b2` `feat/b3`
-
-## git 규칙
-
-1. main 직접 push 금지, PR로만
-2. 빌드 확인 후 머지, 조금씩 자주
-3. 되감기(rebase·force-push)는 본인 브랜치만, main은 그대로
-4. DB 구조 변경은 A③만
-5. `.env`는 팀 공유를 위해 커밋 가능(private 저장소 한정) — public으로 전환하기 전 반드시 키 재발급
-6. 발표 전날 태그 하나 찍고 멈추기, 이후 수정 시 태그 새로
-
-## 로컬 실행
+## 시작하기
 
 ```
 npm install
-npm run dev
+npm run dev              # 개발 서버
+npm run build            # 머지 전 빌드 확인
+npm start                # 프로덕션 실행
+npm run lint             # 린트
+npm run spec:sync-check  # 스키마 · 데이터 정합 검사
 ```
 
-`.env`는 저장소에 들어 있으므로(위 git 규칙 5번) 따로 만들 필요는 없다.
+`.env`는 저장소에 없다(추적 제외). 팀 내부 채널로 전달받는다. 필수 환경변수는 `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` 세 개다. 이미지 생성 테스트는 `OPENAI_API_KEY`를 각자 개인 키로 바꿔 쓴다.
 
 ### Supabase 셋업
 
 새 Supabase 프로젝트로 갈아타거나 처음 셋업할 때는 아래 둘 다 필요하다. 테이블만 만들고 버킷을 빠뜨리면 업로드와 이미지 읽기가 통째로 실패한다(`Bucket not found`, issue #67).
 
 1. **테이블** — `lib/db/schema.sql`을 Supabase SQL Editor에서 실행
-2. **Storage 버킷** — `assets` 버킷을 **public으로** 생성
+2. **Storage 버킷** — `assets` 버킷을 **public으로** 생성 (`lib/asset-store.ts`의 `getAssetUrl()`이 `getPublicUrl()`을 쓰기 때문이다)
 
-버킷을 public으로 두는 이유는 `lib/asset-store.ts`의 `getAssetUrl()`이 `getPublicUrl()`을 쓰기 때문이다. private으로 만들면 이미지 URL이 전부 깨진다.
+## 스택
 
-대시보드에서 만들거나(Storage → New bucket → 이름 `assets`, Public 체크), 서비스롤 키로 한 줄이면 된다.
+| 영역 | 선택 |
+| --- | --- |
+| 앱 | Next.js 16 (App Router) · React 19 · TypeScript |
+| 컷 생성 | OpenAI Responses API — 텍스트 모델 `gpt-5` + image_generation 도구 (`lib/openai/generate.ts:19`) |
+| 캐릭터 시트 | `gpt-image-1` (`lib/openai/extract.ts:213`) |
+| 텍스트(브레인스토밍 · 스타일 추출) | `gpt-4o` (`lib/llm/brainstorm.ts:137`, `lib/openai/extract.ts:92`) |
+| DB · 스토리지 | Supabase |
+| 렌더 합성 | sharp (`lib/render/`) |
+
+## 폴더 구조와 소유권
 
 ```
-npx tsx -e "
-import {createClient} from '@supabase/supabase-js';
-const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-s.storage.createBucket('assets', { public: true }).then(r => console.log(r.data ?? r.error));
-"
+cuttoon-copilot/
+├─ app/
+│  ├─ (studio)/                화면 전체                      JEON-DAEJIN
+│  │   ├─ page.tsx             프로젝트 목록
+│  │   ├─ onboarding/          온보딩 + 프리셋 생성
+│  │   ├─ session/[id]/        소재 입력 → 3안 → 4컷 완성
+│  │   ├─ editor/[id]/         대사 수정 · 드래그 · 되돌리기
+│  │   └─ projects/            세션 목록
+│  └─ api/
+│      ├─ preset/              프리셋 CRUD                    chictimin
+│      ├─ session/             세션 관리 · Export             chictimin
+│      ├─ upload/              레퍼런스 업로드                chictimin
+│      ├─ brainstorm/          브레인스토밍 3턴                chictimin
+│      ├─ generate/            이미지 생성 (maxDuration=300)  joniverse-ai
+│      └─ extract/             스타일 추출                    joniverse-ai
+├─ lib/
+│  ├─ asset-store.ts           업로드 검증 · Storage 저장      chictimin
+│  ├─ llm/                     브레인스토밍 3턴 · 캡션         chictimin
+│  ├─ openai/
+│  │   ├─ generate.ts          컷 생성 (멀티턴 세션 관리)      joniverse-ai
+│  │   ├─ extract.ts           레퍼런스 VLM 추출 · 시트 생성   joniverse-ai
+│  │   └─ provider.ts          ImageProvider 인터페이스        joniverse-ai
+│  ├─ render/                  텍스트 레이어 합성 · ZIP        smartman3514
+│  └─ db/                      Supabase 클라이언트 · 쿼리      chictimin
+├─ spec/                       계약 (변경은 chictimin 승인)    chictimin
+│  ├─ preset.schema.json
+│  ├─ storyboard.schema.json
+│  ├─ vocabulary.json          계약 ⑤ 어휘 사전
+│  ├─ data/                    값 목록 데이터
+│  └─ samples/                 샘플 응답 JSON + 이미지
+└─ public/
+   └─ demo-cache/              발표용 캐시 폴백 (예정 — 아직 없음)
 ```
 
-파일 크기·mime 제한은 아직 걸지 않았다 — 값 확정은 issue #68에서 논의 중이다.
+| 담당 | 폴더 · 파일 | 역할 |
+| --- | --- | --- |
+| chictimin | `spec/`, `lib/llm/`, `app/(studio)/session/[id]/storyboard-assembly.ts`(컷 대사·연출 상수, #152), `app/api/brainstorm/`, `app/api/preset/`, `app/api/session/`, `app/api/upload/`, `lib/db/`, `lib/asset-store.ts` | 스키마 · 데이터 계약 · LLM · 백엔드. 데이터 계약(`spec/`) 변경 승인권자 |
+| JEON-DAEJIN | `app/(studio)/` (단 `session/[id]/storyboard-assembly.ts`는 제외) | 화면 전체 |
+| joniverse-ai | `lib/openai/`, `app/api/generate/`, `app/api/extract/` | 이미지 생성 · 추출 · 캐릭터 시트 |
+| smartman3514 | `lib/render/` | 렌더링 버그 수정(PR #163, #105) + QA 검증 |
+
+1차에는 A①~B③ 6파트 체제였다. `docs/pipeline.md`는 각자 자기 영역 절을 고친다. `public/demo-cache/`는 아직 만들어지지 않았고 담당도 미정이다.
+
+## 브랜치 · git 규칙
+
+1. main 직접 push 금지, PR로만
+2. `npm run build` 확인 후 머지, 조금씩 자주
+3. 되감기(rebase·force-push)는 본인 브랜치만, main은 그대로
+4. DB 구조 변경(`lib/db/`)은 chictimin 승인
+5. `.env`는 커밋하지 않는다(저장소 추적 제외)
+6. 마감(10-15) 전에 태그 하나 찍고 멈추기, 이후 수정 시 태그 새로
+7. 스텁 3규칙(#60): ① 스텁 표식 유지(`stub:true`, `asset://stub/` · `asset://mock/`) ② 실패 가시화(조용히 성공처럼 보이지 않게) ③ PR 본문에 스텁 명시
+
+## 구현 현황
+
+골든패스 각 단계가 지금 어디까지 됐는지. **main에 머지된 것만** 센다 — 열려 있는 PR이나 작업 브랜치 코드만으로 완료 처리하지 않는다.
+
+| 단계 | 로직 · API | 화면 | 상태 | 관련 이슈 |
+| --- | --- | --- | --- | --- |
+| 1. 레퍼런스 업로드 | `POST /api/upload` · `lib/asset-store.ts` (10MB · png/jpeg/webp, #68 확정) | 연결됨 | 완료 | #68 |
+| 2. 스타일 추출 | `lib/openai/extract.ts` (실제 호출) | 연결됨 | 완료 | — |
+| 3. 프리셋 자동 확정 | `lib/llm/preset-guard.ts` | 있음 | 부분 | #125(미매핑 단어 치환값이 프롬프트에 아직 연결되지 않음) |
+| 4. 프리셋 저장 | `GET·POST /api/preset` | 연결됨 | 완료 | — |
+| 5. 캐릭터 시트 표시 | — | 있음 | 완료 | — |
+| 6. 프로젝트 목록 | `GET /api/preset` (id 없이) · 세션 목록 | 연결됨 | 완료 | #136 |
+| 7. 소재 입력 | — | 있음 | 있음 | — |
+| 8. 브레인스토밍 3턴 | `POST /api/brainstorm` · `lib/llm/brainstorm.ts` | 연결됨 | 완료 | #119(턴 건너뛰기 PR #154로 완료. 흐름 턴 LLM 선택은 #157) |
+| 9. 표지컷 3안 | `kind: 'cover_variants'` | 연결됨 | 완료 | #102(닫힘) |
+| 10. 4컷 생성 | `POST /api/generate` 체이닝 | 연결됨 | 완료 | #103(닫힘) · #104(`generateChainedCuts` 1건 잔여, 2차 작업 10번) |
+| 11. 대사 수정 · 드래그 | — | 있음 | 완료 | — |
+| 12. v2 저장 · 되돌리기 | `/api/session` `/version` `/revert` · 재진입 복원 | 연결됨 | 완료 | #143 |
+| 13. Export ZIP | `GET /api/session/export` | 연결됨 | 완료 | — |
+
+1차 추가 완료분: 화면 간 이동(#134), 프로젝트 이름 변경 · 비활성화(#161, `PATCH`/`DELETE /api/preset`), 흐름 템플릿 JSON 분리(PR #153).
+
+미머지(위 표에 미포함): PR #163 — 긴 대사에서 말풍선 꼬리 미노출 수정(`lib/render/compose.ts`), 리뷰 대기 중.
+
+이 표는 손으로 갱신합니다. 단계를 완료하는 PR을 올릴 때 함께 고쳐주세요.
+
+## 2차 작업 표
+
+| # | 구분 | 항목 | 우선순위 | 기한 | 담당 | 관련 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 기능 | 소재에 맞는 컷 대사 · 연출 (BEAT_CAPTION 등 하드코딩 해소) | 발표 필수 | 대사 10-06, 연출 10-08 | chictimin | #152 |
+| 2 | 기능 | 조연 마스코트 고정 (`preset.mascot` + 시트 문장 + 컷 조건문) | 품질 | 10-08 | joniverse-ai | #150 |
+| 3 | 기능 | 사용자 그림체 키워드 반영 (병합 배선 · 레퍼런스 스킵 · 미매핑 치환) | 품질 | 10-08 | JEON-DAEJIN | #151, #125 |
+| 4 | 기능 | 건너뛰면 기본값 채우기 ("알아서 해줘") | 품질 | 10-08 | JEON-DAEJIN | PRD 8절 미결 |
+| 5 | 기능 | 나머지 3컷 생성 진행률 표시 | 품질 | 10-08 | JEON-DAEJIN | #138 |
+| 6 | 기능 | 브레인스토밍 흐름 턴 LLM 선택 | 품질 | 10-13 | chictimin | #157 |
+| 7 | 버그 | 숫자 소재가 이미지에 글자로 박힘 (수정 머지됨, 9/30 재실행 통과 — 근거 PR #165 리뷰 중) | 발표 필수 | 10-06 | joniverse-ai | #146 |
+| 8 | 버그 | 긴 대사에서 말풍선 꼬리 미노출 | 발표 필수 | 10-06 | smartman3514 | PR #163 |
+| 9 | 버그 | 크롭이 말풍선 여백을 깎을 수 있음 | 품질 | 10-08 | smartman3514 | #105 |
+| 10 | 버그 | 생성 결과 유실 방지 잔여분 (`generateChainedCuts`) | 품질 | 10-08 | JEON-DAEJIN | #104 |
+
+3번 선행: chictimin의 그림체 키워드 선정 스크립트. 4번 선행: 6번, 그리고 chictimin이 PRD 8절의 기본값 정책을 먼저 확정한다(미결 항목은 확정 전 구현하지 않는다).
+
+모든 기능·버그 PR은 머지 전에 smartman3514가 골든패스로 동작을 확인하고 결과를 PR에 남긴다. 문서·데이터 계약(`spec/`) 변경 승인은 chictimin이 한다.
+
+## P0 판정 현황
+
+기준은 #133(결정 정본), 실행 · 기록은 #113.
+
+- 현재 수치(9/30 기준): 그림체 동일성 4/4, 주인공 동일성 3/4(케이스 5만 실패 — #123 축소판 이전 조건). 게이트 2는 케이스 1 · 5 클린, 케이스 3은 9/30 같은 조건 재실행에서 위반 0/4로 통과(#146, 근거 이미지 PR #165 리뷰 중)
+- 남은 것(10-06까지): 케이스 2 · 4(조연) 실행, 케이스 1 · 5 재실행, "5 중 4" 판정 기록
+
+## 문서 지도
+
+| 문서 | 보는 때 |
+| --- | --- |
+| [`PRD.md`](./PRD.md) | 제품 요구사항 · 제약 확인 (정본, 구현보다 우선) |
+| [`docs/pipeline.md`](./docs/pipeline.md) | 온보딩→세션→에디터 호출 순서 · 소유 경계 확인 |
+| `spec/` | 스키마 · 값 목록 · 어휘 사전 확인 (변경은 chictimin 승인) |
+| [`docs/gate-evidence/`](./docs/gate-evidence/) | P0 판정 근거 이미지 확인 |
