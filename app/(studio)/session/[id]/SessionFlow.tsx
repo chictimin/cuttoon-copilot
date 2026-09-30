@@ -12,6 +12,7 @@ import type { BrainstormTurn, ExtractedSlot } from "@/lib/llm/brainstorm";
 import { NO_SUPPORTING_OPTION } from "@/lib/llm/brainstorm-options";
 import {
   assembleStoryboard,
+  applyCutDirections,
   FLOW_OPTIONS,
   FLOW_QUESTION,
   type BrainstormAnswers,
@@ -75,7 +76,10 @@ function normalizeFlowTurn(turn: BrainstormTurn | undefined): BrainstormTurn {
 
 // F2 실물 계약(OC-A PR #188, spec-llm-line.md F2절). tone_id 3개 문자열·요청의
 // context{industry, interests, cta_format}·응답 fallbackCutIndexes·컷별 재생성
-// (같은 경로에 문맥+cut_index) 확정. F4 연출 응답은 후속 통합에서 연결한다.
+// (같은 경로에 문맥+cut_index) 확정.
+// F4(OC-A F2+F4 단일 API, spec-llm-line.md F4절): 응답 directions[]와
+// fallbackDirectionCuts를 받아 검증된 연출만 조립된 컷에 적용한다. 컷별 다시
+// 뽑기는 그 컷의 대사+연출을 함께 교체한다.
 const CAPTIONS_ROUTE = "/api/session/captions";
 const CAPTION_TONES = [
   { id: "empathy", label: "공감형" },
@@ -86,6 +90,8 @@ const CAPTION_TONES = [
 interface CaptionsResponse {
   captions?: Array<{ cut_index?: unknown; text?: unknown }>;
   fallbackCutIndexes?: unknown;
+  directions?: unknown;
+  fallbackDirectionCuts?: unknown;
 }
 
 function promptForCut(subject: string, cut: Cut): string {
@@ -382,6 +388,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         storyboard.cuts.map((cut) => cut.cut_index),
         data.fallbackCutIndexes
       );
+      // F4: 검증된 연출만 조립된 컷에 적용한다. 생략·무효·fallback 목록의 컷은
+      // 조립 기본값이 그대로 남는다.
+      applyDirections(data.directions, data.fallbackDirectionCuts);
       setCaptionStatus("ready");
     } catch {
       setCaptionError("대사를 만드는 데 실패했어요. 다시 시도해주세요");
@@ -432,8 +441,17 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     );
   }
 
-  // F2: 컷별 다시 뽑기 — 같은 경로에 문맥과 cut_index를 함께 보내 그 컷만
-  // 교체한다(OC-A PR #188). 대사만 바꾸고 사용자 편집·다른 컷은 보존한다.
+  // F4: 서버 연출안을 조립된 컷에 반영한다. 검증·기본값 유지는
+  // applyCutDirections(storyboard-assembly.ts)가 맡는다.
+  function applyDirections(directions: unknown, fallbackCuts: unknown) {
+    setStoryboard((prev) => {
+      if (!prev) return prev;
+      return { ...prev, cuts: applyCutDirections(prev.cuts, directions, fallbackCuts) };
+    });
+  }
+
+  // F2: 컷별 다시 뽑기 — 같은 경로에 문맥과 cut_index를 함께 보내 그 컷의
+  // 대사+연출을 함께 교체한다(F4). 다른 컷의 대사·연출·사용자 편집은 보존한다.
   async function regenCutCaption(cutIndex: number) {
     if (!storyboard || !preset || !toneId) return;
     setRegenCutIndex(cutIndex);
@@ -473,14 +491,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         : undefined;
       if (!entry) throw new Error("대사를 다시 뽑지 못했습니다");
       const text = entry.text;
+      const directions = data.directions;
+      const directionFallback = data.fallbackDirectionCuts;
       setStoryboard((prev) => {
         if (!prev) return prev;
-        return {
-          ...prev,
-          cuts: prev.cuts.map((cut) =>
-            cut.cut_index === cutIndex ? { ...cut, caption: { ...cut.caption, text } } : cut
-          ),
-        };
+        const withCaption = prev.cuts.map((cut) =>
+          cut.cut_index === cutIndex ? { ...cut, caption: { ...cut.caption, text } } : cut
+        );
+        return { ...prev, cuts: applyCutDirections(withCaption, directions, directionFallback) };
       });
       const fellBack =
         Array.isArray(data.fallbackCutIndexes) && data.fallbackCutIndexes.includes(cutIndex);
@@ -773,6 +791,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             </div>
           ) : (
             <div className="flex gap-2 text-sm">
+              {/* F1 선택 제안: flow 턴은 허용 키만 받으므로 직접 입력을 숨긴다(통합 WIP 436ae7b hunk). */}
               {turns[turnIndex].key !== "flow" && (
                 <button
                   type="button"
@@ -812,6 +831,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               </button>
             ))}
           </div>
+          {/* #186 지적 5(캡틴 확정): 톤 단계 알아서 해줘는 공감형(empathy) 고정 적용(통합 WIP 436ae7b hunk). */}
           <button
             type="button"
             onClick={() => handleSelectTone("empathy")}
