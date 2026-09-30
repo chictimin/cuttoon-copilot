@@ -27,7 +27,7 @@
 | chictimin | 스키마 · 데이터 계약 · LLM · 백엔드 (`spec/` 변경 승인권자) |
 | JEON-DAEJIN | 화면 전체 |
 | joniverse-ai | 이미지 생성 · 추출 · 캐릭터 시트 |
-| smartman3514 | 렌더링 버그 수정 + QA 검증(모든 기능·버그 PR의 머지 전 동작 확인) |
+| smartman3514-commits | 렌더링 버그 수정 + QA 검증(모든 기능·버그 PR의 머지 전 동작 확인) |
 
 ## 시작하기
 
@@ -85,7 +85,7 @@ cuttoon-copilot/
 │  │   ├─ generate.ts          컷 생성 (멀티턴 세션 관리)      joniverse-ai
 │  │   ├─ extract.ts           레퍼런스 VLM 추출 · 시트 생성   joniverse-ai
 │  │   └─ provider.ts          ImageProvider 인터페이스        joniverse-ai
-│  ├─ render/                  텍스트 레이어 합성 · ZIP        smartman3514
+│  ├─ render/                  텍스트 레이어 합성 · ZIP        smartman3514-commits
 │  └─ db/                      Supabase 클라이언트 · 쿼리      chictimin
 ├─ spec/                       계약 (변경은 chictimin 승인)    chictimin
 │  ├─ preset.schema.json
@@ -102,7 +102,7 @@ cuttoon-copilot/
 | chictimin | `spec/`, `lib/llm/`, `app/(studio)/session/[id]/storyboard-assembly.ts`(컷 대사·연출 상수, #152), `app/api/brainstorm/`, `app/api/preset/`, `app/api/session/`, `app/api/upload/`, `lib/db/`, `lib/asset-store.ts` | 스키마 · 데이터 계약 · LLM · 백엔드. 데이터 계약(`spec/`) 변경 승인권자 |
 | JEON-DAEJIN | `app/(studio)/` (단 `session/[id]/storyboard-assembly.ts`는 제외) | 화면 전체 |
 | joniverse-ai | `lib/openai/`, `app/api/generate/`, `app/api/extract/` | 이미지 생성 · 추출 · 캐릭터 시트 |
-| smartman3514 | `lib/render/` | 렌더링 버그 수정(PR #163, #105) + QA 검증 |
+| smartman3514-commits | `lib/render/` | 렌더링 버그 수정(#105, #169, #170) + QA 검증 |
 
 1차에는 A①~B③ 6파트 체제였다. `docs/pipeline.md`는 각자 자기 영역 절을 고친다. `public/demo-cache/`는 아직 만들어지지 않았고 담당도 미정이다.
 
@@ -138,7 +138,7 @@ cuttoon-copilot/
 
 1차 추가 완료분: 화면 간 이동(#134), 프로젝트 이름 변경 · 비활성화(#161, `PATCH`/`DELETE /api/preset`), 흐름 템플릿 JSON 분리(PR #153).
 
-미머지(위 표에 미포함): PR #163 — 긴 대사에서 말풍선 꼬리 미노출 수정(`lib/render/compose.ts`), 리뷰 대기 중.
+2차 착수 전 머지: PR #163 — 말풍선 꼬리 길이를 목표점까지 거리 비율로 조정(`lib/render/compose.ts`).
 
 이 표는 손으로 갱신합니다. 단계를 완료하는 PR을 올릴 때 함께 고쳐주세요.
 
@@ -151,15 +151,17 @@ cuttoon-copilot/
 | 3 | 기능 | 사용자 그림체 키워드 반영 (병합 배선 · 레퍼런스 스킵 · 미매핑 치환) | 품질 | 10-08 | JEON-DAEJIN | #151, #125 |
 | 4 | 기능 | 건너뛰면 기본값 채우기 ("알아서 해줘") | 품질 | 10-08 | JEON-DAEJIN | PRD 8절 미결 |
 | 5 | 기능 | 나머지 3컷 생성 진행률 표시 | 품질 | 10-08 | JEON-DAEJIN | #138 |
-| 6 | 기능 | 브레인스토밍 흐름 턴 LLM 선택 | 품질 | 10-13 | chictimin | #157 |
+| 6 | 기능 | 브레인스토밍 흐름 턴 LLM 선택 | 품질 | 10-04 | chictimin | #157 |
 | 7 | 버그 | 숫자 소재가 이미지에 글자로 박힘 (수정 머지됨, 9/30 재실행 통과 — 근거 PR #165 리뷰 중) | 발표 필수 | 10-06 | joniverse-ai | #146 |
-| 8 | 버그 | 긴 대사에서 말풍선 꼬리 미노출 | 발표 필수 | 10-06 | smartman3514 | PR #163 |
-| 9 | 버그 | 크롭이 말풍선 여백을 깎을 수 있음 | 품질 | 10-08 | smartman3514 | #105 |
+| 8 | 버그 | 긴 대사에서 말풍선 꼬리 미노출 (**해결** — main에서 재현 안 됨, 9/30 QA. 꼬리 길이 조정은 PR #163 머지) | 발표 필수 | 10-06 | smartman3514-commits | PR #163 |
+| 9 | 버그 | 크롭이 말풍선 여백을 깎을 수 있음 | 품질 | 10-08 | smartman3514-commits | #105 |
 | 10 | 버그 | 생성 결과 유실 방지 잔여분 (`generateChainedCuts`) | 품질 | 10-08 | JEON-DAEJIN | #104 |
+| 11 | 버그 | 아주 긴 대사 말풍선이 그림 오른쪽 밖으로 잘림 (`top_right`) | 품질 | 10-08 | smartman3514-commits | #169 |
+| 12 | 버그 | 아주 긴 대사 center 말풍선이 인물을 덮어 꼬리가 사라짐 | 품질 | 10-08 | smartman3514-commits | #170 |
 
 3번 선행: chictimin의 그림체 키워드 선정 스크립트. 4번 선행: 6번, 그리고 chictimin이 PRD 8절의 기본값 정책을 먼저 확정한다(미결 항목은 확정 전 구현하지 않는다).
 
-모든 기능·버그 PR은 머지 전에 smartman3514가 골든패스로 동작을 확인하고 결과를 PR에 남긴다. 문서·데이터 계약(`spec/`) 변경 승인은 chictimin이 한다.
+모든 기능·버그 PR은 머지 전에 smartman3514-commits가 골든패스로 동작을 확인하고 결과를 PR에 남긴다. 문서·데이터 계약(`spec/`) 변경 승인은 chictimin이 한다.
 
 ## P0 판정 현황
 
