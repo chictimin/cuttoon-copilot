@@ -2,82 +2,84 @@
 
 머지된 코드만 기준으로 한다. 열려 있는 PR·이슈의 계획은 넣지 않는다. 함수명이 주 식별자이고 file:line은 보조다 — 라인은 커밋마다 밀린다.
 
-**범위**: A 소유 경로(`app/(studio)/`, `lib/llm/`, `lib/db/`, `spec/`, A 소유 `app/api/*`)만 채웠다. B 소유(`lib/openai/`, `lib/render/`, `app/api/generate/`)는 내부 구현을 적지 않고, A가 그 경계를 어떻게 호출하는지(계약)까지만 적었다 — "B가 그 안에서 무엇을 하는지"는 B 소유자 작성 대기다. 해당 섹션에 표시했다.
+**범위**: 화면(`app/(studio)/`), 스키마·LLM(`lib/llm/`, `spec/`, `app/api/brainstorm/`), 백엔드·저장(`lib/db/`, `app/api/preset/`, `app/api/session/`, `app/api/upload/`) 위주로 채웠다. 이미지 생성·추출 영역(`lib/openai/`, `app/api/generate/`, `app/api/extract/`)과 렌더링 영역(`lib/render/`)은 내부를 전부 적지 않고, 화면·백엔드 쪽이 그 경계를 어떻게 호출하는지(계약)까지만 적었다. 이미지 생성(5-1)·추출·시트(5-1b) 절은 작성됐고, 렌더링(5-2) 절만 작성이 남아 있다. 영역별 담당자는 `README.md` 소유권 표를 본다.
 
 ## 1. 전체 흐름
 
 ```mermaid
 flowchart TD
-  subgraph 온보딩["온보딩 (app/(studio)/onboarding/) — A②"]
+  subgraph 온보딩["온보딩 (app/(studio)/onboarding/) — 화면"]
     U1[레퍼런스 업로드] --> A1[uploadReference]
-    A1 --> A2["POST /api/extract → extractStyle (B②)"]
+    A1 --> A2["POST /api/extract → extractStyle (추출·시트)"]
     A2 --> A3[handleConfirmDetails]
-    A3 --> A4["POST /api/generate kind=character_sheet (B①)"]
+    A3 --> A4["POST /api/generate kind=character_sheet (라우트: 이미지 생성 / 시트 함수: 추출·시트)"]
     A4 --> A5[savePreset]
   end
 
-  subgraph 세션["세션 (app/(studio)/session/[id]/) — A②"]
+  subgraph 세션["세션 (app/(studio)/session/[id]/) — 화면"]
     B1[소재 입력] --> B2[extractDraftFromSubject]
     B2 --> B3[generateBrainstormTurns]
     B3 --> B4[recordAnswer 반복]
     B4 --> B5[assembleStoryboard]
-    B5 --> B6["POST /api/generate kind=cover_variants (B①)"]
+    B5 --> B6["POST /api/generate kind=cover_variants (이미지 생성)"]
     B6 --> B7[handleSelectCover]
-    B7 --> B8["POST /api/generate kind=cut ×3 (B①)"]
+    B7 --> B8["POST /api/generate kind=cut ×3 (이미지 생성)"]
     B8 --> B9[handleSave → POST /api/session]
   end
 
-  subgraph 에디터["에디터 (app/(studio)/editor/[id]/) — A②"]
+  subgraph 에디터["에디터 (app/(studio)/editor/[id]/) — 화면"]
     C1[GET /api/session] --> C2[resolveImages]
     C2 --> C3[대사·말풍선 편집]
     C3 --> C4[handleSave → POST /api/session/version]
     C4 -.-> C5[handleRevert → POST /api/session/revert]
-    C3 --> C6["handleExport → GET /api/session/export (B③)"]
+    C3 --> C6["handleExport → GET /api/session/export (렌더링)"]
   end
 
   온보딩 --> 세션 --> 에디터
 ```
 
-## 2. 온보딩 (A②)
+## 2. 온보딩 (화면)
 
 | 순서 | 함수 | 위치 | 호출 대상 |
 |---|---|---|---|
 | 1 | `handleFilesSelected` → `runAnalysis` | `OnboardingFlow.tsx:64,51` | `uploadReference`, `analyzeStyle` |
 | 2 | `uploadReference` | `style-analysis.ts:8` | `POST /api/upload` → `uploadAsset`(`lib/asset-store.ts`) |
-| 3 | `analyzeStyle` | `style-analysis.ts:28` | `POST /api/extract { assetUris }` — B② 경계, 3번 섹션 참고 |
-| 4 | `handleConfirmDetails` | `OnboardingFlow.tsx:93` | `POST /api/generate { kind:'character_sheet', preset }` — B① 경계 |
-| 5 | 프리셋 저장 | `OnboardingFlow.tsx` | `POST /api/preset` → `savePreset`(`app/api/preset/route.ts:24`, A③) |
+| 3 | `analyzeStyle` | `style-analysis.ts:28` | `POST /api/extract { assetUris }` — 추출·시트 경계, 3번 섹션 참고 |
+| 4 | `handleConfirmStyle` → `handleConfirmDetails` | `OnboardingFlow.tsx:89,93` | 스타일 확인·재추출과 상세 입력 확인을 거친 뒤 `POST /api/generate { kind:'character_sheet', preset }` — 라우트는 이미지 생성, 내부 `generateCharacterSheet`(`extract.ts:207`)는 추출·시트 영역 |
+| 5 | 프리셋 저장 | `OnboardingFlow.tsx` | `POST /api/preset` → `savePreset`(`app/api/preset/route.ts:30`, 백엔드·저장) |
+| 6 | 프로젝트 이름 변경 (#161) | — (화면 호출자 없음) | `PATCH /api/preset`(`app/api/preset/route.ts:63`) → `renameProject`(`lib/db/presets.ts:78`) |
+| 7 | 프로젝트 비활성화 (#161) | — (화면 호출자 없음) | `DELETE /api/preset`(`app/api/preset/route.ts:94`) → `archiveProject`(`lib/db/presets.ts:96`). 하드 삭제가 아니라 `projects.archived_at` 소프트 삭제라 세션·컷 데이터는 남고 목록에서만 빠진다 |
 
-## 3. 세션 (A②)
+## 3. 세션 (화면)
 
 | 순서 | 함수 | 위치 | 호출 대상 |
 |---|---|---|---|
 | 1 | `startBrainstorm` → `loadTurns` | `SessionFlow.tsx:257,217` | `POST /api/brainstorm` |
-| 2 | (route, A①) | `app/api/brainstorm/route.ts` | `body.draft` 없으면 `extractDraftFromSubject`(`brainstorm.ts:259`) 먼저 호출 |
-| 3 | `generateBrainstormTurns` | `brainstorm.ts:78` | 내부 `isSlotFilled`(:26)·`areAllSlotsComplete`(:57)로 draft 기준 남은 턴만 생성. gpt-4o 텍스트 호출(A① 소유 — 세부는 5-1번 참고) |
+| 2 | (route, 스키마·LLM) | `app/api/brainstorm/route.ts` | `body.draft` 없으면 `extractDraftFromSubject`(`brainstorm.ts:259`) 먼저 호출 |
+| 3 | `generateBrainstormTurns` | `brainstorm.ts:78` | 내부 `isSlotFilled`(:28)·`areAllSlotsComplete`(:59)로 draft 기준 남은 턴만 생성. gpt-4o 텍스트 호출(스키마·LLM 소유, `brainstorm.ts:137`) |
 | 4 | 응답의 `resolved` | `SessionFlow.tsx` `loadTurns` | `setAnswers`로 선반영 (#154) |
 | 5 | `recordAnswer` 반복 | `SessionFlow.tsx:190` | 3턴(또는 축소된 턴) 완료 시 `assembling`으로 전이 |
-| 6 | assembling effect | `SessionFlow.tsx:262` | `assembleStoryboard`(`storyboard-assembly.ts:86`) |
+| 6 | assembling effect | `SessionFlow.tsx:262` | `assembleStoryboard`(`storyboard-assembly.ts:85`) |
 | 7 | `assembleStoryboard` 내부 | `storyboard-assembly.ts` | `pickShirtColor`(`session-cast.ts:63`, #148), `getBeatsForFlow`/`getFlowOptions`(`narrative-flow.ts`, #153) |
-| 8 | `loadCoverVariants` | `SessionFlow.tsx:291` | `POST /api/generate { kind:'cover_variants', storyboard, preset, referenceAssets }` — B① 경계 |
-| 9 | `handleSelectCover` | `SessionFlow.tsx:306` | `generateChainedCuts`(`generate-client.ts`, A②) → `POST /api/generate { kind:'cut', ... }` × 3 — B① 경계 |
-| 10 | `handleSave` | `SessionFlow.tsx:366` | `POST /api/session` (A③, `lib/db/sessions.ts`에 저장) |
+| 8 | `loadCoverVariants` | `SessionFlow.tsx:291` | `POST /api/generate { kind:'cover_variants', storyboard, preset, referenceAssets }` — 이미지 생성 경계 |
+| 9 | `handleSelectCover` | `SessionFlow.tsx:306` | `generateChainedCuts`(`generate-client.ts`, 화면) → `POST /api/generate { kind:'cut', ... }` × 3 — 이미지 생성 경계 |
+| 10 | `handleSave` | `SessionFlow.tsx:366` | `POST /api/session` (백엔드·저장, `lib/db/sessions.ts`에 저장) |
 
-## 4. 에디터 (A②)
+## 4. 에디터 (화면)
 
 | 순서 | 함수 | 위치 | 호출 대상 |
 |---|---|---|---|
 | 1 | mount effect | `EditorFlow.tsx:97` | `GET /api/session` → `resolveImages`(:46) |
 | 2 | 대사·말풍선 편집 | `EditorFlow.tsx` | 로컬 state만, 호출 없음 |
-| 3 | `handleSave` | `EditorFlow.tsx:193` | `POST /api/session/version` (A③) |
-| 4 | `handleRevert` | `EditorFlow.tsx:228` | `POST /api/session/revert` (A③) |
-| 5 | `handleExport` | `EditorFlow.tsx:260` | `GET /api/session/export` — B③ 경계, 5-2번 참고 |
+| 3 | `handleSave` | `EditorFlow.tsx:193` | `POST /api/session/version` (백엔드·저장) |
+| 4 | `handleRevert` | `EditorFlow.tsx:228` | `POST /api/session/revert` (백엔드·저장) |
+| 5 | `handleExport` | `EditorFlow.tsx:260` | `GET /api/session/export` — 렌더링 경계, 5-2번 참고 |
 
-## 5. B 소유 파트 (작성 대기)
+## 5. 이미지 생성·합성 파트
 
-아래 두 절은 특정 A 단계(온보딩·세션·에디터)의 하위가 아니다 — 이미지 생성(5-1)은 온보딩·세션 양쪽에서 쓰이고, 합성·Export(5-2)는 에디터에서 쓰인다. B 소유자가 채울 자리다.
+아래 세 절은 특정 화면 단계(온보딩·세션·에디터)의 하위가 아니다 — 이미지 생성(5-1)은 온보딩·세션 양쪽에서 쓰이고, 합성·Export(5-2)는 에디터에서 쓰인다. 5-1·5-1b는 작성됐고, 5-2만 작성이 남아 있다(#156에서 추적 중). 영역별 담당자는 `README.md` 소유권 표를 본다.
 
-### 5-1. 텍스트/이미지 생성 (B①)
+### 5-1. 텍스트/이미지 생성 (이미지 생성)
 
 `app/api/generate/route.ts` · `lib/openai/generate.ts` · `lib/openai/provider.ts` 소유. `generate.ts` 가 내보내는 것은 아래 다섯 개다.
 
@@ -89,7 +91,7 @@ flowchart TD
 | `promptHint` | `generate.ts:141` | `prompt_hints` 조회. 없으면 `undefined` — 힌트 유무를 구분해야 하는 자리를 위해 `hint()`(`:146`)와 나눠 뒀다 |
 | `ratioClause` | `generate.ts:164` | `character_ratio` 절. **폴백 규칙까지** 한 곳에 둔다 — 아래 참고 |
 
-`ratioClause(value)` 가 규칙 자체를 담는다. `extract.ts`(B②)도 이것을 가져다 써서 시트와 컷이 항상 같은 비율 지시를 받는다.
+`ratioClause(value)` 가 규칙 자체를 담는다. `extract.ts`(추출·시트)도 이것을 가져다 써서 시트와 컷이 항상 같은 비율 지시를 받는다.
 
 ```ts
 const v = value ?? '2.5head'
@@ -100,15 +102,15 @@ return promptHint('character_ratio', v) ?? `${v} body proportions`
 
 `promptHint` 만 공유하고 이 세 줄을 각 파일에 복사해 뒀을 때 규칙이 갈라지는 사고가 두 번 났다(#126 에서 생기고 #129 에서 발견, PR #128·#130 으로 절 자체를 공유해 닫음). 스모크의 정적 검사가 `promptHint('character_ratio', …)` 가 **몇 곳에 나오는지** 세는 이유다.
 
-`generateCharacterSheet` 는 이 파일이 아니라 `extract.ts`(B②) 소유다 — `extractStyle` 과 결합도가 높아 #19 로 그렇게 정했다. `route.ts` 가 `kind:'character_sheet'` 를 그쪽으로 넘긴다.
+`generateCharacterSheet` 는 이 파일이 아니라 `extract.ts`(추출·시트) 소유다 — `extractStyle` 과 결합도가 높아 #19 로 그렇게 정했다. `route.ts` 가 `kind:'character_sheet'` 를 그쪽으로 넘긴다.
 
-**모델·API — B② 와 다르다**
+**모델·API — 추출·시트 쪽과 다르다**
 
 `client.responses.create`(`generate.ts:385`), 모델 `gpt-5`(`RESPONSES_MODEL`, `:19`), 이미지는 내장 도구 `tools: [{ type:'image_generation', size:'1024x1024' }]`(`:394`)로 만든다. 응답에서 `image_generation_call` 출력을 찾아 base64 를 꺼낸다(`:401`).
 
-B② 의 `generateCharacterSheet` 는 `client.images.generate`(Images API)를 쓴다. **같은 이미지 모델을 부르는 두 경로가 공존한다** — 체이닝(`previous_response_id`)이 Responses API 에만 있어서 컷 쪽은 이 경로여야 한다. SDK(^7.5.0) 의 Responses 타입이 도구 옵션을 못 따라와 `as any` 로 우회하고 있다(`:383` 주석).
+추출·시트 쪽의 `generateCharacterSheet` 는 `client.images.generate`(Images API)를 쓴다. **같은 이미지 모델을 부르는 두 경로가 공존한다** — 체이닝(`previous_response_id`)이 Responses API 에만 있어서 컷 쪽은 이 경로여야 한다. SDK(^7.5.0) 의 Responses 타입이 도구 옵션을 못 따라와 `as any` 로 우회하고 있다(`:383` 주석).
 
-**세션당 이미지 호출 횟수 (판정 예산)**
+**세션당 이미지 호출 횟수**
 
 | 단계 | 호출 | 비고 |
 |---|---|---|
@@ -116,7 +118,7 @@ B② 의 `generateCharacterSheet` 는 `client.images.generate`(Images API)를 �
 | 나머지 3컷 | **3회** (순차) | 체이닝이라 병렬 불가 |
 | **골든 패스 합계** | **6회** | 캐릭터 시트 1회는 온보딩 소관(5-1b) |
 
-표지 3안에는 **부족분 재시도**가 있다(#108·#118). 예산은 `count * 2 = 6` 회이고, 한 배치가 통째로 실패하면 그 자리에서 멈춘다(`gained === 0`) — 남은 실패 원인이 업로드 계열, 즉 환경 문제라 재시도해도 같이 실패하기 때문이다(#67 이 그 상황이었다).
+표지 3안에는 **부족분 재시도**가 있다(#108·#118). 상한은 `count * 2 = 6` 회이고, 한 배치가 통째로 실패하면 그 자리에서 멈춘다(`gained === 0`) — 남은 실패 원인이 업로드 계열, 즉 환경 문제라 재시도해도 같이 실패하기 때문이다(#67 이 그 상황이었다).
 
 ```bash
 COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
@@ -126,7 +128,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 **호출 순서 (세션 1회, 재시도 없는 골든 패스)**
 
-A② 소유 파일은 **함수명만 적는다** — 5-1b 절과 같은 이유다.
+화면 영역 소유 파일은 **함수명만 적는다** — 5-1b 절과 같은 이유다.
 
 | 순서 | 함수 | 위치 | 호출 대상 |
 |---|---|---|---|
@@ -154,7 +156,30 @@ A② 소유 파일은 **함수명만 적는다** — 5-1b 절과 같은 이유�
 | 9 | `rules.forbidden` → `Do not include:` | 사용자가 적은 금지 요소 |
 | 10 | 말풍선·글자 억제 | P0 게이트 2 |
 
-`spec/vocabulary.json` 의 `prompt_hints` 를 쓰는 자리가 2·5·6·7번이다(카테고리별 표는 6절). 힌트가 없는 값은 토큰이 그대로 나가므로, 새 enum 값이 생기면 힌트도 같이 넣어야 한다 — `npm run spec:sync-check` 가 커버리지를 검사한다.
+`spec/vocabulary.json` 의 `prompt_hints` 를 쓰는 자리가 2·5·6·7번이다(카테고리별 표는 아래). 힌트가 없는 값은 토큰이 그대로 나가므로, 새 enum 값이 생기면 힌트도 같이 넣어야 한다 — `npm run spec:sync-check` 가 커버리지를 검사한다.
+
+**`spec/vocabulary.json` 소비 방식 (컷 프롬프트)**
+
+`generate.ts` 가 모듈 로드 때 한 번 import 한다(`generate.ts:13`) — 요청마다 파일을 다시 읽지 않는다. 조회는 `prompt_hints` 만 쓰고, 최상위 enum 값 목록(`expression` 등)은 읽지 않는다. 표의 "조각"은 위 `buildCutPrompt` 표의 번호다.
+
+| 카테고리 | 조회 경로 | 조각 | 들어가는 문장 | 힌트가 없을 때 |
+|---|---|---|---|---|
+| `character_ratio` | `ratioClause` → `promptHint` (`generate.ts:164`) | 2 | `Style:` 끝 | 기본값 `2.5head` 를 먼저 적용한 뒤 `` `${값} body proportions` `` |
+| `life_stage` | `HINTS.life_stage` 직접 조회 (`buildCutPrompt` 안) | 5 | `Who this comic is made for …` | 밑줄을 공백으로 (`job_seeker` → `job seeker`) |
+| `narrative_beat` | `hint()` (`generate.ts:146`) | 6 | `This panel's role in the story:` | 토큰 그대로 |
+| `shot_type` | `hint()` | 6 | `Framing:` | 토큰 그대로 |
+| `camera_angle` | `hint()` | 6 | `Camera:` | 토큰 그대로 |
+| `time_of_day` | `hint()` | 6 | `Lighting:` | 토큰 그대로 |
+| `expression` · `pose` | `hint()` | 7 | `Character:` 의 `cast[].description` 뒤 | 토큰 그대로 |
+
+**컷 프롬프트가 `vocabulary.json` 을 거치지 않는 값**
+
+- `reserved_zone` — enum 값은 `vocabulary.json` 에 있지만 문장은 `reservedZoneHint`(`generate.ts:117`)의 고정 영어 문장이다. `prompt_hints` 에 항목이 없다.
+- `bubble_type` · `position` — 컷 프롬프트에 넣지 않는다. 말풍선은 합성 단계(5-2절) 몫이다.
+- `style.line_weight` · `saturation` · `background_density` — 토큰을 그대로 넣는다(`medium line weight` 식).
+- `context.industry` · `age_band` · `style.palette` · `keywords` · `rules.forbidden` — 사용자 입력 문자열을 그대로 잇는다.
+
+2026-09-30 기준(`vocabulary_version: "1.0"`) 위 표의 8개 카테고리는 `npm run spec:sync-check` 에서 전부 커버리지가 채워져 있다 — "힌트가 없을 때" 열은 새 값이 추가됐는데 힌트를 안 넣었을 때의 동작이다.
 
 **reference 주입 (캐릭터 동일성 방어선)**
 
@@ -186,9 +211,9 @@ A② 소유 파일은 **함수명만 적는다** — 5-1b 절과 같은 이유�
 
 정적 검사가 지키는 것은 과거에 실제로 났던 사고들이다 — `continueFrom` 배선 누락(#75), `Promise.all` 복귀(#104), reference 0장 미차단(#67), 시트·컷 스타일 필드 불일치(#126·#129).
 
-프롬프트 문구 품질은 정적 검사로 잡히지 않는다. **codex 환경(의뢰사 크레딧 0)에서 같은 프롬프트를 4회씩 돌려 육안 판정**하는 방식으로 검증했고, 결과는 #121 · #146 · #113 에 기록돼 있다.
+프롬프트 문구 품질은 정적 검사로 잡히지 않는다. **codex 환경에서 같은 프롬프트를 4회씩 돌려 육안 판정**하는 방식으로 검증했고, 결과는 #121 · #146 · #113 에 기록돼 있다.
 
-### 5-1b. 스타일 분석 · 캐릭터 시트 생성 (B②)
+### 5-1b. 스타일 분석 · 캐릭터 시트 생성 (추출·시트)
 
 `lib/openai/extract.ts` 소유. 이 파일이 내보내는 건 아래 두 함수뿐이다.
 
@@ -197,7 +222,7 @@ A② 소유 파일은 **함수명만 적는다** — 5-1b 절과 같은 이유�
 
 **호출 순서 (온보딩 1회, 재시도 없는 골든 패스)**
 
-A② 소유 파일(`OnboardingFlow.tsx`·`style-analysis.ts`)은 **함수명만 적는다** — 라인 번호를 붙이면 그 파일이 바뀔 때마다 이 표가 조용히 틀린다. 실측으로 겪었다: 이 표의 초판이 머지 당일 `OnboardingFlow.tsx` 라인 5개가 전부 어긋났다.
+화면 영역 소유 파일(`OnboardingFlow.tsx`·`style-analysis.ts`)은 **함수명만 적는다** — 라인 번호를 붙이면 그 파일이 바뀔 때마다 이 표가 조용히 틀린다. 실측으로 겪었다: 이 표의 초판이 머지 당일 `OnboardingFlow.tsx` 라인 5개가 전부 어긋났다.
 
 | 순서 | 함수 | 위치 | 호출 대상 |
 |---|---|---|---|
@@ -207,23 +232,23 @@ A② 소유 파일(`OnboardingFlow.tsx`·`style-analysis.ts`)은 **함수명만 
 | 4 | `handleConfirmStyle` | `OnboardingFlow.tsx` | (화면 전환, 호출 없음) |
 | 5 | `handleConfirmDetails` → `fetch("/api/generate")` | `OnboardingFlow.tsx` | `POST /api/generate {kind:"character_sheet"}` → **`generateCharacterSheet`** ×1 |
 
-**세션당 호출 횟수 (판정 예산 관련)**
+**세션당 호출 횟수**
 
 - 이미지 생성(유료) 호출: `generateCharacterSheet`는 프로젝트 생성 시 **정확히 1회**뿐이다 — 재시도 버튼이 없다(#19 결정: 세션마다 다시 만들지 않음). 그 프로젝트로 세션을 몇 개 만들거나 몇 번 재방문해도 추가 호출은 없다.
 - 텍스트 호출: `extractStyle`은 `ResultStep`(`OnboardingFlow.tsx`)의 "다시 뽑기"를 누를 때마다 추가로 1회씩 늘어난다 — 상한이 없어 사용자가 원하는 만큼 반복 가능하다. 같은 클릭이 같은 파일을 `/api/upload`에 재업로드하므로, 재시도 1회당 업로드 N회 + 추출 1회가 함께 늘어난다.
-- 참고: `generateCoverVariants`(B①)에도 별도 "다시 뽑기"가 있다(`SessionFlow.tsx`). 이건 `extract.ts` 소관이 아니라 혼동 방지로만 적는다.
+- 참고: `generateCoverVariants`(이미지 생성)에도 별도 "다시 뽑기"가 있다(`SessionFlow.tsx`). 이건 `extract.ts` 소관이 아니라 혼동 방지로만 적는다.
 
 **`spec/vocabulary.json` 소비 방식**
 
 `extract.ts`는 `vocabulary.json`을 직접 import하지 않는다. `./generate`에서 `ratioClause`만 가져와 쓴다(`extract.ts:4`). `ratioClause(value)`(`generate.ts:164-167`)는 내부에서 `promptHint('character_ratio', value)`(`generate.ts:141`)로 `vocabulary.json`의 `prompt_hints.character_ratio` 항목을 찾고, 없으면 `` `${value} body proportions` `` 문자열로 폴백한다. `buildCharacterPrompt`(`extract.ts:154`)가 이 결과를 시트 프롬프트에 그대로 넣는다 — `generate.ts`의 `buildCutPrompt`도 같은 헬퍼를 쓰기 때문에 시트와 컷이 항상 같은 비율 지시를 받는다(#126·#129 회귀 방지, PR #130).
 
-### 5-2. 텍스트 레이어 합성·Export (B③)
+### 5-2. 텍스트 레이어 합성·Export (렌더링 — 작성 예정)
 
-- **`GET /api/session/export`**(`app/api/session/export/route.ts`, A③ 소유 라우트) — 세션의 `storyboard.cuts`를 받아 최종 합성 이미지 ZIP을 반환한다. 내부에서 `lib/render/`(B③)의 합성·zip 로직을 호출한다.
+- **`GET /api/session/export`**(`app/api/session/export/route.ts`, 백엔드·저장 영역 라우트) — 세션의 `storyboard.cuts`를 받아 최종 합성 이미지 ZIP을 반환한다. 내부에서 `lib/render/`(렌더링 영역)의 합성·zip 로직을 호출한다.
 
-작성 대기 항목(B③): `lib/render/`의 실제 함수·호출 순서, 캡션/말풍선 합성 방식, ZIP 구성 방식.
+작성 예정 항목(#156에서 추적 중): `lib/render/`의 실제 함수·호출 순서, 캡션/말풍선 합성 방식, ZIP 구성 방식. 렌더링 영역 담당자는 `README.md` 소유권 표를 본다.
 
-## 6. 데이터 파일 vs 코드 (A 소유분)
+## 6. 데이터 파일 vs 코드 (화면·스키마·LLM·백엔드 영역분)
 
 **`spec/data/`로 이미 분리된 것**
 
@@ -233,50 +258,22 @@ A② 소유 파일(`OnboardingFlow.tsx`·`style-analysis.ts`)은 **함수명만 
 | `narrative-flow.json` | 서사 흐름 템플릿 3종(#153) | `lib/llm/narrative-flow.ts` |
 | `style-vocabulary.json` | 스타일 키워드 매핑 | `lib/llm/preset-guard.ts`(`checkUnmappedWordsPolicy` 관련) |
 
-**`spec/vocabulary.json`**(위 `data/`와 다른 위치, A① 소유) — enum별 프롬프트 힌트. B①(`lib/openai/generate.ts`)이 프롬프트 조립에 쓴다. **캐릭터 시트 쪽 소비 경로는 5-1b절에 적었다**(`extract.ts` → `ratioClause` → `promptHint`). 컷 프롬프트(`buildCutPrompt`) 쪽은 아래와 같다.
+**`spec/vocabulary.json`**(위 `data/`와 다른 위치, 스키마·LLM 영역) — enum별 프롬프트 힌트. 이미지 생성 영역(`lib/openai/generate.ts`)이 프롬프트 조립에 쓴다. **캐릭터 시트 쪽 소비 경로는 5-1b절에 적었다**(`extract.ts` → `ratioClause` → `promptHint`). 컷 프롬프트(`buildCutPrompt`)의 소비 방식은 5-1절에 적었다.
 
-`generate.ts` 가 모듈 로드 때 한 번 import 한다(`generate.ts:13`) — 요청마다 파일을 다시 읽지 않는다. 조회는 `prompt_hints` 만 쓰고, 최상위 enum 값 목록(`expression` 등)은 읽지 않는다. 표의 "조각"은 5-1절 `buildCutPrompt` 표의 번호다.
-
-| 카테고리 | 조회 경로 | 조각 | 들어가는 문장 | 힌트가 없을 때 |
-|---|---|---|---|---|
-| `character_ratio` | `ratioClause` → `promptHint` (`generate.ts:164`) | 2 | `Style:` 끝 | 기본값 `2.5head` 를 먼저 적용한 뒤 `` `${값} body proportions` `` |
-| `life_stage` | `HINTS.life_stage` 직접 조회 (`buildCutPrompt` 안) | 5 | `Who this comic is made for …` | 밑줄을 공백으로 (`job_seeker` → `job seeker`) |
-| `narrative_beat` | `hint()` (`generate.ts:146`) | 6 | `This panel's role in the story:` | 토큰 그대로 |
-| `shot_type` | `hint()` | 6 | `Framing:` | 토큰 그대로 |
-| `camera_angle` | `hint()` | 6 | `Camera:` | 토큰 그대로 |
-| `time_of_day` | `hint()` | 6 | `Lighting:` | 토큰 그대로 |
-| `expression` · `pose` | `hint()` | 7 | `Character:` 의 `cast[].description` 뒤 | 토큰 그대로 |
-
-**컷 프롬프트가 `vocabulary.json` 을 거치지 않는 값**
-
-- `reserved_zone` — enum 값은 `vocabulary.json` 에 있지만 문장은 `reservedZoneHint`(`generate.ts:117`)의 고정 영어 문장이다. `prompt_hints` 에 항목이 없다.
-- `bubble_type` · `position` — 컷 프롬프트에 넣지 않는다. 말풍선은 합성 단계(5-2절) 몫이다.
-- `style.line_weight` · `saturation` · `background_density` — 토큰을 그대로 넣는다(`medium line weight` 식).
-- `context.industry` · `age_band` · `style.palette` · `keywords` · `rules.forbidden` — 사용자 입력 문자열을 그대로 잇는다.
-
-2026-09-30 기준(`vocabulary_version: "1.0"`) 위 표의 8개 카테고리는 `npm run spec:sync-check` 에서 전부 커버리지가 채워져 있다 — "힌트가 없을 때" 열은 새 값이 추가됐는데 힌트를 안 넣었을 때의 동작이다.
-
-**아직 코드에 남은 상수** (`storyboard-assembly.ts`, A②, #152 대상)
+**아직 코드에 남은 상수** (`storyboard-assembly.ts`, 화면 영역, #152 대상)
 
 | 상수 | 위치 | 내용 |
 |---|---|---|
-| `BEAT_EXPRESSION_POSE` | :31 | narrative_beat별 표정·포즈 매핑 |
-| `BEAT_CAPTION` | :44 | narrative_beat별 캡션 문구 템플릿 |
-| `CUT_SHOT_PLAN` | :57 | 컷별 shot_type·camera_angle 고정 시퀀스 |
-| `CAPTION_POSITIONS` | :64 | 컷별 캡션 위치 고정 시퀀스 |
+| `BEAT_EXPRESSION_POSE` | :30 | narrative_beat별 표정·포즈 매핑 |
+| `BEAT_CAPTION` | :43 | narrative_beat별 캡션 문구 템플릿 |
+| `CUT_SHOT_PLAN` | :56 | 컷별 shot_type·camera_angle 고정 시퀀스 |
+| `CAPTION_POSITIONS` | :63 | 컷별 캡션 위치 고정 시퀀스 |
 
-## 7. 소유 경계 (`README.md` 폴더 소유권 표 기준)
+## 7. 소유 경계
 
-| 경로 | 담당 |
-|---|---|
-| `app/(studio)/` | A② |
-| `app/api/preset/`, `app/api/session/`, `lib/db/` | A③ |
-| `lib/llm/`, `app/api/brainstorm/`, `spec/` | A① |
-| `app/api/generate/`, `lib/openai/generate.ts`, `lib/openai/provider.ts` | B① |
-| `lib/openai/extract.ts` | B② |
-| `lib/render/` | B③ |
+폴더·파일별 담당자는 `README.md` 소유권 표를 본다(2차 소유권 개편 반영). 이 문서의 영역 이름(화면 / 스키마·LLM / 백엔드·저장 / 이미지 생성 / 추출·시트 / 렌더링)은 그 표의 담당 구분과 같은 뜻이다.
 
-## 8. 구현은 있으나 호출자가 없는 함수 (전부 A① 소유)
+## 8. 구현은 있으나 호출자가 없는 함수 (전부 스키마·LLM 영역)
 
 | 함수 | 위치 | 실제 호출자 | 관련 이슈 |
 |---|---|---|---|
