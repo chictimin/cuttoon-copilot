@@ -764,13 +764,16 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             </div>
           ) : (
             <div className="flex gap-2 text-sm">
-              <button
-                type="button"
-                onClick={() => setIsCustomOpen(true)}
-                className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-600 hover:bg-zinc-50"
-              >
-                직접 쓸게
-              </button>
+              {/* F1 선택 제안: flow 턴은 허용 키만 받으므로 직접 입력을 숨긴다(통합 WIP 436ae7b hunk). */}
+              {turns[turnIndex].key !== "flow" && (
+                <button
+                  type="button"
+                  onClick={() => setIsCustomOpen(true)}
+                  className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-600 hover:bg-zinc-50"
+                >
+                  직접 쓸게
+                </button>
+              )}
               {/* 선택지가 비면(모델이 그 턴을 빼먹은 경우) 고를 것이 없으니 감춘다 */}
               {turns[turnIndex].options.length > 0 && (
                 <button
@@ -801,6 +804,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               </button>
             ))}
           </div>
+          {/* #186 지적 5(캡틴 확정): 톤 단계 알아서 해줘는 공감형(empathy) 고정 적용(통합 WIP 436ae7b hunk). */}
+          <button
+            type="button"
+            onClick={() => handleSelectTone("empathy")}
+            className="rounded-md border border-dashed border-zinc-300 px-4 py-2.5 text-sm text-zinc-600 hover:bg-zinc-50"
+          >
+            알아서 해줘
+          </button>
         </div>
       )}
 
