@@ -26,10 +26,13 @@ const TURN_ORDER: BrainstormTurn["key"][] = ["protagonist", "supporting", "flow"
 // LLM 응답을 화면이 쓸 수 있는 형태로 맞춘다. 모델 응답은 순서·개수·문자열을
 // 보장하지 않으므로 세 가지를 여기서 고정한다.
 //
-// 1. flow 턴은 LLM 선택지를 버리고 로컬 FLOW_OPTIONS 로 교체한다. 흐름 선택은
+// 1. flow 턴은 서버가 정규화한 선택지를 쓴다(F1, spec-llm-line.md). 흐름 선택은
 //    자유 텍스트가 아니라 NarrativeBeat 템플릿을 고르는 것이라(스키마의
-//    narrative_beat enum), 임의 문자열이 오면 assembleStoryboard 가 조용히 첫
-//    템플릿으로 폴백해 어떤 흐름을 골라도 같은 4컷이 나온다.
+//    narrative_beat enum), 허용 키와 일치하는 서버 옵션만 순서대로 살리고 빠진
+//    키만 로컬 FLOW_OPTIONS 에서 채운다. 허용 키 밖 문자열은 여기서 덜어낸다 —
+//    남기면 assembleStoryboard 가 조용히 기본 흐름으로 폴백해 어떤 흐름을 골라도
+//    같은 4컷이 나온다. question 은 서버 값을 쓰되 비어 있으면 로컬 FLOW_QUESTION
+//    으로 둔다(설명 문구 고정은 서버 몫).
 // 2. 조연 없이 진행하는 선택지는 PRD 6절의 필수 경로다(조연 유무가 cast 구성을
 //    바꾼다). 프롬프트가 그 문자열을 리터럴로 지시하지만 모델이 무시할 수 있어
 //    빠져 있으면 되살린다 — 사용자 입력을 덮어쓰는 게 아니라 사라진 선택지를
@@ -40,7 +43,7 @@ function normalizeTurns(turns: BrainstormTurn[]): BrainstormTurn[] {
 
   return TURN_ORDER.map((key) => {
     if (key === "flow") {
-      return { key, question: FLOW_QUESTION, options: FLOW_OPTIONS };
+      return normalizeFlowTurn(byKey.get(key));
     }
 
     const turn = byKey.get(key);
@@ -60,6 +63,15 @@ const FALLBACK_QUESTION: Record<"protagonist" | "supporting", string> = {
   protagonist: "주인공은 누구인가요?",
   supporting: "함께 등장할 인물이 있나요?",
 };
+
+function normalizeFlowTurn(turn: BrainstormTurn | undefined): BrainstormTurn {
+  const question = turn?.question?.trim() ? turn.question : FLOW_QUESTION;
+  const valid = [...new Set((turn?.options ?? []).filter((option) => FLOW_OPTIONS.includes(option)))];
+  for (const key of FLOW_OPTIONS) {
+    if (!valid.includes(key)) valid.push(key);
+  }
+  return { key: "flow", question, options: valid };
+}
 
 function promptForCut(subject: string, cut: Cut): string {
   return `${subject} · ${cut.narrative_beat} · ${cut.shot_type}/${cut.camera_angle}`;
@@ -111,6 +123,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [answers, setAnswers] = useState<Partial<Record<BrainstormTurn["key"], string>>>({});
   const [customText, setCustomText] = useState("");
   const [isCustomOpen, setIsCustomOpen] = useState(false);
+  // F1: flow 턴에서 허용 키 밖 직접 입력을 거부했을 때 보여줄 안내.
+  const [answerError, setAnswerError] = useState<string | null>(null);
   const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
   const [preset, setPreset] = useState<Preset | null>(null);
   const [coverVariants, setCoverVariants] = useState<GeneratedCut[] | null>(null);
@@ -194,6 +208,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   function recordAnswer(value: string) {
     if (!turns) return;
     const key = turns[turnIndex].key;
+    // F1: flow 직접 입력은 정규화 후 허용 키만 받는다. 자유 입력 값은 조립 전에
+    // 거부한다 — 남기면 assembleStoryboard 의 기본 흐름 폴백이 조용히 타 어떤
+    // 흐름을 골라도 같은 4컷이 나온다.
+    if (key === "flow" && !FLOW_OPTIONS.includes(value)) {
+      setAnswerError("흐름은 제시된 선택지 중에서 골라주세요");
+      return;
+    }
+    setAnswerError(null);
     const next = { ...answers, [key]: value };
     setAnswers(next);
     setIsCustomOpen(false);
@@ -533,6 +555,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             ))}
           </div>
 
+          {answerError && (
+            <p className="w-full rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">
+              {answerError}
+            </p>
+          )}
           {isCustomOpen ? (
             <div className="flex w-full gap-2">
               <input
