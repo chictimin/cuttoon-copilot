@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { uploadAsset } from "../asset-store";
 import { OUTPUT_SIZE, ratioClause } from "./generate";
 import type { GeneratedImageResult } from "./provider";
+import { imageQuality, imageSetting, logImageSetting } from "./image-setting";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -208,12 +209,18 @@ export async function generateCharacterSheet(
   preset: PresetInput
 ): Promise<GeneratedImageResult> {
   const prompt = buildCharacterPrompt(preset);
+  // 유료 호출 전에 읽어 모르는 값이면 여기서 멈춘다(#190). 컷과 같은 설정을 따른다 —
+  // 시트만 기본 화질이면 저가 QA에서도 시트 비용은 그대로 나간다.
+  const setting = imageSetting();
+  const quality = imageQuality(setting);
+  logImageSetting("character_sheet", setting);
 
   const response = await client.images.generate({
     model: "gpt-image-1",
     prompt,
     n: 1,
     size: `${OUTPUT_SIZE.width}x${OUTPUT_SIZE.height}` as const,
+    ...(quality && { quality }),
   });
 
   const data = response.data?.[0];

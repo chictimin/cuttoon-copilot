@@ -13,6 +13,7 @@ import sharp from 'sharp'
 import vocabulary from '@/spec/vocabulary.json'
 import type { ImageProvider, GeneratedImageResult, ReservedZone } from './provider'
 import { readAsset, uploadAsset } from '../asset-store'
+import { imageQuality, imageSetting, logImageSetting, type ImageSetting } from './image-setting'
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -376,9 +377,13 @@ async function callImageGeneration(
   prompt: string,
   referenceAssets: unknown[],
   preset: MinimalPreset,
+  setting: ImageSetting,
+  kind: 'cover_variant' | 'cut',
   previousResponseId?: string
 ): Promise<{ base64: string; responseId: string }> {
   const inputImages = await toInputImages(referenceUris(referenceAssets, preset))
+  const quality = imageQuality(setting)
+  logImageSetting(kind, setting)
 
   // openai SDK(^7.5.0)의 Responses 타입이 image_generation 도구 옵션을 아직 못
   // 따라와 as any로 우회한다 — 실제 호출로 요청/응답 모양을 검증했다 (#18).
@@ -391,7 +396,7 @@ async function callImageGeneration(
         content: [{ type: 'input_text', text: prompt }, ...inputImages],
       },
     ],
-    tools: [{ type: 'image_generation', size: IMAGE_SIZE }],
+    tools: [{ type: 'image_generation', size: IMAGE_SIZE, ...(quality && { quality }) }],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any)
 
@@ -455,9 +460,18 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const storyboard = (input.storyboard ?? {}) as MinimalStoryboard
   const preset = (input.preset ?? {}) as MinimalPreset
   const cut = nextUngeneratedCut(storyboard.cuts)
+  // 유료 호출 전에 읽어 모르는 값이면 여기서 멈춘다(#190).
+  const setting = imageSetting()
 
   const prompt = buildCutPrompt(storyboard, preset, cut)
-  const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, preset, input.continueFrom)
+  const { base64, responseId } = await callImageGeneration(
+    prompt,
+    input.referenceAssets,
+    preset,
+    setting,
+    'cut',
+    input.continueFrom
+  )
 
   const { buffer, width, height } = await resizeToOutput(base64, cut?.reserved_zone)
   const { assetUri } = await uploadAsset(buffer, 'image/png', 'cut.png')
@@ -495,9 +509,10 @@ async function generateOneVariant(
   prompt: string,
   referenceAssets: unknown[],
   preset: MinimalPreset,
+  setting: ImageSetting,
   reservedZone?: ReservedZone
 ): Promise<GeneratedImageResult> {
-  const { base64, responseId } = await callImageGeneration(prompt, referenceAssets, preset)
+  const { base64, responseId } = await callImageGeneration(prompt, referenceAssets, preset, setting, 'cover_variant')
   const { buffer, width, height } = await resizeToOutput(base64, reservedZone)
   const { assetUri } = await uploadAsset(buffer, 'image/png', 'cover.png')
   return {
@@ -517,6 +532,9 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   const preset = (input.preset ?? {}) as MinimalPreset
   const cut = storyboard.cuts?.[0]
   const prompt = buildCutPrompt(storyboard, preset, cut)
+  // allSettled 안에서 읽으면 모르는 값이 "3안 모두 실패"로 뭉개진다 — 배치 전에 읽어
+  // 설정 오류로 바로 던진다(#190).
+  const setting = imageSetting()
 
   const variants: GeneratedImageResult[] = []
   // 재시도를 켜면 count(3)만큼 더 실패해도 채울 수 있게 여유를 둔다 — 무한 재시도로
@@ -540,7 +558,7 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
     // 후처리(sharp·업로드)에서 실패할 때 이미 성공한 나머지 안까지 같이 버려져
     // 성공분 생성비가 그대로 날아간다 (#104). 성공한 것만 살려서 이어붙인다.
     const settled = await Promise.allSettled(
-      Array.from({ length: batch }, () => generateOneVariant(prompt, input.referenceAssets, preset, cut?.reserved_zone))
+      Array.from({ length: batch }, () => generateOneVariant(prompt, input.referenceAssets, preset, setting, cut?.reserved_zone))
     )
 
     let gained = 0
