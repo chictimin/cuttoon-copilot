@@ -156,30 +156,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 | 9 | `rules.forbidden` → `Do not include:` | 사용자가 적은 금지 요소 |
 | 10 | 말풍선·글자 억제 | P0 게이트 2 |
 
-`spec/vocabulary.json` 의 `prompt_hints` 를 쓰는 자리가 2·5·6·7번이다(카테고리별 표는 아래). 힌트가 없는 값은 토큰이 그대로 나가므로, 새 enum 값이 생기면 힌트도 같이 넣어야 한다 — `npm run spec:sync-check` 가 커버리지를 검사한다.
-
-**`spec/vocabulary.json` 소비 방식 (컷 프롬프트)**
-
-`generate.ts` 가 모듈 로드 때 한 번 import 한다(`generate.ts:13`) — 요청마다 파일을 다시 읽지 않는다. 조회는 `prompt_hints` 만 쓰고, 최상위 enum 값 목록(`expression` 등)은 읽지 않는다. 표의 "조각"은 위 `buildCutPrompt` 표의 번호다.
-
-| 카테고리 | 조회 경로 | 조각 | 들어가는 문장 | 힌트가 없을 때 |
-|---|---|---|---|---|
-| `character_ratio` | `ratioClause` → `promptHint` (`generate.ts:164`) | 2 | `Style:` 끝 | 기본값 `2.5head` 를 먼저 적용한 뒤 `` `${값} body proportions` `` |
-| `life_stage` | `HINTS.life_stage` 직접 조회 (`buildCutPrompt` 안) | 5 | `Who this comic is made for …` | 밑줄을 공백으로 (`job_seeker` → `job seeker`) |
-| `narrative_beat` | `hint()` (`generate.ts:146`) | 6 | `This panel's role in the story:` | 토큰 그대로 |
-| `shot_type` | `hint()` | 6 | `Framing:` | 토큰 그대로 |
-| `camera_angle` | `hint()` | 6 | `Camera:` | 토큰 그대로 |
-| `time_of_day` | `hint()` | 6 | `Lighting:` | 토큰 그대로 |
-| `expression` · `pose` | `hint()` | 7 | `Character:` 의 `cast[].description` 뒤 | 토큰 그대로 |
-
-**컷 프롬프트가 `vocabulary.json` 을 거치지 않는 값**
-
-- `reserved_zone` — enum 값은 `vocabulary.json` 에 있지만 문장은 `reservedZoneHint`(`generate.ts:117`)의 고정 영어 문장이다. `prompt_hints` 에 항목이 없다.
-- `bubble_type` · `position` — 컷 프롬프트에 넣지 않는다. 말풍선은 합성 단계(5-2절) 몫이다.
-- `style.line_weight` · `saturation` · `background_density` — 토큰을 그대로 넣는다(`medium line weight` 식).
-- `context.industry` · `age_band` · `style.palette` · `keywords` · `rules.forbidden` — 사용자 입력 문자열을 그대로 잇는다.
-
-2026-09-30 기준(`vocabulary_version: "1.0"`) 위 표의 8개 카테고리는 `npm run spec:sync-check` 에서 전부 커버리지가 채워져 있다 — "힌트가 없을 때" 열은 새 값이 추가됐는데 힌트를 안 넣었을 때의 동작이다.
+`spec/vocabulary.json` 의 `prompt_hints` 를 쓰는 자리가 6·2번이다. 힌트가 없는 값은 토큰이 그대로 나가므로, 새 enum 값이 생기면 힌트도 같이 넣어야 한다 — `npm run spec:sync-check` 가 커버리지를 검사한다.
 
 **reference 주입 (캐릭터 동일성 방어선)**
 
