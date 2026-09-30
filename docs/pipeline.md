@@ -199,7 +199,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 `resizeToOutput`(`:429`)이 `sharp` 로 `OUTPUT_SIZE` 를 강제한다. 모델이 요청한 `size` 와 다른 크기를 낼 때가 있고(실측 `1536x1024` · `1199x1312`), 그러면 계약 ④ 의 `width`/`height` 가 실제 픽셀과 어긋난다. 리사이즈가 실패하면 원본을 살리고 `sharp.metadata()` 로 실제 크기를 다시 읽어 반환한다 — 유료 결과를 버리지 않는다(#104).
 
-`fit:'cover'` 의 crop position 은 기본값(`centre`)이다. 비정사각형 출력에서 중앙 크롭이 `reserved_zone` 과 같은 축에 걸리면 말풍선 여백이 깎이는데, `compose.ts` 가 아직 `reserved_zone` 을 읽지 않아 지금은 비활성이다 — #105 에서 추적한다.
+`fit:'cover'` 의 crop position 은 `reserved_zone` 과 같은 쪽이다(`top`이면 위를 남기고 아래를 자름, `bottom`이면 반대) — `resizeToOutput`(`:430`)이 `reservedZone ?? 'centre'` 로 넘긴다. `reserved_zone` 이 없으면 기본값(`centre`)이다. 실측(위쪽 200px 여백, `1199x1312` → `1024x1024`): `centre` 122px 남음, 같은 쪽 171px, 반대쪽 74px (#105, PR #166).
 
 **1024×1024 인 이유**
 
