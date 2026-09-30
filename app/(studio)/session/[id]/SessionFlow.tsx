@@ -17,6 +17,11 @@ import {
   type BrainstormAnswers,
 } from "./storyboard-assembly";
 import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
+import {
+  EMPTY_CONTEXT_HINT,
+  fetchSubjectSuggestions,
+  hasSuggestionContext,
+} from "./subject-suggestions";
 import type { Cut, Storyboard } from "./storyboard-types";
 
 type Step = "subject" | "brainstorm" | "assembling" | "cover" | "generating" | "cuts" | "saved";
@@ -102,6 +107,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [checkingExisting, setCheckingExisting] = useState(true);
   const [isRestoredView, setIsRestoredView] = useState(false);
   const [subject, setSubject] = useState("");
+  // 2차 4번: 소재 후보(preset.context 기반 LLM 제안, #181). 후보는 선택지로만 보여주고
+  // 자동으로 채택하지 않는다 — 누르면 입력창에 채워져 수정할 수 있다.
+  const [subjectSuggestions, setSubjectSuggestions] = useState<string[] | null>(null);
+  const [suggestionsStub, setSuggestionsStub] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const suggestAttemptRef = useRef(0);
   const [turnIndex, setTurnIndex] = useState(0);
   const [turns, setTurns] = useState<BrainstormTurn[] | null>(null);
   const [turnsError, setTurnsError] = useState<string | null>(null);
@@ -258,6 +270,29 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // 소재를 확정하는 사용자 액션에서 바로 요청을 띄운다. effect 로 옮기면
   // cascading render 가 되고(react-hooks/set-state-in-effect), 이 요청은 화면
   // 진입이 아니라 "다음" 클릭이라는 이벤트에 속한 일이다.
+  // "알아서 해줘"(다시 뽑기 포함) — 횟수 제한 없이 새 후보 3개를 받는다. 실패해도
+  // 입력창은 그대로 쓸 수 있고, 이전 후보는 지우지 않는다.
+  async function handleSuggestSubjects() {
+    if (!preset || suggesting) return;
+    const presetId = window.sessionStorage.getItem("cuttoon:preset-id");
+    if (!presetId) {
+      setSuggestError("먼저 온보딩에서 프로젝트를 만들어주세요");
+      return;
+    }
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const result = await fetchSubjectSuggestions(presetId, preset, suggestAttemptRef.current);
+      suggestAttemptRef.current += 1;
+      setSubjectSuggestions(result.subjects);
+      setSuggestionsStub(result.stub === true);
+    } catch {
+      setSuggestError("소재 후보를 만드는 데 실패했어요. 다시 시도하거나 직접 적어주세요");
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
   function startBrainstorm() {
     setStep("brainstorm");
     void loadTurns();
@@ -468,6 +503,45 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             placeholder="예: 무릎 연골 나감"
             className="w-full rounded-md border border-zinc-300 px-4 py-3 text-sm"
           />
+
+          {preset && !hasSuggestionContext(preset) ? (
+            <p className="text-sm text-zinc-500">{EMPTY_CONTEXT_HINT}</p>
+          ) : null}
+          <button
+            type="button"
+            disabled={!preset || !hasSuggestionContext(preset) || suggesting}
+            onClick={() => void handleSuggestSubjects()}
+            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
+          >
+            {suggesting ? "소재를 찾고 있어요..." : subjectSuggestions ? "다시 뽑기" : "알아서 해줘"}
+          </button>
+
+          {suggestError && (
+            <p className="rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">{suggestError}</p>
+          )}
+
+          {subjectSuggestions && (
+            <div className="flex w-full flex-col gap-2">
+              {subjectSuggestions.map((candidate) => (
+                <button
+                  key={candidate}
+                  type="button"
+                  onClick={() => setSubject(candidate)}
+                  className={`rounded-md border px-4 py-2.5 text-left text-sm hover:bg-zinc-50 ${
+                    subject === candidate ? "border-zinc-900 bg-zinc-50" : "border-zinc-300"
+                  }`}
+                >
+                  {candidate}
+                </button>
+              ))}
+              {suggestionsStub && (
+                <p className="text-xs text-zinc-400">
+                  임시 예시 후보예요 (소재 제안 서버 연결 전)
+                </p>
+              )}
+            </div>
+          )}
+
           <button
             type="button"
             disabled={subject.trim().length === 0}
