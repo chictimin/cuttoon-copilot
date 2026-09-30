@@ -417,22 +417,24 @@ async function callImageGeneration(
 // (extract.ts 가 이미 이 파일의 OUTPUT_SIZE 를 가져다 쓴다). 나중에 공용 위치로
 // 옮길 수 있으면 한쪽으로 합치는 편이 낫다.
 //
-// ponytail: crop position 은 기본값(centre)이다. 비정사각형 출력에서 중앙 크롭이
-// reserved_zone 과 같은 축에 걸리면 말풍선 여백이 깎인다 — compose.ts(B③)가
-// reserved_zone 을 아직 읽지 않아 지금은 비활성이고, 읽기 시작할 때 position 을
-// zone 반대쪽으로 지정해야 한다. #105 에서 추적한다.
+// #105: 기본값(centre) 크롭은 초과분을 양쪽에서 똑같이 잘라서, 세로로 긴 출력(1199x1312)
+// 에서는 모델에게 비워두라고 한 위/아래 말풍선 자리(reserved_zone)까지 깎는다.
+// position 을 zone 과 "같은 쪽"으로 준다 — sharp 는 그쪽 가장자리를 붙잡고 반대쪽을
+// 잘라낸다. 실측(위쪽 200px 여백, 1199x1312 → 1024x1024): centre 122px 남음,
+// 'top' 171px(전부 보존), 'bottom' 74px. zone "반대쪽"으로 주면 오히려 더 깎인다.
 //
 // #104: 여기 도달했다는 건 유료 호출이 이미 성공했다는 뜻이다 — 리사이즈(후처리)
 // 실패로 그 결과를 통째로 버리지 않는다. 실패하면 원본 버퍼를 그대로 쓰고,
 // width/height도 OUTPUT_SIZE로 고정하지 않고 실제 메타데이터를 다시 읽어 반환한다
 // (메타 읽기까지 실패하면 그때만 OUTPUT_SIZE로 최후 폴백).
 async function resizeToOutput(
-  base64: string
+  base64: string,
+  reservedZone?: ReservedZone
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
   const original = Buffer.from(base64, 'base64')
   try {
     const buffer = await sharp(original)
-      .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: 'cover' })
+      .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: 'cover', position: reservedZone ?? 'centre' })
       .png()
       .toBuffer()
     return { buffer, width: OUTPUT_SIZE.width, height: OUTPUT_SIZE.height }
@@ -457,7 +459,7 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const prompt = buildCutPrompt(storyboard, preset, cut)
   const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, preset, input.continueFrom)
 
-  const { buffer, width, height } = await resizeToOutput(base64)
+  const { buffer, width, height } = await resizeToOutput(base64, cut?.reserved_zone)
   const { assetUri } = await uploadAsset(buffer, 'image/png', 'cut.png')
 
   return {
@@ -496,7 +498,7 @@ async function generateOneVariant(
   reservedZone?: ReservedZone
 ): Promise<GeneratedImageResult> {
   const { base64, responseId } = await callImageGeneration(prompt, referenceAssets, preset)
-  const { buffer, width, height } = await resizeToOutput(base64)
+  const { buffer, width, height } = await resizeToOutput(base64, reservedZone)
   const { assetUri } = await uploadAsset(buffer, 'image/png', 'cover.png')
   return {
     asset: assetUri,
