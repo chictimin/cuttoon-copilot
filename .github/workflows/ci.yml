@@ -15,5 +15,8 @@ jobs:
         with: { node-version: 24 }
       - run: npm ci
       - run: npm run build
+        env:
+          # 빌드는 OpenAI 클라이언트 생성자만 통과하면 된다. 실제 호출 없음 — 진짜 키를 CI에 넣지 않는다
+          OPENAI_API_KEY: ci-build-placeholder
       - run: npx tsc --noEmit
       - run: npm run lint
