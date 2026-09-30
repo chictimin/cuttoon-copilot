@@ -50,3 +50,6 @@ CLAUDE.md
 # Playwright MCP 브라우저 세션 산출물 (스크린샷·트레이스)
 .playwright-mcp/
 .env
+
+# P0 스파이크(scripts/p0-spike.ts) 생성 이미지
+scripts/output/
