@@ -20,11 +20,14 @@ function parseContext(value: unknown): CaptionContext | undefined {
 }
 
 /**
- * F2 컷 대사 생성. 이미지 호출 전에 화면이 부른다.
+ * F2 컷 대사 + F4 컷 연출 생성. 이미지 호출 전에 화면이 부른다.
  * body: { subject, flow, beats(4개), cast(description 목록), tone_id, context, cut_index? }
- * - cut_index(1~4)가 있으면 그 컷만 다시 뽑아 {captions:[1개]}로 돌려준다.
- * - 없으면 4컷 전체를 {captions:[4개]}로 돌려준다.
+ * - cut_index(1~4)가 있으면 그 컷의 대사와 연출을 함께 다시 뽑아
+ *   {captions:[1개], directions:[1개]}로 돌려준다.
+ * - 없으면 4컷 전체를 {captions:[4개], directions:[4개]}로 돌려준다.
  * - fallbackCutIndexes: 기본 대사로 채운 컷. 화면은 해당 컷을 `기본 대사`로 표시한다.
+ * - fallbackDirectionCuts: 연출 필드 하나라도 기본값으로 돌아간 컷.
+ *   화면은 검증된 연출만 적용한다.
  */
 export async function POST(request: Request) {
   let body: unknown;
