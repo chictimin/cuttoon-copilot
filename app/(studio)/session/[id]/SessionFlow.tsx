@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { assertStoryboardRuntimeInvariants } from "@/lib/llm/storyboard-guard";
 import type { Preset } from "@/lib/llm/preset-guard";
@@ -117,6 +117,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [coverRequested, setCoverRequested] = useState<number | undefined>(undefined);
   const [cutImageUrls, setCutImageUrls] = useState<Record<number, string>>({});
   const [genError, setGenError] = useState<string | null>(null);
+  const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
+  // 나머지 3컷 체이닝의 진행 상태 — 중간 실패 뒤 "이어서 만들기"가 이미 만든 컷과
+  // 다음 컷 체이닝 토큰에서 재개하도록 렌더와 무관하게 들고 있는다(#104).
+  const chainRef = useRef<{ storyboard: Storyboard; token: string } | null>(null);
   const [editingCutIndex, setEditingCutIndex] = useState<number | null>(null);
   const [draftCaption, setDraftCaption] = useState("");
   const [saving, setSaving] = useState(false);
@@ -316,38 +320,45 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     };
     setStoryboard(updated);
     setCutImageUrls((prev) => ({ ...prev, [firstCutIndex]: variant.image }));
+    void runChainedCuts(updated, variant.continuationToken ?? "");
+  }
+
+  // 컷이 하나 끝날 때마다 storyboard·이미지 URL을 바로 반영한다. 다음 컷이 실패해도
+  // 이미 유료로 만든 컷이 화면 상태에 남고, 재시도는 첫 미생성 컷부터 이어진다.
+  async function runChainedCuts(startStoryboard: Storyboard, token: string) {
+    if (!preset) return;
+    chainRef.current = { storyboard: startStoryboard, token };
     setStep("generating");
     setGenError(null);
+    setGenProgress(null);
 
     try {
-      const generated = await generateChainedCuts(updated, preset, variant.continuationToken ?? "");
-
-      setStoryboard((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          cuts: prev.cuts.map((cut, i) =>
-            i === 0
-              ? cut
-              : {
+      await generateChainedCuts(startStoryboard, preset, token, {
+        onProgress: (done, total) => setGenProgress({ done, total }),
+        onCut: (i, generated) => {
+          const chain = chainRef.current;
+          if (!chain) return;
+          const cuts = chain.storyboard.cuts.map((cut, idx) =>
+            idx === i
+              ? {
                   ...cut,
-                  generated_image: generated[i - 1].asset,
-                  prompt_used: promptForCut(prev.subject, cut),
+                  generated_image: generated.asset,
+                  prompt_used: promptForCut(chain.storyboard.subject, cut),
                 }
-          ),
-        };
-      });
-      setCutImageUrls((prev) => {
-        const next = { ...prev };
-        updated.cuts.slice(1).forEach((cut, i) => {
-          next[cut.cut_index] = generated[i].image;
-        });
-        return next;
+              : cut
+          );
+          chainRef.current = {
+            storyboard: { ...chain.storyboard, cuts },
+            token: generated.continuationToken ?? chain.token,
+          };
+          setStoryboard(chainRef.current.storyboard);
+          setCutImageUrls((prev) => ({ ...prev, [cuts[i].cut_index]: generated.image }));
+        },
       });
       setStep("cuts");
     } catch {
-      setGenError("나머지 컷 생성에 실패했어요. 다시 시도해주세요");
-      setStep("cover");
+      // step은 generating에 둔다 — 표지로 돌아가면 만든 컷이 버려진다.
+      setGenError("나머지 컷 생성에 실패했어요. 이미 만든 컷은 보관돼 있어요");
     }
   }
 
@@ -562,7 +573,16 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
       {step === "assembling" && !presetError && <Spinner text="이야기를 엮고 있어요..." />}
       {step === "cover" && !coverVariants && !genError && <Spinner text="표지 3안을 그리고 있어요..." />}
-      {step === "generating" && <Spinner text="나머지 컷을 완성하고 있어요..." />}
+      {step === "generating" && !genError && (
+        <Spinner
+          text={
+            genProgress
+              ? `나머지 컷을 완성하고 있어요... (${genProgress.done}/${genProgress.total})`
+              : "나머지 컷을 완성하고 있어요..."
+          }
+          progress={genProgress}
+        />
+      )}
 
       {(step === "cover" || step === "generating") && genError && (
         <div className="flex flex-col items-center gap-3 text-center">
@@ -570,6 +590,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           <button
             type="button"
             onClick={() => {
+              if (step === "generating" && chainRef.current) {
+                void runChainedCuts(chainRef.current.storyboard, chainRef.current.token);
+                return;
+              }
               setGenError(null);
               setCoverVariants(null);
               setCoverRequested(undefined);
@@ -578,7 +602,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             }}
             className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
           >
-            다시 시도
+            {step === "generating" ? "이어서 만들기" : "다시 시도"}
           </button>
         </div>
       )}
@@ -731,11 +755,19 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   );
 }
 
-function Spinner({ text }: { text: string }) {
+function Spinner({ text, progress }: { text: string; progress?: { done: number; total: number } | null }) {
   return (
     <div className="flex flex-col items-center gap-4 text-center">
       <div className="h-12 w-12 animate-spin rounded-full border-4 border-zinc-200 border-t-zinc-700" />
       <p className="text-base font-medium">{text}</p>
+      {progress && progress.total > 0 && (
+        <div className="h-2 w-48 overflow-hidden rounded-full bg-zinc-200">
+          <div
+            className="h-full bg-zinc-700 transition-all"
+            style={{ width: `${(progress.done / progress.total) * 100}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }
