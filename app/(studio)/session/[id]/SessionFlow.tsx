@@ -773,13 +773,15 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             </div>
           ) : (
             <div className="flex gap-2 text-sm">
-              <button
-                type="button"
-                onClick={() => setIsCustomOpen(true)}
-                className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-600 hover:bg-zinc-50"
-              >
-                직접 쓸게
-              </button>
+              {turns[turnIndex].key !== "flow" && (
+                <button
+                  type="button"
+                  onClick={() => setIsCustomOpen(true)}
+                  className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-600 hover:bg-zinc-50"
+                >
+                  직접 쓸게
+                </button>
+              )}
               {/* 선택지가 비면(모델이 그 턴을 빼먹은 경우) 고를 것이 없으니 감춘다 */}
               {turns[turnIndex].options.length > 0 && (
                 <button
@@ -810,6 +812,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={() => handleSelectTone("empathy")}
+            className="rounded-md border border-dashed border-zinc-300 px-4 py-2.5 text-sm text-zinc-600 hover:bg-zinc-50"
+          >
+            알아서 해줘
+          </button>
         </div>
       )}
 

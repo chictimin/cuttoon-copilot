@@ -267,7 +267,9 @@ async function generateCaptionsForCuts(
   maxTokens: number
 ): Promise<CaptionsResult> {
   const firstContent = await callCaptionsModel(buildPrompt(input, wanted), maxTokens);
-  let { valid, invalid } = collectValid(parseCaptionsObject(firstContent), wanted);
+  const collected = collectValid(parseCaptionsObject(firstContent), wanted);
+  const valid = collected.valid;
+  let invalid = collected.invalid;
 
   // 무효·누락 컷은 사유를 붙여 1회 재요청한다 (타임아웃은 재시도하지 않는다).
   if (invalid.length > 0) {
