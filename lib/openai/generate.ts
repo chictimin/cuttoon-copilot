@@ -285,9 +285,9 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
 
   if (cut) {
     // 컷이 이야기에서 하는 역할. 이게 없으면 4컷이 전부 같은 온도로 나온다 —
-    // problem 컷과 after 컷이 구분되지 않는다. prompt_hints 에 narrative_beat
-    // 항목이 아직 없어(spec/ 은 A① 소유) 토큰이 그대로 들어가지만, enum 값이
-    // 이미 영어 단어라(problem/before/turning/after…) 모델이 읽는다.
+    // problem 컷과 after 컷이 구분되지 않는다. prompt_hints.narrative_beat 의
+    // 서술문을 쓰고, 힌트가 없는 값은 토큰이 그대로 들어간다 — enum 값이 이미
+    // 영어 단어라(problem/before/turning/after…) 그래도 모델이 읽는다.
     const beat = hint('narrative_beat', cut.narrative_beat)
     // 라벨 형태로 둔다. 예전엔 `This panel is the "${beat}" beat of the story.` 였는데,
     // 그러면 힌트가 그 영어 문장 안에 들어맞는 짧은 구여야 해서 spec/ 쪽 서술문 작성이
