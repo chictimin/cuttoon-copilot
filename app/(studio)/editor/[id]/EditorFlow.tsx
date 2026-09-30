@@ -360,7 +360,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
                 }}
                 className="absolute max-w-[70%] cursor-pointer truncate rounded-full bg-white px-3 py-1 text-xs font-medium text-zinc-900 shadow"
                 style={POSITION_STYLE[cut.caption.position]}
-                title="끌어서 말풍선 위치를 옮길 수 있어요"
+                title="클릭하면 대사를 고칠 수 있어요 · 끌면 위치를 옮길 수 있어요"
               >
                 {cut.caption.text}
               </div>
