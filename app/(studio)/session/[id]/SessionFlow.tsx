@@ -358,7 +358,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       setStep("cuts");
     } catch {
       // step은 generating에 둔다 — 표지로 돌아가면 만든 컷이 버려진다.
-      setGenError("나머지 컷 생성에 실패했어요. 이미 만든 컷은 보관돼 있어요");
+      // chainRef는 메모리 상태라 새로고침·탭 닫기 시 사라진다 — 문구에 그 한계를 밝힌다.
+      setGenError(
+        "나머지 컷 생성에 실패했어요. 이미 만든 컷은 이 화면을 닫거나 새로고침하기 전까지만 보관돼요. 창을 닫지 말고 '이어서 만들기'를 눌러주세요"
+      );
     }
   }
 
