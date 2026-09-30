@@ -354,7 +354,11 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
               <div
                 draggable
                 onDragStart={(e) => e.dataTransfer.setData("text/plain", String(i))}
-                className="absolute max-w-[70%] cursor-move truncate rounded-full bg-white px-3 py-1 text-xs font-medium shadow"
+                onClick={() => {
+                  setEditingIndex(i);
+                  setDraftCaption(cut.caption.text);
+                }}
+                className="absolute max-w-[70%] cursor-pointer truncate rounded-full bg-white px-3 py-1 text-xs font-medium shadow"
                 style={POSITION_STYLE[cut.caption.position]}
                 title="끌어서 말풍선 위치를 옮길 수 있어요"
               >
