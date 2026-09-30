@@ -117,20 +117,34 @@ export async function generateCoverVariants(
   return { variants, requested };
 }
 
+export interface ChainedCutsCallbacks {
+  onCut?: (cutArrayIndex: number, cut: GeneratedCut) => void;
+  onProgress?: (done: number, total: number) => void;
+}
+
 // 표지 선택 이후 나머지 3컷 — continuationToken(previous_response_id) 체이닝으로
 // 순차 생성한다. 매 호출 전 이전 컷까지 generated_image를 채운 storyboard를
 // 넘겨야 generateCut의 nextUngeneratedCut()이 다음 컷을 정확히 고른다.
+// 이미 generated_image가 채워진 컷은 건너뛰고 첫 미생성 컷부터 이어간다 — 중간
+// 실패 뒤 재시도가 이미 유료로 만든 컷을 다시 만들지 않게(#104).
+// onCut: 컷 하나가 끝날 때마다 호출 — 호출부가 즉시 저장해 두면 다음 컷이
+// 실패해도 앞 컷을 잃지 않는다. onProgress(done, total): "1/3" 표시용(#138).
 export async function generateChainedCuts(
   storyboard: Storyboard,
   preset: Preset,
-  startContinueFrom: string
+  startContinueFrom: string,
+  { onCut, onProgress }: ChainedCutsCallbacks = {}
 ): Promise<GeneratedCut[]> {
   const referenceAssets = referenceAssetsOf(preset);
   const cuts = storyboard.cuts.map((c) => ({ ...c }));
   const results: GeneratedCut[] = [];
   let continueFrom: string | undefined = startContinueFrom;
+  const total = cuts.length - 1;
+  let done = cuts.slice(1).filter((c) => c.generated_image).length;
+  onProgress?.(done, total);
 
   for (let i = 1; i < cuts.length; i++) {
+    if (cuts[i].generated_image) continue;
     const raw = await callGenerateCut({
       storyboard: { ...storyboard, cuts },
       preset,
@@ -155,7 +169,10 @@ export async function generateChainedCuts(
       );
     }
 
-    results.push({ asset: raw.asset, image, continuationToken: raw.continuationToken });
+    const generated: GeneratedCut = { asset: raw.asset, image, continuationToken: raw.continuationToken };
+    results.push(generated);
+    onCut?.(i, generated);
+    onProgress?.(++done, total);
   }
 
   return results;

@@ -131,7 +131,7 @@ cuttoon-copilot/
 | 7. 소재 입력 | — | 있음 | 있음 | — |
 | 8. 브레인스토밍 3턴 | `POST /api/brainstorm` · `lib/llm/brainstorm.ts` | 연결됨 | 완료 | #119(턴 건너뛰기 PR #154로 완료. 흐름 턴 LLM 선택은 #157) |
 | 9. 표지컷 3안 | `kind: 'cover_variants'` | 연결됨 | 완료 | #102(닫힘) |
-| 10. 4컷 생성 | `POST /api/generate` 체이닝 | 연결됨 | 완료 | #103(닫힘) · #104(`generateChainedCuts` 1건 잔여, 2차 작업 10번) |
+| 10. 4컷 생성 | `POST /api/generate` 체이닝 | 연결됨 | 완료 | #103(닫힘) · #104(`generateChainedCuts` 중간 실패 시 만든 컷 보존·이어서 만들기 — 2차 작업 10번, 이 PR) · #138(나머지 3컷 진행률 "n/3" — 2차 작업 5번, 이 PR) |
 | 11. 대사 수정 · 드래그 | — | 있음 | 완료 | — |
 | 12. v2 저장 · 되돌리기 | `/api/session` `/version` `/revert` · 재진입 복원 | 연결됨 | 완료 | #143 |
 | 13. Export ZIP | `GET /api/session/export` | 연결됨 | 완료 | — |
