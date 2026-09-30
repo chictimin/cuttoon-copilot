@@ -61,19 +61,20 @@ const FALLBACK_QUESTION: Record<"protagonist" | "supporting", string> = {
   supporting: "함께 등장할 인물이 있나요?",
 };
 
-// F2 잠정 계약(OC-A 서버 확정 전, spec-llm-line.md F2절 기준). tone_id 3개
-// 문자열과 컷별 재생성 요청·응답 형태는 OC-A가 정해 전달하면 이 블록만 교체한다.
-// F4(컷 연출 enum)는 이 호출에 얹지 않는다 — QA 하네스에 F4 축이 추가되기 전이라
-// 보류(hero 지시).
+// F2 실물 계약(OC-A PR #188, spec-llm-line.md F2절). tone_id 3개 문자열·요청의
+// context{industry, interests, cta_format}·응답 fallbackCutIndexes·컷별 재생성
+// (같은 경로에 문맥+cut_index) 확정. F4(컷 연출 enum)는 얹지 않는다 — QA 하네스
+// F4 축 추가 PM 신호 전 보류(hero 지시).
 const CAPTIONS_ROUTE = "/api/session/captions";
 const CAPTION_TONES = [
   { id: "empathy", label: "공감형" },
   { id: "informative", label: "정보형" },
-  { id: "example", label: "사례형" },
+  { id: "case", label: "사례형" },
 ] as const;
 
 interface CaptionsResponse {
   captions?: Array<{ cut_index?: unknown; text?: unknown }>;
+  fallbackCutIndexes?: unknown;
 }
 
 function promptForCut(subject: string, cut: Cut): string {
@@ -131,7 +132,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // F2: 이미지 호출 전 생성 대사의 상태. "idle"이면 captions 단계 진입 시 1회 호출.
   const [captionStatus, setCaptionStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [captionError, setCaptionError] = useState<string | null>(null);
-  // F2: 유효 서버 대사를 받지 못해 기본 대사로 남은 컷 번호. "기본 대사" 표시에 쓴다.
+  // F2: 기본 대사로 남은 컷 번호(서버 fallbackCutIndexes 기준). "기본 대사" 표시에 쓴다.
   const [defaultCutIndexes, setDefaultCutIndexes] = useState<number[]>([]);
   const [regenCutIndex, setRegenCutIndex] = useState<number | null>(null);
   const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
@@ -327,7 +328,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   }, [step, storyboard, captionStatus]);
 
   // F2: 이미지 호출 전에 생성 대사를 받아 편집 화면에 둔다. preset 전체나
-  // 이미지·비밀값은 넘기지 않는다(spec-llm-line.md F2절).
+  // 이미지·비밀값은 넘기지 않는다(spec-llm-line.md F2절, OC-A PR #188).
   async function loadCaptions() {
     if (!storyboard || !preset || !toneId) return;
     setCaptionStatus("loading");
@@ -346,15 +347,20 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           context: {
             industry: preset.context.industry,
             interests: preset.context.interests,
+            cta_format: preset.rules.cta_format,
           },
-          rules: { cta_format: preset.rules.cta_format },
         }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error ?? "대사를 만들지 못했습니다");
       }
-      applyCaptions(((await res.json()) as CaptionsResponse).captions, storyboard.cuts.map((cut) => cut.cut_index));
+      const data = (await res.json()) as CaptionsResponse;
+      applyCaptions(
+        data.captions,
+        storyboard.cuts.map((cut) => cut.cut_index),
+        data.fallbackCutIndexes
+      );
       setCaptionStatus("ready");
     } catch {
       setCaptionError("대사를 만드는 데 실패했어요. 다시 시도해주세요");
@@ -362,10 +368,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     }
   }
 
-  // F2: 컷 인덱스 1~4별 유효 문자열만 채택한다. 유효 대사를 받지 못한 컷은
-  // 서버가 기본 대사로 채운 것으로 보고 기본 대사 목록에 남긴다. 다른 컷의
-  // 유효 대사·사용자 편집은 건드리지 않는다.
-  function applyCaptions(list: CaptionsResponse["captions"], cutIndexes: number[]) {
+  // F2: 컷 인덱스 1~4별 유효 문자열만 채택한다. 기본 대사 표시는 서버의
+  // fallbackCutIndexes를 쓰고, 없을 때만 유효 대사를 못 받은 컷으로 본다.
+  // 다른 컷의 유효 대사·사용자 편집은 건드리지 않는다.
+  function applyCaptions(
+    list: CaptionsResponse["captions"],
+    cutIndexes: number[],
+    fallback: CaptionsResponse["fallbackCutIndexes"]
+  ) {
     const valid = new Map<number, string>();
     if (Array.isArray(list)) {
       for (const entry of list) {
@@ -394,24 +404,42 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         ),
       };
     });
-    setDefaultCutIndexes(cutIndexes.filter((n) => !valid.has(n)));
+    setDefaultCutIndexes(
+      Array.isArray(fallback)
+        ? fallback.filter((n): n is number => typeof n === "number")
+        : cutIndexes.filter((n) => !valid.has(n))
+    );
   }
 
-  // F2: 컷별 다시 뽑기 — 그 컷만 교체한다. 사용자 편집·다른 컷은 보존한다.
+  // F2: 컷별 다시 뽑기 — 같은 경로에 문맥과 cut_index를 함께 보내 그 컷만
+  // 교체한다(OC-A PR #188). 대사만 바꾸고 사용자 편집·다른 컷은 보존한다.
   async function regenCutCaption(cutIndex: number) {
-    if (!storyboard) return;
+    if (!storyboard || !preset || !toneId) return;
     setRegenCutIndex(cutIndex);
     try {
       const res = await fetch(CAPTIONS_ROUTE, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cut_index: cutIndex }),
+        body: JSON.stringify({
+          subject,
+          flow: answers.flow ?? "",
+          beats: storyboard.cuts.map((cut) => cut.narrative_beat),
+          cast: storyboard.cast.map((member) => member.description),
+          tone_id: toneId,
+          context: {
+            industry: preset.context.industry,
+            interests: preset.context.interests,
+            cta_format: preset.rules.cta_format,
+          },
+          cut_index: cutIndex,
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error ?? "대사를 다시 뽑지 못했습니다");
       }
-      const list = ((await res.json()) as CaptionsResponse).captions;
+      const data = (await res.json()) as CaptionsResponse;
+      const list = data.captions;
       const entry = Array.isArray(list)
         ? list.find(
             (item): item is { cut_index: number; text: string } =>
@@ -433,7 +461,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           ),
         };
       });
-      setDefaultCutIndexes((prev) => prev.filter((n) => n !== cutIndex));
+      const fellBack =
+        Array.isArray(data.fallbackCutIndexes) && data.fallbackCutIndexes.includes(cutIndex);
+      setDefaultCutIndexes((prev) => {
+        const next = prev.filter((n) => n !== cutIndex);
+        if (fellBack) next.push(cutIndex);
+        return next;
+      });
     } catch {
       setCaptionError("그 컷 대사를 다시 뽑지 못했어요. 다시 시도해주세요");
     } finally {
