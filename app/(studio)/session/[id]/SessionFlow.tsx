@@ -110,10 +110,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // 2차 4번: 소재 후보(preset.context 기반 LLM 제안, #181). 후보는 선택지로만 보여주고
   // 자동으로 채택하지 않는다 — 누르면 입력창에 채워져 수정할 수 있다.
   const [subjectSuggestions, setSubjectSuggestions] = useState<string[] | null>(null);
-  const [suggestionsStub, setSuggestionsStub] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
-  const suggestAttemptRef = useRef(0);
   const [turnIndex, setTurnIndex] = useState(0);
   const [turns, setTurns] = useState<BrainstormTurn[] | null>(null);
   const [turnsError, setTurnsError] = useState<string | null>(null);
@@ -282,10 +280,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     setSuggesting(true);
     setSuggestError(null);
     try {
-      const result = await fetchSubjectSuggestions(presetId, preset, suggestAttemptRef.current);
-      suggestAttemptRef.current += 1;
-      setSubjectSuggestions(result.subjects);
-      setSuggestionsStub(result.stub === true);
+      setSubjectSuggestions(await fetchSubjectSuggestions(presetId));
     } catch {
       setSuggestError("소재 후보를 만드는 데 실패했어요. 다시 시도하거나 직접 적어주세요");
     } finally {
@@ -534,11 +529,6 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   {candidate}
                 </button>
               ))}
-              {suggestionsStub && (
-                <p className="text-xs text-zinc-400">
-                  임시 예시 후보예요 (소재 제안 서버 연결 전)
-                </p>
-              )}
             </div>
           )}
 
