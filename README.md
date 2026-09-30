@@ -102,7 +102,7 @@ cuttoon-copilot/
 | chictimin | `spec/`, `lib/llm/`, `app/(studio)/session/[id]/storyboard-assembly.ts`(컷 대사·연출 상수, #152), `app/api/brainstorm/`, `app/api/preset/`, `app/api/session/`, `app/api/upload/`, `lib/db/`, `lib/asset-store.ts` | 스키마 · 데이터 계약 · LLM · 백엔드. 데이터 계약(`spec/`) 변경 승인권자 |
 | JEON-DAEJIN | `app/(studio)/` (단 `session/[id]/storyboard-assembly.ts`는 제외) | 화면 전체 |
 | joniverse-ai | `lib/openai/`, `app/api/generate/`, `app/api/extract/` | 이미지 생성 · 추출 · 캐릭터 시트 |
-| smartman3514-commits | `lib/render/` | 렌더링 버그 수정(PR #163, #105) + QA 검증 |
+| smartman3514-commits | `lib/render/` | 렌더링 버그 수정(#105, #169, #170) + QA 검증 |
 
 1차에는 A①~B③ 6파트 체제였다. `docs/pipeline.md`는 각자 자기 영역 절을 고친다. `public/demo-cache/`는 아직 만들어지지 않았고 담당도 미정이다.
 
@@ -138,7 +138,7 @@ cuttoon-copilot/
 
 1차 추가 완료분: 화면 간 이동(#134), 프로젝트 이름 변경 · 비활성화(#161, `PATCH`/`DELETE /api/preset`), 흐름 템플릿 JSON 분리(PR #153).
 
-미머지(위 표에 미포함): PR #163 — 긴 대사에서 말풍선 꼬리 미노출 수정(`lib/render/compose.ts`), 리뷰 대기 중.
+2차 착수 전 머지: PR #163 — 말풍선 꼬리 길이를 목표점까지 거리 비율로 조정(`lib/render/compose.ts`).
 
 이 표는 손으로 갱신합니다. 단계를 완료하는 PR을 올릴 때 함께 고쳐주세요.
 
@@ -153,7 +153,7 @@ cuttoon-copilot/
 | 5 | 기능 | 나머지 3컷 생성 진행률 표시 | 품질 | 10-08 | JEON-DAEJIN | #138 |
 | 6 | 기능 | 브레인스토밍 흐름 턴 LLM 선택 | 품질 | 10-13 | chictimin | #157 |
 | 7 | 버그 | 숫자 소재가 이미지에 글자로 박힘 (수정 머지됨, 9/30 재실행 통과 — 근거 PR #165 리뷰 중) | 발표 필수 | 10-06 | joniverse-ai | #146 |
-| 8 | 버그 | 긴 대사에서 말풍선 꼬리 미노출 | 발표 필수 | 10-06 | smartman3514-commits | PR #163 |
+| 8 | 버그 | 긴 대사에서 말풍선 꼬리 미노출 (**해결** — main에서 재현 안 됨, 9/30 QA. 꼬리 길이 조정은 PR #163 머지) | 발표 필수 | 10-06 | smartman3514-commits | PR #163 |
 | 9 | 버그 | 크롭이 말풍선 여백을 깎을 수 있음 | 품질 | 10-08 | smartman3514-commits | #105 |
 | 10 | 버그 | 생성 결과 유실 방지 잔여분 (`generateChainedCuts`) | 품질 | 10-08 | JEON-DAEJIN | #104 |
 | 11 | 버그 | 아주 긴 대사 말풍선이 그림 오른쪽 밖으로 잘림 (`top_right`) | 품질 | 10-08 | smartman3514-commits | #169 |
