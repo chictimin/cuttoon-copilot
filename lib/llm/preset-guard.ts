@@ -56,6 +56,11 @@ export interface Preset {
     life_stage: LifeStage[];
     main_subjects: string[];
   };
+  /** 프로젝트 고정 마스코트(issue #150). 선택 필드 — 없으면 기존 동작 유지. */
+  mascot?: {
+    label: string;
+    description: string;
+  };
 }
 
 const ASSET_URI_PATTERN = /^asset:\/\//;
@@ -122,7 +127,7 @@ export function assertValidPreset(data: unknown): asserts data is Preset {
   if (typeof data !== "object" || data === null) fail("preset이 객체가 아님");
   const d = data as Record<string, unknown>;
 
-  const allowedTopKeys = ["preset_version", "project_name", "assets", "style", "rules", "context"];
+  const allowedTopKeys = ["preset_version", "project_name", "assets", "style", "rules", "context", "mascot"];
   const extraTop = Object.keys(d).filter((k) => !allowedTopKeys.includes(k));
   if (extraTop.length) {
     fail(`허용되지 않은 최상위 필드: ${extraTop.join(", ")} (additionalProperties: false)`);
@@ -213,6 +218,23 @@ export function assertValidPreset(data: unknown): asserts data is Preset {
   }
   if (!isStringArray(context.main_subjects)) {
     fail("context.main_subjects는 문자열 배열이어야 함");
+  }
+
+  // mascot (issue #150) — 선택 필드. 있으면 객체, label·description은 비어 있지
+  // 않은 문자열, 그 외 키는 금지한다.
+  if (d.mascot !== undefined) {
+    if (typeof d.mascot !== "object" || d.mascot === null) fail("mascot은 객체여야 함");
+    const mascot = d.mascot as Record<string, unknown>;
+    const extraMascot = Object.keys(mascot).filter((k) => k !== "label" && k !== "description");
+    if (extraMascot.length) {
+      fail(`mascot에 허용되지 않은 필드: ${extraMascot.join(", ")}`);
+    }
+    if (typeof mascot.label !== "string" || mascot.label.length < 1) {
+      fail("mascot.label은 비어 있지 않은 문자열이어야 함");
+    }
+    if (typeof mascot.description !== "string" || mascot.description.length < 1) {
+      fail("mascot.description은 비어 있지 않은 문자열이어야 함");
+    }
   }
 }
 
