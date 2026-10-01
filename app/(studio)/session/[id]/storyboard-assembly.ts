@@ -8,9 +8,8 @@
 // PRD.md 6절: "최대 3턴, 매 턴 선택지 3개 + 직접 쓸게 + 알아서 해줘. 종료 판정은
 // 필수 슬롯이 전부 찼는가로 결정적이어야 한다."
 
-import { pickShirtColor } from "@/lib/llm/session-cast";
+import { buildSessionCast, type MascotRef } from "@/lib/llm/session-cast";
 import { getBeatsForFlow, getFlowOptions } from "@/lib/llm/narrative-flow";
-import { NO_SUPPORTING_OPTION } from "@/lib/llm/brainstorm-options";
 import {
   defaultCaptionForBeat,
   defaultReservedZoneFor,
@@ -22,7 +21,7 @@ import {
   getSupportingDefault,
 } from "@/lib/llm/cut-defaults";
 import storyboardSchema from "@/spec/storyboard.schema.json";
-import type { CastMember, Cut, CutCharacter, NarrativeBeat, Storyboard } from "./storyboard-types";
+import type { Cut, CutCharacter, NarrativeBeat, Storyboard } from "./storyboard-types";
 
 // issue #119-2 (갈래 3): 흐름 템플릿 3종(키·beats 시퀀스)은 spec/data/narrative-flow.json
 // 으로 옮겼다 — 값은 하나도 안 바뀌었다(lib/llm/narrative-flow.ts 참고).
@@ -53,26 +52,29 @@ export interface BrainstormAnswers {
 export function assembleStoryboard(
   subject: string,
   answers: BrainstormAnswers,
-  palette: string[] = []
+  palette: string[] = [],
+  mascot?: MascotRef
 ): Storyboard {
   const beats = (getBeatsForFlow(answers.flow) ?? getBeatsForFlow(DEFAULT_FLOW_KEY)!) as NarrativeBeat[];
-  const hasSupporting = answers.supporting !== null && answers.supporting !== NO_SUPPORTING_OPTION;
   // 컷 기본값은 lib/llm/cut-defaults.ts 단일 출처에서 읽는다(captions.ts 폴백과 같은 값).
   const shotPlan = getCutShotPlan();
   const captionPositions = getCaptionPositions();
   const supportingCutIndex = getSupportingCutIndex();
 
-  const shirtColor = pickShirtColor(palette);
-  const protagonistDescription = shirtColor
-    ? [answers.protagonist, `상의 ${shirtColor}`].filter(Boolean).join(", ")
-    : answers.protagonist;
-
-  const cast: CastMember[] = [
-    { character_id: "protagonist", role: "protagonist", description: protagonistDescription },
-  ];
-  if (hasSupporting && answers.supporting) {
-    cast.push({ character_id: "supporting", role: "supporting", description: answers.supporting });
-  }
+  // cast는 C2(buildSessionCast)가 확정한다. mascot은 4번째 인자로만 받는다.
+  const { cast } = buildSessionCast({
+    protagonist: answers.protagonist,
+    supporting: answers.supporting,
+    mascot,
+    palette,
+  });
+  // 조연 유무는 답변이 아니라 cast로 본다 — 빈·공백 조연은 cast에 조연이 없어
+  // 3번째 컷에 cast에 없는 "supporting" id가 남지 않는다.
+  const hasSupporting = cast.some((member) => member.role === "supporting");
+  // 3번째 컷 조연의 character_id는 cast의 조연 값을 쓴다 — 마스코트면 mascot.label,
+  // 자유 입력이면 "supporting"이다(값은 cut-defaults 로더 그대로).
+  const supportingId =
+    cast.find((member) => member.role === "supporting")?.character_id ?? "supporting";
 
   const cuts: Cut[] = beats.map((beat, i) => {
     const ep = getBeatExpressionPose(beat) ?? { expression: "neutral", pose: "stand" };
@@ -87,7 +89,7 @@ export function assembleStoryboard(
     if (hasSupporting && i === supportingCutIndex - 1) {
       const supportingDefault = getSupportingDefault();
       charactersInFrame.push({
-        character_id: "supporting",
+        character_id: supportingId,
         expression: supportingDefault.expression as Cut["characters_in_frame"][number]["expression"],
         pose: supportingDefault.pose as Cut["characters_in_frame"][number]["pose"],
       });

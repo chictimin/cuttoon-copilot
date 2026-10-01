@@ -74,6 +74,21 @@ export async function getPreset(presetId: string): Promise<SavedPreset | null> {
   };
 }
 
+/**
+ * 프리셋 JSON(data) 전체를 교체한다. C7 mascot 갱신용 — 호출부가
+ * assertValidPreset으로 검증한 값을 받는다.
+ */
+export async function updatePresetData(presetId: string, preset: Preset): Promise<void> {
+  const { data, error } = await getDb()
+    .from("presets")
+    .update({ data: preset })
+    .eq("id", presetId)
+    .select("id");
+
+  if (error) throw new Error(`프리셋 갱신 실패: ${error.message}`);
+  if (!data?.length) throw new Error("존재하지 않는 프리셋입니다");
+}
+
 /** 프로젝트 이름만 바꾼다. project_name의 정본은 이 컬럼이다(issue #7). */
 export async function renameProject(projectId: string, name: string): Promise<void> {
   const { data, error } = await getDb()

@@ -5,6 +5,7 @@ import {
   listProjects,
   renameProject,
   savePreset,
+  updatePresetData,
 } from "@/lib/db/presets";
 
 export async function POST(request: Request) {
@@ -59,7 +60,13 @@ export async function GET(request: Request) {
   }
 }
 
-/** 프로젝트 이름 변경. body: { projectId, name } */
+/**
+ * 프로젝트 이름 변경 + mascot 갱신 (issue #150 C7).
+ * body: { projectId, name } (이름 변경, 현행 그대로)
+ *     | { id, mascot } (mascot 갱신. mascot: null이면 제거)
+ * - mascot은 저장된 프리셋에 합친 결과를 assertValidPreset으로 검증한 뒤 저장한다.
+ * - 두 키가 함께 오면 둘 다 수행한다.
+ */
 export async function PATCH(request: Request) {
   let body: unknown;
   try {
@@ -68,23 +75,82 @@ export async function PATCH(request: Request) {
     return Response.json({ error: "JSON 본문을 파싱할 수 없습니다" }, { status: 400 });
   }
 
-  const { projectId, name } = (body ?? {}) as Record<string, unknown>;
+  const { projectId, name, id, mascot } = (body ?? {}) as Record<string, unknown>;
+  const wantsMascot = "mascot" in (body as Record<string, unknown>) || "id" in (body as Record<string, unknown>);
+  const wantsRename = name !== undefined || (projectId !== undefined && !wantsMascot);
 
-  if (typeof projectId !== "string" || typeof name !== "string" || name.length === 0) {
+  if (!wantsRename && !wantsMascot) {
     return Response.json({ error: "projectId · name(빈 문자열 불가)이 필요합니다" }, { status: 400 });
   }
 
-  try {
-    await renameProject(projectId, name);
-    return Response.json({ projectId, name });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "프로젝트 이름 변경 실패";
-    console.error("[PATCH /api/preset] 이름 변경 실패:", e);
-    return Response.json(
-      { error: message },
-      { status: message.includes("존재하지 않는") ? 404 : 500 }
-    );
+  const result: Record<string, unknown> = {};
+
+  if (wantsRename) {
+    if (typeof projectId !== "string" || typeof name !== "string" || name.length === 0) {
+      return Response.json({ error: "projectId · name(빈 문자열 불가)이 필요합니다" }, { status: 400 });
+    }
+
+    try {
+      await renameProject(projectId, name);
+      result.projectId = projectId;
+      result.name = name;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "프로젝트 이름 변경 실패";
+      console.error("[PATCH /api/preset] 이름 변경 실패:", e);
+      return Response.json(
+        { error: message },
+        { status: message.includes("존재하지 않는") ? 404 : 500 }
+      );
+    }
   }
+
+  if (wantsMascot) {
+    if (typeof id !== "string" || id.length === 0) {
+      return Response.json({ error: "프리셋 id가 필요합니다" }, { status: 400 });
+    }
+    if (mascot !== null && (typeof mascot !== "object" || mascot === null)) {
+      return Response.json({ error: "mascot은 객체 또는 null이어야 합니다" }, { status: 400 });
+    }
+
+    let saved;
+    try {
+      saved = await getPreset(id);
+    } catch (e) {
+      console.error("[PATCH /api/preset] mascot 갱신용 프리셋 조회 실패:", e);
+      return Response.json({ error: "프리셋 조회에 실패했습니다" }, { status: 500 });
+    }
+    if (!saved) return Response.json({ error: "없음" }, { status: 404 });
+
+    const merged = { ...saved.preset };
+    if (mascot === null) {
+      delete merged.mascot;
+    } else {
+      merged.mascot = mascot as { label: string; description: string };
+    }
+    try {
+      assertValidPreset(merged);
+    } catch (e) {
+      return Response.json(
+        { error: e instanceof Error ? e.message : "프리셋 검증 실패" },
+        { status: 400 }
+      );
+    }
+
+    try {
+      await updatePresetData(id, merged);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "프리셋 갱신 실패";
+      console.error("[PATCH /api/preset] mascot 갱신 실패:", e);
+      return Response.json(
+        { error: message },
+        { status: message.includes("존재하지 않는") ? 404 : 500 }
+      );
+    }
+    result.presetId = id;
+    result.mascot = merged.mascot ?? null;
+  }
+
+  return Response.json(result);
 }
 
 /**

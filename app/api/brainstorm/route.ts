@@ -49,7 +49,23 @@ export async function POST(request: Request) {
       ? rawIndustry.filter((v): v is string => typeof v === "string")
       : [];
 
-    const { turns, flowSupplement } = await generateBrainstormTurns(trimmed, draft, { industry });
+    // 프로젝트 마스코트(issue #150 C5) — supporting 첫 후보 고정용. 형태가
+    // 어긋나면 무시하고 마스코트 없이 진행한다.
+    const rawMascot = (body.context as Record<string, unknown> | undefined)?.mascot;
+    const mascot =
+      typeof rawMascot === "object" &&
+      rawMascot !== null &&
+      typeof (rawMascot as Record<string, unknown>).label === "string" &&
+      ((rawMascot as Record<string, unknown>).label as string).length > 0 &&
+      typeof (rawMascot as Record<string, unknown>).description === "string" &&
+      ((rawMascot as Record<string, unknown>).description as string).length > 0
+        ? (rawMascot as { label: string; description: string })
+        : undefined;
+
+    const { turns, flowSupplement } = await generateBrainstormTurns(trimmed, draft, {
+      industry,
+      ...(mascot ? { mascot } : {}),
+    });
     // flowSupplement: flow 옵션 중 로컬 목록으로 보충한 위치. 화면은 서버가
     // 정규화한 flow 옵션을 사용한다(F1 계약).
     return Response.json({ turns, resolved: extracted?.resolved ?? [], flowSupplement });

@@ -71,6 +71,11 @@ export interface CaptionsRequest {
   cast: string[];
   tone_id: string;
   context: CaptionContext;
+  /**
+   * 조연 character_id (issue #150 C4). 마스코트 조연이면 mascot.label.
+   * 없으면 "supporting"(현행 호환).
+   */
+  supporting_id?: string;
 }
 
 export interface CutCaption {
@@ -131,9 +136,14 @@ function readVocabList(key: string): string[] {
 // storyboard-assembly.ts의 조립 기본값과 같은 값이다(issue #152 W1-a).
 
 // 조연은 CTA 직전 컷(supporting_cut_index)에만 함께 등장한다 — 조립과 같은 규칙.
-function expectedCharacterIds(cutIndex: number, hasSupporting: boolean): string[] {
+// supportingId는 조연 character_id(마스코트면 mascot.label, 없으면 "supporting")다.
+function expectedCharacterIds(
+  cutIndex: number,
+  hasSupporting: boolean,
+  supportingId = "supporting"
+): string[] {
   const ids = ["protagonist"];
-  if (hasSupporting && cutIndex === getSupportingCutIndex()) ids.push("supporting");
+  if (hasSupporting && cutIndex === getSupportingCutIndex()) ids.push(supportingId);
   return ids;
 }
 
@@ -141,7 +151,8 @@ function expectedCharacterIds(cutIndex: number, hasSupporting: boolean): string[
 function defaultDirection(
   cutIndex: 1 | 2 | 3 | 4,
   beat: string,
-  hasSupporting: boolean
+  hasSupporting: boolean,
+  supportingId = "supporting"
 ): CutDirection {
   const i = cutIndex - 1;
   const ep = getBeatExpressionPose(beat) ?? { expression: "neutral", pose: "stand" };
@@ -151,9 +162,9 @@ function defaultDirection(
   const characters: DirectionCharacter[] = [
     { character_id: "protagonist", expression: ep.expression, pose: ep.pose },
   ];
-  if (expectedCharacterIds(cutIndex, hasSupporting).includes("supporting")) {
+  if (expectedCharacterIds(cutIndex, hasSupporting, supportingId).includes(supportingId)) {
     characters.push({
-      character_id: "supporting",
+      character_id: supportingId,
       expression: supportingDefault.expression,
       pose: supportingDefault.pose,
     });
@@ -298,9 +309,10 @@ function validateDirection(
   raw: unknown,
   cutIndex: 1 | 2 | 3 | 4,
   beat: string,
-  hasSupporting: boolean
+  hasSupporting: boolean,
+  supportingId = "supporting"
 ): ValidatedDirection {
-  const fallback = defaultDirection(cutIndex, beat, hasSupporting);
+  const fallback = defaultDirection(cutIndex, beat, hasSupporting, supportingId);
   const reasons: string[] = [];
   const fields: DirectionFieldState = {
     shot_type: false,
@@ -368,14 +380,14 @@ function validateDirection(
   }
 
   const rawCharacters = Array.isArray(raw.characters) ? raw.characters : [];
-  const expected = expectedCharacterIds(cutIndex, hasSupporting);
+  const expected = expectedCharacterIds(cutIndex, hasSupporting, supportingId);
   for (const characterId of expected) {
     const entry = rawCharacters.find(
       (c): c is Record<string, unknown> => isRecord(c) && c.character_id === characterId
     );
     const base =
       fallback.characters.find((c) => c.character_id === characterId) ??
-      (characterId === "supporting"
+      (characterId === supportingId
         ? { character_id: characterId, ...getSupportingDefault() }
         : { character_id: characterId, expression: "neutral", pose: "stand" });
     if (!entry) {
@@ -486,13 +498,21 @@ function fieldRetryNeeded(validated: ValidatedDirection): boolean {
   return !isDirectionClean(validated);
 }
 
+/** 조연 character_id를 정한다. 없으면 "supporting"(현행 호환). */
+function resolveSupportingId(input: CaptionsRequest): string {
+  return typeof input.supporting_id === "string" && input.supporting_id.length > 0
+    ? input.supporting_id
+    : "supporting";
+}
+
 function buildPrompt(input: CaptionsRequest, wanted: number[]): string {
   const tone = getCaptionToneById(input.tone_id);
   const hasSupporting = input.cast.length > 1;
+  const supportingId = resolveSupportingId(input);
   const cutLines = wanted
     .map((i) => {
       const beat = input.beats[i - 1];
-      const ids = expectedCharacterIds(i, hasSupporting).join(", ");
+      const ids = expectedCharacterIds(i, hasSupporting, supportingId).join(", ");
       return `  - cut ${i}: narrative_beat "${beat}", character_id: ${ids}`;
     })
     .join("\n");
@@ -567,11 +587,12 @@ function buildRetryPrompt(
   reasons: string[]
 ): string {
   const hasSupporting = input.cast.length > 1;
+  const supportingId = resolveSupportingId(input);
   const wanted = [...new Set([...missingCaptions, ...missingDirections])].sort((a, b) => a - b);
   const cutLines = wanted
     .map((i) => {
       const beat = input.beats[i - 1];
-      const ids = expectedCharacterIds(i, hasSupporting).join(", ");
+      const ids = expectedCharacterIds(i, hasSupporting, supportingId).join(", ");
       const need: string[] = [];
       if (missingCaptions.includes(i)) need.push("대사");
       if (missingDirections.includes(i)) need.push("연출");
@@ -637,6 +658,7 @@ async function generateCaptionsForCuts(
   maxTokens: number
 ): Promise<CaptionsResult> {
   const hasSupporting = input.cast.length > 1;
+  const supportingId = resolveSupportingId(input);
   const firstContent = await callCaptionsModel(buildPrompt(input, wanted), maxTokens);
   const first = parseResponseObject(firstContent);
   const captionState = collectValidCaptions(first.captions, wanted);
@@ -653,7 +675,7 @@ async function generateCaptionsForCuts(
     const cutIndex = i as 1 | 2 | 3 | 4;
     directionByCut.set(
       i,
-      validateDirection(rawByCut.get(i), cutIndex, input.beats[i - 1], hasSupporting)
+      validateDirection(rawByCut.get(i), cutIndex, input.beats[i - 1], hasSupporting, supportingId)
     );
   }
 
@@ -692,7 +714,8 @@ async function generateCaptionsForCuts(
         retryRawByCut.get(i),
         cutIndex,
         input.beats[i - 1],
-        hasSupporting
+        hasSupporting,
+        supportingId
       );
       // 재요청 응답도 유효한 필드만 합친다.
       directionByCut.set(

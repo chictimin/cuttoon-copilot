@@ -12,6 +12,8 @@ import {
   NO_SUPPORTING_OPTION,
   PROTAGONIST_QUESTION,
   SUPPORTING_QUESTION,
+  mascotOption,
+  type MascotRef,
 } from "./brainstorm-options";
 import { getFlowOptions } from "./narrative-flow";
 import {
@@ -95,7 +97,8 @@ function areAllSlotsComplete(draft?: DraftStoryboard): boolean {
  *
  * @param subject 소재
  * @param draft 부분 채워진 storyboard (있으면 이미 채워진 턴은 건너뜀)
- * @param context 프로젝트 문맥 (industry: 문자열 배열, 없으면 빈 배열)
+ * @param context 프로젝트 문맥 (industry: 문자열 배열, 없으면 빈 배열.
+ *   mascot이 있으면 supporting 첫 후보로 고정)
  * @returns 생성할 턴 배열(최대 3개, 이미 채워진 것은 제외)과 flow 로컬 보충 정보
  */
 export interface FlowSupplement {
@@ -261,6 +264,13 @@ function validateTurns(
         reasons.push(`"${key}" options[${i}]이 중복 키`);
         continue;
       }
+      // supporting도 중복을 제거하고 센다 — [NO,NO,NO]나 중복 후보가 3개로
+      // 통과해 withMascotFirst 결과가 2개가 되는 것을 막는다. 3개 미만이면
+      // 아래 개수 검사에서 무효가 되어 기존 1회 재요청 경로를 탄다.
+      if (key === "supporting" && normalized.includes(opt)) {
+        reasons.push(`"${key}" options[${i}]이 중복`);
+        continue;
+      }
       normalized.push(opt);
     }
 
@@ -398,10 +408,38 @@ function supplementFlowOptions(valid: string[], flowKeys: string[]): {
   return { options, supplementedIndexes };
 }
 
+/** 쓸 수 있는 마스코트인지(둘 다 비어 있지 않은 문자열). route가 무효는 미리 거른다. */
+function isUsableMascot(mascot: MascotRef | undefined): mascot is MascotRef {
+  return (
+    !!mascot &&
+    typeof mascot.label === "string" &&
+    mascot.label.length > 0 &&
+    typeof mascot.description === "string" &&
+    mascot.description.length > 0
+  );
+}
+
+/**
+ * supporting 옵션 맨 앞에 마스코트 후보를 결정적으로 넣는다(issue #150 C5).
+ * 모델이 만들게 하지 않고, 결과는 3개 — 마스코트 + 모델 후보에서 마스코트
+ * 문자열·NO를 뺀 첫 고유 후보 1개 + NO_SUPPORTING_OPTION. 검증에서 중복을
+ * 제거하고 3개를 세므로(위 validateTurns) 모델 후보는 항상 살아 있다.
+ */
+function withMascotFirst(options: string[], mascot: MascotRef): string[] {
+  const mascotStr = mascotOption(mascot);
+  let pick: string | undefined;
+  for (const o of options) {
+    if (o === mascotStr || o === NO_SUPPORTING_OPTION) continue;
+    pick = o;
+    break;
+  }
+  return pick === undefined ? [mascotStr, NO_SUPPORTING_OPTION] : [mascotStr, pick, NO_SUPPORTING_OPTION];
+}
+
 export async function generateBrainstormTurns(
   subject: string,
   draft?: DraftStoryboard,
-  context?: { industry: string[] }
+  context?: { industry: string[]; mascot?: MascotRef }
 ): Promise<BrainstormResult> {
   // 모든 슬롯이 이미 채워졌으면 빈 배열 반환 (종료)
   if (areAllSlotsComplete(draft)) {
@@ -424,6 +462,7 @@ export async function generateBrainstormTurns(
   const flowKeys = getFlowOptions();
   const trimmedSubject = subject.trim();
   const industry = context?.industry ?? [];
+  const mascot = isUsableMascot(context?.mascot) ? context?.mascot : undefined;
 
   // 1차 호출 (기존 흐름 1회 호출에 F1을 실어 추가 호출을 피한다)
   const firstContent = await callBrainstormModel(
@@ -477,6 +516,17 @@ export async function generateBrainstormTurns(
   for (const key of turnsToGenerate) {
     const v = byKey.get(key);
     if (v?.turn && key !== "flow") {
+      // supporting은 마스코트가 있으면 첫 후보를 마스코트로 고정한다.
+      // 검증(3개·NO 포함)을 통과한 모델 옵션을 재료로 쓰므로 규칙과 충돌하지 않는다.
+      if (key === "supporting" && mascot) {
+        turns.push({
+          key,
+          question: v.turn.question,
+          options: withMascotFirst(v.turn.options, mascot),
+        });
+        console.info("[brainstorm-mascot] supporting 첫 후보 마스코트 고정");
+        continue;
+      }
       turns.push(v.turn);
       continue;
     }
