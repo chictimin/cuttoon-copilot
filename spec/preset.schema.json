@@ -103,7 +103,7 @@
           "type": "array",
           "items": { "type": "string" },
           "uniqueItems": true,
-          "description": "네거티브 요소. 단어 단위 태그 — enum 아님. 프롬프트 조립 시 미매핑 단어 위험 있음(검증 로직 미정)"
+          "description": "네거티브 요소. 단어 단위 태그 — enum 아님. 프롬프트 조립 시 미매핑 단어 위험 있음(정책 #15 확정, 프롬프트 경로 연결은 #125 OPEN)"
         },
         "cta_format": {
           "type": "string",
