@@ -60,7 +60,7 @@ flowchart TD
 | 4 | 응답의 `resolved` | `SessionFlow.tsx` `loadTurns` | `setAnswers`로 선반영 (#154) |
 | 5 | `recordAnswer` 반복 | `SessionFlow.tsx:190` | 3턴(또는 축소된 턴) 완료 시 `assembling`으로 전이 |
 | 6 | assembling effect | `SessionFlow.tsx:262` | `assembleStoryboard`(`storyboard-assembly.ts:85`) |
-| 7 | `assembleStoryboard` 내부 | `storyboard-assembly.ts` | `pickShirtColor`(`session-cast.ts:63`, #148), `getBeatsForFlow`/`getFlowOptions`(`narrative-flow.ts`, #153) |
+| 7 | `assembleStoryboard` 내부 | `storyboard-assembly.ts` | `buildSessionCast`(`session-cast.ts:75`, #150), `getBeatsForFlow`/`getFlowOptions`(`narrative-flow.ts`, #153) |
 | 8 | 대사 생성(F2) | `loadCaptions`(`SessionFlow.tsx:389`) | `POST /api/session/captions` — tone 단계 선택값 + subject·flow·beats·cast·context를 보내 4컷 대사와 연출(F4)을 받고 `applyCaptions`·`applyDirections`로 조립 컷에 반영. 컷별 다시 뽑기 `regenCutCaption`(:485)은 같은 경로에 `cut_index`를 함께 보냄 |
 | 9 | `loadCoverVariants` | `SessionFlow.tsx:291` | `POST /api/generate { kind:'cover_variants', storyboard, preset, referenceAssets }` — 이미지 생성 경계 |
 | 10 | `handleSelectCover` | `SessionFlow.tsx:306` | `generateChainedCuts`(`generate-client.ts`, 화면) → `POST /api/generate { kind:'cut', ... }` × 3 — 이미지 생성 경계 |
@@ -314,7 +314,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 | 함수 | 위치 | 실제 호출자 | 관련 이슈 |
 |---|---|---|---|
-| `buildSessionCast` | `lib/llm/session-cast.ts:71` | 없음 | #150 |
+| `buildSessionCast` | `lib/llm/session-cast.ts:75` | `assembleStoryboard`(`storyboard-assembly.ts:55`) | #150 |
 | `mergeStyleValues` | `lib/llm/style-merge.ts:77` | 없음 | #151 |
 | `checkUnmappedWordsPolicy` | `lib/llm/preset-guard.ts:333` | `preset-guard.demo.ts`(데모 스크립트)뿐 — 실제 파이프라인 경로 없음 | #125 |
 
