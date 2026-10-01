@@ -19,6 +19,7 @@
 import {
   LLM_REQUEST_TIMEOUT_MS,
   OBSERVED_LIMITS,
+  describeContext,
   logObservedLength,
   normalizeModelString,
 } from "./model-text";
@@ -112,11 +113,6 @@ function collectValid(rawItems: unknown[], already: string[]): string[] {
     if (!out.includes(text)) out.push(text);
   }
   return out;
-}
-
-function describeContext(label: string, values: string[]): string {
-  if (values.length === 0) return `${label}: (비어 있음 — 억지로 채우지 마시오)`;
-  return `${label}:\n${values.map((v) => `- ${v}`).join("\n")}`;
 }
 
 function buildPrompt(input: SubjectSuggestionInput): string {

@@ -5,8 +5,8 @@
 // 데이터 파일로 분리")이 이 분리를 요구한다.
 //
 // 이 파일은 FLOW_BEATS·FLOW_OPTIONS만 다룬다. BEAT_EXPRESSION_POSE·CUT_SHOT_PLAN·
-// CAPTION_POSITIONS는 #152(도메인·톤 하드코딩 전수 리스트업) B항목 몫이라 건드리지
-// 않는다.
+// CAPTION_POSITIONS는 #152에서 spec/data/cut-defaults.json +
+// lib/llm/cut-defaults.ts로 분리됐다(조립·폴백이 같은 값을 읽는다).
 //
 // cta-presets.ts(#5)와 같은 패턴 — ajv 없이 손으로 짠 가드, 모듈 로드 시점 fail-fast.
 

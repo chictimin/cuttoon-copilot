@@ -9,12 +9,18 @@ import type { Preset } from "@/lib/llm/preset-guard";
 import type { BrainstormTurn, ExtractedSlot } from "@/lib/llm/brainstorm";
 // brainstorm.ts와는 별개 파일이다 — OPENAI_API_KEY를 쓰지 않는 순수 상수라
 // 값으로 import해도 위 규칙에 안 걸린다(lib/llm/brainstorm-options.ts 참고).
-import { NO_SUPPORTING_OPTION } from "@/lib/llm/brainstorm-options";
+import {
+  FLOW_QUESTION,
+  NO_SUPPORTING_OPTION,
+  PROTAGONIST_QUESTION,
+  SUPPORTING_QUESTION,
+} from "@/lib/llm/brainstorm-options";
+// caption-tones.ts도 JSON 로더라 OPENAI_API_KEY를 쓰지 않아 클라이언트에서 안전하다.
+import { loadCaptionTones } from "@/lib/llm/caption-tones";
 import {
   assembleStoryboard,
   applyCutDirections,
   FLOW_OPTIONS,
-  FLOW_QUESTION,
   type BrainstormAnswers,
 } from "./storyboard-assembly";
 import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
@@ -66,8 +72,8 @@ function normalizeTurns(turns: BrainstormTurn[]): BrainstormTurn[] {
 }
 
 const FALLBACK_QUESTION: Record<"protagonist" | "supporting", string> = {
-  protagonist: "주인공은 누구인가요?",
-  supporting: "함께 등장할 인물이 있나요?",
+  protagonist: PROTAGONIST_QUESTION,
+  supporting: SUPPORTING_QUESTION,
 };
 
 function normalizeFlowTurn(turn: BrainstormTurn | undefined): BrainstormTurn {
@@ -86,11 +92,8 @@ function normalizeFlowTurn(turn: BrainstormTurn | undefined): BrainstormTurn {
 // fallbackDirectionCuts를 받아 검증된 연출만 조립된 컷에 적용한다. 컷별 다시
 // 뽑기는 그 컷의 대사+연출을 함께 교체한다.
 const CAPTIONS_ROUTE = "/api/session/captions";
-const CAPTION_TONES = [
-  { id: "empathy", label: "공감형" },
-  { id: "informative", label: "정보형" },
-  { id: "case", label: "사례형" },
-] as const;
+// 톤 목록은 spec/data/caption-tones.json 단일 출처에서 읽는다.
+const CAPTION_TONES = loadCaptionTones();
 
 interface CaptionsResponse {
   captions?: Array<{ cut_index?: unknown; text?: unknown }>;
@@ -298,7 +301,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       const res = await fetch("/api/brainstorm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: trimmed }),
+        body: JSON.stringify({
+          subject: trimmed,
+          context: { industry: preset?.context.industry ?? [] },
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);

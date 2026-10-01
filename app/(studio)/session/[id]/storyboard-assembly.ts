@@ -11,62 +11,29 @@
 import { pickShirtColor } from "@/lib/llm/session-cast";
 import { getBeatsForFlow, getFlowOptions } from "@/lib/llm/narrative-flow";
 import { NO_SUPPORTING_OPTION } from "@/lib/llm/brainstorm-options";
+import {
+  defaultCaptionForBeat,
+  defaultReservedZoneFor,
+  getBeatExpressionPose,
+  getCaptionPositions,
+  getCutShotPlan,
+  getFirstCutTimeOfDay,
+  getSupportingCutIndex,
+  getSupportingDefault,
+} from "@/lib/llm/cut-defaults";
 import storyboardSchema from "@/spec/storyboard.schema.json";
 import type { CastMember, Cut, CutCharacter, NarrativeBeat, Storyboard } from "./storyboard-types";
 
 // issue #119-2 (갈래 3): 흐름 템플릿 3종(키·beats 시퀀스)은 spec/data/narrative-flow.json
-// 으로 옮겼다 — 값은 하나도 안 바뀌었다(lib/llm/narrative-flow.ts 참고). 흐름 선택은
-// 자유 텍스트가 아니라 NarrativeBeat 템플릿을 고르는 것이라(storyboard.schema.json의
-// narrative_beat enum), 이 턴만은 여전히 LLM 생성 선택지를 쓰지 않고 데이터 파일의
-// 키를 그대로 화면에 낸다 — 키가 어긋나면 아래 조립이 조용히 첫 템플릿으로 폴백해
-// 흐름 선택이 무의미해진다. LLM이 이 키를 직접 고르게 하는 것은 #113/#133 판정
-// 케이스(흐름 3종 전제, 케이스 2·4 아직 미실행)와 얽혀 있어 이번 변경 범위 밖이다.
+// 으로 옮겼다 — 값은 하나도 안 바뀌었다(lib/llm/narrative-flow.ts 참고).
+// F1(spec-llm-line.md F1절): flow 턴 선택지는 서버가 허용 키 안에서 고르게 하고
+// 무효 키는 거부한다 — validateTurns가 비허용·빈자리 사유를 붙여 최대 1회 재요청하고,
+// 그래도 모자란 자리는 supplementFlowOptions가 로컬 목록에서 채운다. 아래 조립의
+// DEFAULT_FLOW_KEY 폴백은 그 뒤의 안전망이다.
 const DEFAULT_FLOW_KEY = "문제 제기 → 이전 상황 → 해결 → CTA";
 
 /** 화면의 flow 턴 선택지. narrative-flow.json의 키와 항상 일치한다. */
 export const FLOW_OPTIONS = getFlowOptions();
-
-export const FLOW_QUESTION = "어떤 흐름으로 풀어볼까요?";
-
-const BEAT_EXPRESSION_POSE: Record<NarrativeBeat, { expression: Cut["characters_in_frame"][number]["expression"]; pose: Cut["characters_in_frame"][number]["pose"] }> = {
-  hook: { expression: "surprised", pose: "stand" },
-  problem: { expression: "worried", pose: "sit" },
-  solution: { expression: "determined", pose: "stand" },
-  cta: { expression: "laugh", pose: "walk" },
-  question: { expression: "worried", pose: "stand" },
-  fact: { expression: "neutral", pose: "stand" },
-  benefit: { expression: "smile", pose: "arms_up" },
-  before: { expression: "tired", pose: "slump" },
-  turning: { expression: "determined", pose: "point" },
-  after: { expression: "relieved", pose: "stretch" },
-};
-
-const BEAT_CAPTION: Record<NarrativeBeat, (subject: string) => string> = {
-  hook: (s) => `${s}, 이거 알고 계셨나요?`,
-  problem: (s) => `${s} 때문에 정말 힘들었어요`,
-  before: () => "이러다 안 되겠다 싶었죠",
-  turning: () => "그러다 방법을 하나 찾았어요",
-  solution: () => "이렇게 하니까 확실히 달라졌어요",
-  after: () => "지금은 훨씬 편해졌어요",
-  benefit: () => "이 방법의 진짜 효과는 따로 있어요",
-  fact: () => "사실은 이런 이유가 있었어요",
-  question: (s) => `${s}, 왜 그런 걸까요?`,
-  cta: () => "지금 바로 확인해보세요",
-};
-
-const CUT_SHOT_PLAN: { shot_type: Cut["shot_type"]; camera_angle: Cut["camera_angle"] }[] = [
-  { shot_type: "closeup", camera_angle: "eye" },
-  { shot_type: "full", camera_angle: "eye" },
-  { shot_type: "waist", camera_angle: "eye" },
-  { shot_type: "wide", camera_angle: "low" },
-];
-
-const CAPTION_POSITIONS: Cut["caption"]["position"][] = [
-  "top_left",
-  "top_right",
-  "top_left",
-  "top_left",
-];
 
 export interface BrainstormAnswers {
   protagonist: string;
@@ -90,6 +57,10 @@ export function assembleStoryboard(
 ): Storyboard {
   const beats = (getBeatsForFlow(answers.flow) ?? getBeatsForFlow(DEFAULT_FLOW_KEY)!) as NarrativeBeat[];
   const hasSupporting = answers.supporting !== null && answers.supporting !== NO_SUPPORTING_OPTION;
+  // 컷 기본값은 lib/llm/cut-defaults.ts 단일 출처에서 읽는다(captions.ts 폴백과 같은 값).
+  const shotPlan = getCutShotPlan();
+  const captionPositions = getCaptionPositions();
+  const supportingCutIndex = getSupportingCutIndex();
 
   const shirtColor = pickShirtColor(palette);
   const protagonistDescription = shirtColor
@@ -104,13 +75,22 @@ export function assembleStoryboard(
   }
 
   const cuts: Cut[] = beats.map((beat, i) => {
-    const { expression, pose } = BEAT_EXPRESSION_POSE[beat];
+    const ep = getBeatExpressionPose(beat) ?? { expression: "neutral", pose: "stand" };
     const charactersInFrame: Cut["characters_in_frame"] = [
-      { character_id: "protagonist", expression, pose },
+      {
+        character_id: "protagonist",
+        expression: ep.expression as Cut["characters_in_frame"][number]["expression"],
+        pose: ep.pose as Cut["characters_in_frame"][number]["pose"],
+      },
     ];
-    // 조연은 CTA 직전 컷(3번째)에만 함께 등장시킨다 — 흐름 템플릿 3종 공통 규칙
-    if (hasSupporting && i === 2) {
-      charactersInFrame.push({ character_id: "supporting", expression: "smile", pose: "point" });
+    // 조연은 CTA 직전 컷(supporting_cut_index)에만 함께 등장시킨다 — 흐름 템플릿 3종 공통 규칙
+    if (hasSupporting && i === supportingCutIndex - 1) {
+      const supportingDefault = getSupportingDefault();
+      charactersInFrame.push({
+        character_id: "supporting",
+        expression: supportingDefault.expression as Cut["characters_in_frame"][number]["expression"],
+        pose: supportingDefault.pose as Cut["characters_in_frame"][number]["pose"],
+      });
     }
 
     const cutIndex = (i + 1) as Cut["cut_index"];
@@ -118,16 +98,16 @@ export function assembleStoryboard(
     return {
       cut_index: cutIndex,
       narrative_beat: beat,
-      shot_type: CUT_SHOT_PLAN[i].shot_type,
-      camera_angle: CUT_SHOT_PLAN[i].camera_angle,
-      ...(i === 0 ? { time_of_day: "morning" as const } : {}),
+      shot_type: shotPlan[i].shot_type as Cut["shot_type"],
+      camera_angle: shotPlan[i].camera_angle as Cut["camera_angle"],
+      ...(i === 0 ? { time_of_day: getFirstCutTimeOfDay() as Cut["time_of_day"] } : {}),
       characters_in_frame: charactersInFrame,
       caption: {
-        text: BEAT_CAPTION[beat](subject),
+        text: defaultCaptionForBeat(beat, subject),
         bubble_type: "rounded",
-        position: CAPTION_POSITIONS[i],
+        position: captionPositions[i] as Cut["caption"]["position"],
       },
-      reserved_zone: CAPTION_POSITIONS[i].startsWith("top") ? "top" : "bottom",
+      reserved_zone: defaultReservedZoneFor(captionPositions[i]) as Cut["reserved_zone"],
       ...(beat === "cta" ? { cta_override: null } : {}),
       generated_image: null,
       prompt_used: null,
@@ -143,9 +123,9 @@ export function assembleStoryboard(
 }
 
 // F4(spec-llm-line.md F4절, OC-A F2+F4 단일 API): 서버 연출안을 검증된 것만
-// 조립된 컷에 적용한다. BEAT_EXPRESSION_POSE·CUT_SHOT_PLAN·CAPTION_POSITIONS·
-// 1컷 morning 기본값은 유지하고, fallback 목록에 든 컷·무효 항목은 건드리지
-// 않는다. 등장인물 수·역할·narrative_beat·컷 순서·CTA 위치는 바꾸지 않는다 —
+// 조립된 컷에 적용한다. 컷 기본값(beat별 표정·포즈, 4컷 샷·앵글, 캡션 위치,
+// 조연 기본값·등장 컷, 1컷 time_of_day)은 lib/llm/cut-defaults.ts 단일 출처에서
+// 읽고, fallback 목록에 든 컷·무효 항목은 건드리지 않는다. 등장인물 수·역할·narrative_beat·컷 순서·CTA 위치는 바꾸지 않는다 —
 // characters는 해당 컷에 이미 있는 character_id의 표정·포즈만 바꾼다.
 // caption_position은 caption.position에 대응하고 bubble_type은 다루지 않는다.
 // 허용값은 storyboard.schema.json의 enum에서 읽는다(하드코딩 아님).

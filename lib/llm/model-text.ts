@@ -67,6 +67,15 @@ export function normalizeModelString(value: unknown): string | null {
   return out;
 }
 
+/**
+ * 프롬프트에 넣을 문맥 한 줄을 만든다. 비어 있으면 억지로 채우지 말고
+ * 비어 있음을 밝힌다. subject-suggestions.ts·brainstorm.ts가 함께 쓴다.
+ */
+export function describeContext(label: string, values: string[]): string {
+  if (values.length === 0) return `${label}: (비어 있음 — 억지로 채우지 마시오)`;
+  return `${label}:\n${values.map((v) => `- ${v}`).join("\n")}`;
+}
+
 /** 관찰 기준 초과를 로그에 남긴다. 원문은 남기지 않고 길이·위치만 남긴다. */
 export function logObservedLength(
   scope: string,

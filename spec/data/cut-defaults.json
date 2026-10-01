@@ -1,0 +1,37 @@
+{
+  "cut_defaults_version": "1.0",
+  "beat_expression_pose": {
+    "hook": { "expression": "surprised", "pose": "stand" },
+    "problem": { "expression": "worried", "pose": "sit" },
+    "solution": { "expression": "determined", "pose": "stand" },
+    "cta": { "expression": "laugh", "pose": "walk" },
+    "question": { "expression": "worried", "pose": "stand" },
+    "fact": { "expression": "neutral", "pose": "stand" },
+    "benefit": { "expression": "smile", "pose": "arms_up" },
+    "before": { "expression": "tired", "pose": "slump" },
+    "turning": { "expression": "determined", "pose": "point" },
+    "after": { "expression": "relieved", "pose": "stretch" }
+  },
+  "beat_caption_templates": {
+    "hook": "{subject}, 이거 알고 계셨나요?",
+    "problem": "{subject} 때문에 정말 힘들었어요",
+    "before": "이러다 안 되겠다 싶었죠",
+    "turning": "그러다 방법을 하나 찾았어요",
+    "solution": "이렇게 하니까 확실히 달라졌어요",
+    "after": "지금은 훨씬 편해졌어요",
+    "benefit": "이 방법의 진짜 효과는 따로 있어요",
+    "fact": "사실은 이런 이유가 있었어요",
+    "question": "{subject}, 왜 그런 걸까요?",
+    "cta": "지금 바로 확인해보세요"
+  },
+  "cut_shot_plan": [
+    { "shot_type": "closeup", "camera_angle": "eye" },
+    { "shot_type": "full", "camera_angle": "eye" },
+    { "shot_type": "waist", "camera_angle": "eye" },
+    { "shot_type": "wide", "camera_angle": "low" }
+  ],
+  "caption_positions": ["top_left", "top_right", "top_left", "top_left"],
+  "supporting_default": { "expression": "smile", "pose": "point" },
+  "supporting_cut_index": 3,
+  "first_cut_time_of_day": "morning"
+}
