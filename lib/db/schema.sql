@@ -112,6 +112,10 @@ create table if not exists assets (
 -- PRD.md 6절: 저장 규칙만 지키면 나중에 읽는 코드만 붙이면 된다.
 -- 표지컷 3안 중 무엇을 골랐는지가 쌓이면 프리셋 승격 규칙을 만들 수 있지만,
 -- 그 판정 로직은 지금 만들지 않는다.
+-- 계약(issue #207): 한 행 = 화면에 보여준 후보 한 묶음(라운드).
+-- variant_index = 고른 위치(버리면 null). (session_id, cut_index, round)은
+-- 유일하다. 나중에 프리셋 승격 규칙(D, reference_asset_ids)이
+-- sessions.preset_id로 묶어 읽는다(#202).
 create table if not exists selections (
   id             uuid primary key default gen_random_uuid(),
   session_id     uuid not null references sessions(id) on delete cascade,
@@ -149,3 +153,33 @@ drop trigger if exists sessions_set_updated_at on sessions;
 create trigger sessions_set_updated_at
   before update on sessions
   for each row execute function set_updated_at();
+
+-- issue #207: 표지 선택 기록 — 고른 안·버린 안을 세션 저장 때 함께 남긴다.
+-- 계약: 한 행 = 화면에 보여준 후보 한 묶음(라운드). variant_index = 고른 위치
+-- (버린 라운드면 null). (session_id, cut_index, round)은 유일하다. 나중에
+-- 프리셋 승격 규칙(D, reference_asset_ids)이 sessions.preset_id로 묶어 읽는다.
+alter table selections add column if not exists round            integer;
+alter table selections add column if not exists candidate_assets jsonb not null default '[]'::jsonb;
+alter table selections add column if not exists requested_count  integer;
+alter table selections add column if not exists selected_asset   text;
+alter table selections add column if not exists outcome          text;
+alter table selections add column if not exists occurred_at      timestamptz;
+alter table selections alter column variant_index drop not null;
+-- outcome은 'selected'·'regenerated'·null만, round는 null·1 이상만 허용한다.
+-- add constraint에 if not exists가 없어 duplicate_object를 삼키는 do 블록으로
+-- 재실행 안전하게 만든다(위 add column if not exists와 같은 패턴).
+do $$ begin
+  alter table selections add constraint selections_outcome_check
+    check (outcome is null or outcome in ('selected', 'regenerated'));
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter table selections add constraint selections_round_check
+    check (round is null or round >= 1);
+exception when duplicate_object then null;
+end $$;
+-- where 절 없는 무조건 유일 인덱스다. 기존 행의 round는 전부 null이라 Postgres의
+-- null-서로-다름 규칙으로 서로 충돌하지 않는다. PostgREST의 on_conflict(upsert)가
+-- 조건부 부분 인덱스를 지정할 수 없어 무조건 인덱스로 둔다.
+create unique index if not exists selections_session_cut_round_uidx
+  on selections (session_id, cut_index, round);
