@@ -31,6 +31,14 @@ export const SELECTION_RETRY_DELAYS_MS = [200, 400, 800] as const;
 /** 최대 3회 재시도 = 총 4번 시도. */
 export const SELECTION_MAX_RETRIES = 3;
 
+/**
+ * 시도별 요청 타임아웃. 소량 insert라 3초면 충분하고, 저장 버튼 응답성을 위해
+ * 이 이상 기다리지 않는다. 연결이 매달리면 실패 자체가 오지 않아 재시도도 안
+ * 걸리므로, 시도마다 끊어 주어야 한다. 최악 대기 = 4×3초(시도) + 1.4초(백오프)
+ * = 13.4초.
+ */
+export const SELECTION_ATTEMPT_TIMEOUT_MS = 3000;
+
 export type SelectionSleep = (ms: number) => Promise<void>;
 
 const defaultSleep: SelectionSleep = (ms) =>
@@ -62,7 +70,9 @@ export interface SelectionFailure {
  *
  * 재시도 대상 = status 0(연결 실패)·HTTP 5xx·code ''(네트워크 계열 메시지에 한함)·
  * PGRST5xx. 그 외 4xx·PG 23xxx·22xxx 등 제약·형식 위반은 재시도하지 않는다 —
- * 다시 보내도 같은 자리에서 실패한다.
+ * 다시 보내도 같은 자리에서 실패한다. 시도 타임아웃(AbortSignal.timeout)도
+ * code ''·status 0으로 돌아오므로(PostgrestTransformBuilder.abortSignal TSDoc의
+ * Set a timeout 예시 응답) 일시 오류로 분류돼 재시도된다.
  */
 export function isTransientSelectionError(failure: SelectionFailure | null | undefined): boolean {
   if (!failure) return false;
@@ -130,7 +140,11 @@ export async function insertSelections(
       .upsert(rows, {
         onConflict: "session_id,cut_index,round",
         ignoreDuplicates: true,
-      });
+      })
+      // 시도마다 타임아웃을 건다(.abortSignal은 PostgrestTransformBuilder의 실재
+      // API다 — src/PostgrestTransformBuilder.ts). 매달린 연결을 끊어야 위
+      // 재시도 분류가 동작한다.
+      .abortSignal(AbortSignal.timeout(SELECTION_ATTEMPT_TIMEOUT_MS));
 
     if (!error) return;
 

@@ -114,7 +114,8 @@ create table if not exists assets (
 -- 그 판정 로직은 지금 만들지 않는다.
 -- 계약(issue #207): 한 행 = 화면에 보여준 후보 한 묶음(라운드).
 -- variant_index = 고른 위치(버리면 null). (session_id, cut_index, round)은
--- 유일하다. 나중에 프리셋 승격 규칙(D, reference_asset_ids)이
+-- 유일하다. requested_count는 요청 안 수이고 실제 후보 수와 다를 수 있다
+-- (일부만 생성돼도 묶음은 한 행). 나중에 프리셋 승격 규칙(D, reference_asset_ids)이
 -- sessions.preset_id로 묶어 읽는다(#202).
 create table if not exists selections (
   id             uuid primary key default gen_random_uuid(),
@@ -179,7 +180,7 @@ do $$ begin
 exception when duplicate_object then null;
 end $$;
 -- where 절 없는 무조건 유일 인덱스다. 기존 행의 round는 전부 null이라 Postgres의
--- null-서로-다름 규칙으로 서로 충돌하지 않는다. PostgREST의 on_conflict(upsert)가
--- 조건부 부분 인덱스를 지정할 수 없어 무조건 인덱스로 둔다.
+-- null-서로-다름 규칙으로 서로 충돌하지 않는다. PostgREST on_conflict에는 where
+-- 절을 붙일 방법이 없어, 조건부 인덱스는 충돌 대상으로 추론되지 않는다(42P10).
 create unique index if not exists selections_session_cut_round_uidx
   on selections (session_id, cut_index, round);

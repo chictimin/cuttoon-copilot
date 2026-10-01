@@ -1,8 +1,10 @@
 import { createSession, getSession, listSessions } from "@/lib/db/sessions";
 import { insertSelections, type SelectionInsert } from "@/lib/db/selections";
+import {
+  SELECTION_MAX_CANDIDATES,
+  SELECTION_MAX_ROUNDS,
+} from "@/lib/session/selection-log";
 import { assertStoryboardShape } from "./validate";
-
-const MAX_SELECTION_ROUNDS = 20;
 const ASSET_URI_PATTERN = /^asset:\/\//;
 
 /**
@@ -17,13 +19,13 @@ function toSelectionInsert(entry: unknown): SelectionInsert | null {
   if (!Number.isInteger(r.cut_index) || (r.cut_index as number) < 1 || (r.cut_index as number) > 4) {
     return null;
   }
-  if (!Number.isInteger(r.round) || (r.round as number) < 1 || (r.round as number) > MAX_SELECTION_ROUNDS) {
+  if (!Number.isInteger(r.round) || (r.round as number) < 1 || (r.round as number) > SELECTION_MAX_ROUNDS) {
     return null;
   }
   if (
     !Array.isArray(r.candidate_assets) ||
     r.candidate_assets.length < 1 ||
-    r.candidate_assets.length > 3 ||
+    r.candidate_assets.length > SELECTION_MAX_CANDIDATES ||
     !r.candidate_assets.every((a) => typeof a === "string" && ASSET_URI_PATTERN.test(a))
   ) {
     return null;
@@ -75,8 +77,8 @@ export function validateSelectionRounds(input: unknown): SelectionInsert[] {
   const seen = new Set<string>();
   const valid: SelectionInsert[] = [];
   input.forEach((entry, i) => {
-    if (valid.length >= MAX_SELECTION_ROUNDS) {
-      console.warn(`[POST /api/session] selections ${i}번째 이후 버림: 라운드 최대 ${MAX_SELECTION_ROUNDS}개`);
+    if (valid.length >= SELECTION_MAX_ROUNDS) {
+      console.warn(`[POST /api/session] selections ${i}번째 이후 버림: 라운드 최대 ${SELECTION_MAX_ROUNDS}개`);
       return;
     }
     const row = toSelectionInsert(entry);

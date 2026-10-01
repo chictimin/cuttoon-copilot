@@ -13,6 +13,10 @@
 
 export type SelectionOutcome = "selected" | "regenerated";
 
+/** 서버(POST /api/session 검증)와 같은 상한. 헬퍼 출력이 서버 검증을 항상 통과해야 한다. */
+export const SELECTION_MAX_ROUNDS = 20;
+export const SELECTION_MAX_CANDIDATES = 3;
+
 /** POST /api/session body의 selections 배열 원소 모양. */
 export interface SelectionRound {
   cut_index: number;
@@ -50,6 +54,7 @@ function toIso(now: Date | undefined): string {
  * 후보 묶음을 보여줄 때마다 한 라운드를 연다. round는 1부터 증가한다.
  * 이전에 열린 라운드가 닫히지 않았으면 그대로 두고 새 라운드를 연다 —
  * 화면은 다시 뽑기할 때 markRegenerated를 먼저 부르므로 정상 흐름에선 겹치지 않는다.
+ * 후보는 3개까지만 기록하고, 라운드가 20개를 넘으면 더 기록하지 않는다(서버 상한과 일치).
  */
 export function recordRound(
   log: SelectionLog,
@@ -58,12 +63,13 @@ export function recordRound(
   now?: Date
 ): SelectionLog {
   void now;
+  if (log.rounds.length >= SELECTION_MAX_ROUNDS) return log;
   return {
     rounds: [
       ...log.rounds,
       {
         round: log.rounds.length + 1,
-        candidateAssets: variants.map((v) => v.asset),
+        candidateAssets: variants.slice(0, SELECTION_MAX_CANDIDATES).map((v) => v.asset),
         requestedCount: requested,
         selectedIndex: null,
         outcome: null,
@@ -85,10 +91,11 @@ export function markRegenerated(log: SelectionLog, now?: Date): SelectionLog {
   };
 }
 
-/** 열린 라운드에서 index번째를 고름으로 닫는다. 열린 라운드가 없으면 그대로 둔다. */
+/** 열린 라운드에서 index번째를 고름으로 닫는다. 열린 라운드가 없거나 index가 열린 라운드 후보 범위 밖이면 그대로 둔다. */
 export function markSelected(log: SelectionLog, index: number, now?: Date): SelectionLog {
   const last = log.rounds[log.rounds.length - 1];
   if (!last || last.outcome !== null) return log;
+  if (!Number.isInteger(index) || index < 0 || index >= last.candidateAssets.length) return log;
   return {
     rounds: [
       ...log.rounds.slice(0, -1),
