@@ -24,6 +24,15 @@ import {
   type BrainstormAnswers,
 } from "./storyboard-assembly";
 import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
+// 순수 헬퍼라 클라이언트에서 값으로 import해도 된다(서버 모듈·DB import 없음, #207).
+import {
+  createSelectionLog,
+  markRegenerated,
+  markSelected,
+  recordRound,
+  toPayload,
+  type SelectionLog,
+} from "@/lib/session/selection-log";
 import {
   EMPTY_CONTEXT_HINT,
   fetchSubjectSuggestions,
@@ -177,6 +186,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // 나머지 3컷 체이닝의 진행 상태 — 중간 실패 뒤 "이어서 만들기"가 이미 만든 컷과
   // 다음 컷 체이닝 토큰에서 재개하도록 렌더와 무관하게 들고 있는다(#104).
   const chainRef = useRef<{ storyboard: Storyboard; token: string } | null>(null);
+  // #207: 표지 3안을 보여줄 때마다 한 라운드씩 쌓아 두었다가 "저장" 때 selections로
+  // 함께 보낸다. 화면에 그리지 않는 기록이라 state가 아니라 ref로 든다.
+  const selectionLogRef = useRef<SelectionLog>(createSelectionLog());
+  // #207: 세션은 저장됐지만 선택 기록만 실패한 경우(selectionsSaved: false)의 비차단 안내.
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
   const [editingCutIndex, setEditingCutIndex] = useState<number | null>(null);
   const [draftCaption, setDraftCaption] = useState("");
   const [saving, setSaving] = useState(false);
@@ -556,6 +570,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     if (cutIndex != null) setDefaultCutIndexes((prev) => prev.filter((n) => n !== cutIndex));
   }
 
+  // #207: 비차단 안내는 몇 초 뒤 스스로 사라진다(닫기 버튼으로 먼저 닫을 수도 있다).
+  useEffect(() => {
+    if (!selectionNotice) return;
+    const timer = window.setTimeout(() => setSelectionNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [selectionNotice]);
+
   useEffect(() => {
     if (step !== "cover" || !storyboard || coverVariants) return;
     void loadCoverVariants();
@@ -572,13 +593,15 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       const { variants, requested } = await generateCoverVariants(storyboard, preset);
       setCoverVariants(variants);
       setCoverRequested(requested);
+      selectionLogRef.current = recordRound(selectionLogRef.current, variants, requested ?? variants.length);
     } catch {
       setGenError("표지를 만드는 데 실패했어요. 다시 시도해주세요");
     }
   }
 
-  async function handleSelectCover(variant: GeneratedCut) {
+  async function handleSelectCover(variant: GeneratedCut, index: number) {
     if (!storyboard || !preset) return;
+    selectionLogRef.current = markSelected(selectionLogRef.current, index);
     const firstCutIndex = storyboard.cuts[0].cut_index;
     const updated: Storyboard = {
       ...storyboard,
@@ -667,11 +690,18 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
     setSaveError(null);
     setSaving(true);
+    const selections = toPayload(selectionLogRef.current);
     try {
       const res = await fetch("/api/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, presetId, storyboard }),
+        // 닫힌 라운드가 없으면(표지 기록 없음) 키를 빼 기존 응답 형태를 유지한다.
+        body: JSON.stringify({
+          projectId,
+          presetId,
+          storyboard,
+          ...(selections.length > 0 ? { selections } : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -680,7 +710,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         return;
       }
 
-      const { sessionId: savedId } = await res.json();
+      const { sessionId: savedId, selectionsSaved } = (await res.json()) as {
+        sessionId: string;
+        selectionsSaved?: boolean;
+      };
+      // #207: 선택 기록만 실패해도 세션은 저장됐다 — 흐름을 막지 않고 알리기만 한다.
+      if (selectionsSaved === false) {
+        setSelectionNotice("선택 기록은 저장되지 않았어요. 컷툰은 정상 저장됐습니다.");
+      }
       // URL의 id는 세션이 생기기 전 임시값이었을 수 있으니 실제 id로 맞춘다 —
       // 에디터 화면이 이 id로 세션을 조회한다. history API로 바꾸는 이유는
       // useRouter().replace()가 이 라우트를 다시 서버에서 그려서 컴포넌트를
@@ -1026,7 +1063,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               <button
                 key={i}
                 type="button"
-                onClick={() => handleSelectCover(variant)}
+                onClick={() => handleSelectCover(variant, i)}
                 className="overflow-hidden rounded-lg border border-zinc-200 hover:border-zinc-900"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- mock placeholder, next/image 불필요 */}
@@ -1037,6 +1074,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           <button
             type="button"
             onClick={() => {
+              selectionLogRef.current = markRegenerated(selectionLogRef.current);
               setCoverVariants(null);
               setCoverRequested(undefined);
               void loadCoverVariants();
@@ -1155,6 +1193,23 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           >
             대사·말풍선 수정하러 가기
           </Link>
+        </div>
+      )}
+
+      {selectionNotice && (
+        <div
+          role="status"
+          className="fixed bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-md bg-zinc-800 px-4 py-2.5 text-sm text-white shadow-lg"
+        >
+          <span>{selectionNotice}</span>
+          <button
+            type="button"
+            onClick={() => setSelectionNotice(null)}
+            aria-label="안내 닫기"
+            className="text-zinc-300 hover:text-white"
+          >
+            ✕
+          </button>
         </div>
       )}
     </main>
