@@ -4,10 +4,12 @@
 - [2. Property `Preset > project_name`](#project_name)
 - [3. Property `Preset > assets`](#assets)
   - [3.1. Property `Preset > assets > character_sheet`](#assets_character_sheet)
-  - [3.2. Property `Preset > assets > style_refs`](#assets_style_refs)
-    - [3.2.1. Preset > assets > style_refs > style_refs items](#assets_style_refs_items)
-  - [3.3. Property `Preset > assets > reference_asset_ids`](#assets_reference_asset_ids)
-    - [3.3.1. Preset > assets > reference_asset_ids > reference_asset_ids items](#assets_reference_asset_ids_items)
+  - [3.2. Property `Preset > assets > character_pool`](#assets_character_pool)
+    - [3.2.1. Preset > assets > character_pool > character_pool items](#assets_character_pool_items)
+  - [3.3. Property `Preset > assets > style_refs`](#assets_style_refs)
+    - [3.3.1. Preset > assets > style_refs > style_refs items](#assets_style_refs_items)
+  - [3.4. Property `Preset > assets > reference_asset_ids`](#assets_reference_asset_ids)
+    - [3.4.1. Preset > assets > reference_asset_ids > reference_asset_ids items](#assets_reference_asset_ids_items)
 - [4. Property `Preset > style`](#style)
   - [4.1. Property `Preset > style > keywords`](#style_keywords)
     - [4.1.1. Preset > style > keywords > keywords items](#style_keywords_items)
@@ -33,6 +35,9 @@
     - [6.4.1. Preset > context > life_stage > life_stage items](#context_life_stage_items)
   - [6.5. Property `Preset > context > main_subjects`](#context_main_subjects)
     - [6.5.1. Preset > context > main_subjects > main_subjects items](#context_main_subjects_items)
+- [7. Property `Preset > mascot`](#mascot)
+  - [7.1. Property `Preset > mascot > label`](#mascot_label)
+  - [7.2. Property `Preset > mascot > description`](#mascot_description)
 
 **Title:** Preset
 
@@ -44,14 +49,15 @@
 
 **Description:** 프로젝트 단위 1회 확정값. 프로젝트 안에서 컷툰 생성 세션을 시작할 때 자동으로 주입되는 공통 스타일·정책 묶음이다. 필드 추가·유지 판정 기준: 프로젝트 내 모든 컷툰에 공통으로 주입되는 값만 여기 둔다. 컷툰마다 달라지는 값(등장 캐릭터, 서사 전개, 소재, 대사, 컷별 연출)은 preset이 아니라 storyboard 소유다. 등장 캐릭터 1~2명·주인공 1명 같은 제약도 세션 단위이므로 storyboard.schema.json에서 강제한다
 
-| Property                             | Pattern | Type             | Deprecated | Definition | Title/Description                                                                              |
-| ------------------------------------ | ------- | ---------------- | ---------- | ---------- | ---------------------------------------------------------------------------------------------- |
-| + [preset_version](#preset_version ) | No      | enum (of string) | No         | -          | 1.1에서 파괴적 변경: rules.characters 제거(세션 단위 값), project_name·context.industry·style.keywords 필수 추가 |
-| + [project_name](#project_name )     | No      | string           | No         | -          | 프로젝트 표시 이름. 사용자가 온보딩에서 입력한다                                                                    |
-| + [assets](#assets )                 | No      | object           | No         | -          | -                                                                                              |
-| + [style](#style )                   | No      | object           | No         | -          | 그림체 확정값. 레퍼런스 이미지 추출값과 사용자가 직접 입력한 스타일 키워드를 합친 결과 — 레퍼런스 없이 키워드만으로도 성립한다                       |
-| + [rules](#rules )                   | No      | object           | No         | -          | 프로젝트 전체에 적용되는 정책. 컷툰마다 달라지는 값은 여기 두지 않는다 — 등장 캐릭터 명단·역할은 세션에서 정하므로 storyboard 소유               |
-| + [context](#context )               | No      | object           | No         | -          | 온보딩에서 수집하는 프로젝트 설정값. 각 필드는 빈 배열로 스킵 가능(assets/rules의 forbidden·style_refs와 동일한 규약)             |
+| Property                             | Pattern | Type             | Deprecated | Definition | Title/Description                                                                                            |
+| ------------------------------------ | ------- | ---------------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------ |
+| + [preset_version](#preset_version ) | No      | enum (of string) | No         | -          | 1.1에서 파괴적 변경: rules.characters 제거(세션 단위 값), project_name·context.industry·style.keywords 필수 추가               |
+| + [project_name](#project_name )     | No      | string           | No         | -          | 프로젝트 표시 이름. 사용자가 온보딩에서 입력한다                                                                                  |
+| + [assets](#assets )                 | No      | object           | No         | -          | -                                                                                                            |
+| + [style](#style )                   | No      | object           | No         | -          | 그림체 확정값. 레퍼런스 이미지 추출값과 사용자가 직접 입력한 스타일 키워드를 합친 결과 — 레퍼런스 없이 키워드만으로도 성립한다                                     |
+| + [rules](#rules )                   | No      | object           | No         | -          | 프로젝트 전체에 적용되는 정책. 컷툰마다 달라지는 값은 여기 두지 않는다 — 등장 캐릭터 명단·역할은 세션에서 정하므로 storyboard 소유                             |
+| + [context](#context )               | No      | object           | No         | -          | 온보딩에서 수집하는 프로젝트 설정값. 각 필드는 빈 배열로 스킵 가능(assets/rules의 forbidden·style_refs와 동일한 규약)                           |
+| - [mascot](#mascot )                 | No      | object           | No         | -          | 프로젝트 고정 마스코트(issue #150). 선택 필드 — 없으면 기존 동작(시트는 그림체 기준만, 컷 문구 그대로)을 유지한다. required에 넣지 않는다 — 이미 저장된 프리셋이 깨진다 |
 
 ## <a name="preset_version"></a>1. Property `Preset > preset_version`
 
@@ -86,11 +92,12 @@ Must be one of:
 | **Required**              | Yes         |
 | **Additional properties** | Not allowed |
 
-| Property                                              | Pattern | Type            | Deprecated | Definition | Title/Description                                                                               |
-| ----------------------------------------------------- | ------- | --------------- | ---------- | ---------- | ----------------------------------------------------------------------------------------------- |
-| + [character_sheet](#assets_character_sheet )         | No      | string          | No         | -          | 필수. 프로젝트의 캐릭터 풀. 캐릭터 동일성은 텍스트 서술로 대체 불가 — 매 컷 reference 주입의 근거 애셋. 각 컷툰에 이 중 누가 등장하는지는 세션에서 고른다 |
-| + [style_refs](#assets_style_refs )                   | No      | array of string | No         | -          | 그림체 레퍼런스 업로드 애셋. 온보딩에서 스킵 가능 — 빈 배열이면 기본 스타일 적용                                                 |
-| + [reference_asset_ids](#assets_reference_asset_ids ) | No      | array of string | No         | -          | 누적 메모리용. 지금은 항상 빈 배열 — 필드만 미리 박아 마이그레이션 회피                                                      |
+| Property                                              | Pattern | Type            | Deprecated | Definition | Title/Description                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------- | ------- | --------------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| + [character_sheet](#assets_character_sheet )         | No      | string          | No         | -          | 필수. 프로젝트의 고정 마스코트 한 명을 3포즈로 그린 시트. 캐릭터 동일성은 텍스트 서술로 대체 불가 — 매 컷 reference 주입의 근거 애셋. issue #113에서 정합화: 이전 문구는 '캐릭터 풀'이었으나 storyboard.schema.json 의 cast[].character_id description(마스코트 한 명만 담고 나머지는 시트 없는 가변 인물)이 정본이고 구현도 1인 시트다. 여러 인물을 담는 확장은 character_pool 로 열어 뒀다 |
+| - [character_pool](#assets_character_pool )           | No      | array of string | No         | -          | 캐릭터 풀 확장용(issue #113 결정, #123). 지금은 항상 빈 배열 — 필드만 미리 박아 마이그레이션 회피(reference_asset_ids 와 같은 패턴). 프로젝트 설정 페이지에서 마스코트 외 인물을 추가할 수 있게 되면 여기가 채워진다. required 에 넣지 않는다 — 이미 저장된 프리셋이 깨진다                                                                                       |
+| + [style_refs](#assets_style_refs )                   | No      | array of string | No         | -          | 그림체 레퍼런스 업로드 애셋. 온보딩에서 스킵 가능 — 빈 배열이면 기본 스타일 적용                                                                                                                                                                                                                          |
+| + [reference_asset_ids](#assets_reference_asset_ids ) | No      | array of string | No         | -          | 누적 메모리용. 지금은 항상 빈 배열 — 필드만 미리 박아 마이그레이션 회피                                                                                                                                                                                                                               |
 
 ### <a name="assets_character_sheet"></a>3.1. Property `Preset > assets > character_sheet`
 
@@ -99,13 +106,45 @@ Must be one of:
 | **Type**     | `string` |
 | **Required** | Yes      |
 
-**Description:** 필수. 프로젝트의 캐릭터 풀. 캐릭터 동일성은 텍스트 서술로 대체 불가 — 매 컷 reference 주입의 근거 애셋. 각 컷툰에 이 중 누가 등장하는지는 세션에서 고른다
+**Description:** 필수. 프로젝트의 고정 마스코트 한 명을 3포즈로 그린 시트. 캐릭터 동일성은 텍스트 서술로 대체 불가 — 매 컷 reference 주입의 근거 애셋. issue #113에서 정합화: 이전 문구는 '캐릭터 풀'이었으나 storyboard.schema.json 의 cast[].character_id description(마스코트 한 명만 담고 나머지는 시트 없는 가변 인물)이 정본이고 구현도 1인 시트다. 여러 인물을 담는 확장은 character_pool 로 열어 뒀다
 
 | Restrictions                      |                                                                       |
 | --------------------------------- | --------------------------------------------------------------------- |
 | **Must match regular expression** | ```^asset://``` [Test](https://regex101.com/?regex=%5Easset%3A%2F%2F) |
 
-### <a name="assets_style_refs"></a>3.2. Property `Preset > assets > style_refs`
+### <a name="assets_character_pool"></a>3.2. Property `Preset > assets > character_pool`
+
+|              |                   |
+| ------------ | ----------------- |
+| **Type**     | `array of string` |
+| **Required** | No                |
+
+**Description:** 캐릭터 풀 확장용(issue #113 결정, #123). 지금은 항상 빈 배열 — 필드만 미리 박아 마이그레이션 회피(reference_asset_ids 와 같은 패턴). 프로젝트 설정 페이지에서 마스코트 외 인물을 추가할 수 있게 되면 여기가 채워진다. required 에 넣지 않는다 — 이미 저장된 프리셋이 깨진다
+
+|                      | Array restrictions |
+| -------------------- | ------------------ |
+| **Min items**        | N/A                |
+| **Max items**        | N/A                |
+| **Items unicity**    | True               |
+| **Additional items** | False              |
+| **Tuple validation** | See below          |
+
+| Each item of this array must be                      | Description |
+| ---------------------------------------------------- | ----------- |
+| [character_pool items](#assets_character_pool_items) | -           |
+
+#### <a name="assets_character_pool_items"></a>3.2.1. Preset > assets > character_pool > character_pool items
+
+|              |          |
+| ------------ | -------- |
+| **Type**     | `string` |
+| **Required** | No       |
+
+| Restrictions                      |                                                                       |
+| --------------------------------- | --------------------------------------------------------------------- |
+| **Must match regular expression** | ```^asset://``` [Test](https://regex101.com/?regex=%5Easset%3A%2F%2F) |
+
+### <a name="assets_style_refs"></a>3.3. Property `Preset > assets > style_refs`
 
 |              |                   |
 | ------------ | ----------------- |
@@ -126,7 +165,7 @@ Must be one of:
 | -------------------------------------------- | ----------- |
 | [style_refs items](#assets_style_refs_items) | -           |
 
-#### <a name="assets_style_refs_items"></a>3.2.1. Preset > assets > style_refs > style_refs items
+#### <a name="assets_style_refs_items"></a>3.3.1. Preset > assets > style_refs > style_refs items
 
 |              |          |
 | ------------ | -------- |
@@ -137,7 +176,7 @@ Must be one of:
 | --------------------------------- | --------------------------------------------------------------------- |
 | **Must match regular expression** | ```^asset://``` [Test](https://regex101.com/?regex=%5Easset%3A%2F%2F) |
 
-### <a name="assets_reference_asset_ids"></a>3.3. Property `Preset > assets > reference_asset_ids`
+### <a name="assets_reference_asset_ids"></a>3.4. Property `Preset > assets > reference_asset_ids`
 
 |              |                   |
 | ------------ | ----------------- |
@@ -158,7 +197,7 @@ Must be one of:
 | -------------------------------------------------------------- | ----------- |
 | [reference_asset_ids items](#assets_reference_asset_ids_items) | -           |
 
-#### <a name="assets_reference_asset_ids_items"></a>3.3.1. Preset > assets > reference_asset_ids > reference_asset_ids items
+#### <a name="assets_reference_asset_ids_items"></a>3.4.1. Preset > assets > reference_asset_ids > reference_asset_ids items
 
 |              |          |
 | ------------ | -------- |
@@ -331,10 +370,10 @@ Must be one of:
 
 **Description:** 프로젝트 전체에 적용되는 정책. 컷툰마다 달라지는 값은 여기 두지 않는다 — 등장 캐릭터 명단·역할은 세션에서 정하므로 storyboard 소유
 
-| Property                           | Pattern | Type            | Deprecated | Definition | Title/Description                                                                                                                         |
-| ---------------------------------- | ------- | --------------- | ---------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| + [forbidden](#rules_forbidden )   | No      | array of string | No         | -          | 네거티브 요소. 단어 단위 태그 — enum 아님. 프롬프트 조립 시 미매핑 단어 위험 있음(검증 로직 미정)                                                                             |
-| + [cta_format](#rules_cta_format ) | No      | string          | No         | -          | 마지막 컷 CTA의 프로젝트 기본값. 세션에서 다른 값으로 덮어쓸 수 있고, 덮어쓰지 않으면 이 값이 주입된다. 값 목록은 코드가 아니라 JSON 데이터 파일(cta_presets.json, 미작성)로 분리 예정 — 목록 확정 전까지 자유 문자열 |
+| Property                           | Pattern | Type            | Deprecated | Definition | Title/Description                                                                                                                                                                                                                                                                                |
+| ---------------------------------- | ------- | --------------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| + [forbidden](#rules_forbidden )   | No      | array of string | No         | -          | 네거티브 요소. 단어 단위 태그 — enum 아님. 프롬프트 조립 시 미매핑 단어 위험 있음(정책 #15 확정, 프롬프트 경로 연결은 #125 OPEN)                                                                                                                                                                                                            |
+| + [cta_format](#rules_cta_format ) | No      | string          | No         | -          | 마지막 컷 CTA의 프로젝트 기본값. 세션에서 다른 값으로 덮어쓸 수 있고, 덮어쓰지 않으면 이 값이 주입된다. spec/data/cta_presets.json에 정의된 preset 중 하나의 id를 저장한다 (예: 'consult_request'). 자유 문자열 타입은 유지하되(스키마 레벨 enum 아님), 값은 항상 cta_presets.json의 presets[].id 중 하나와 일치해야 한다 — presets 목록이 계속 늘어날 수 있어 JSON Schema enum으로 고정하지 않음 (issue #4) |
 
 ### <a name="rules_forbidden"></a>5.1. Property `Preset > rules > forbidden`
 
@@ -343,7 +382,7 @@ Must be one of:
 | **Type**     | `array of string` |
 | **Required** | Yes               |
 
-**Description:** 네거티브 요소. 단어 단위 태그 — enum 아님. 프롬프트 조립 시 미매핑 단어 위험 있음(검증 로직 미정)
+**Description:** 네거티브 요소. 단어 단위 태그 — enum 아님. 프롬프트 조립 시 미매핑 단어 위험 있음(정책 #15 확정, 프롬프트 경로 연결은 #125 OPEN)
 
 |                      | Array restrictions |
 | -------------------- | ------------------ |
@@ -371,7 +410,7 @@ Must be one of:
 | **Type**     | `string` |
 | **Required** | Yes      |
 
-**Description:** 마지막 컷 CTA의 프로젝트 기본값. 세션에서 다른 값으로 덮어쓸 수 있고, 덮어쓰지 않으면 이 값이 주입된다. 값 목록은 코드가 아니라 JSON 데이터 파일(cta_presets.json, 미작성)로 분리 예정 — 목록 확정 전까지 자유 문자열
+**Description:** 마지막 컷 CTA의 프로젝트 기본값. 세션에서 다른 값으로 덮어쓸 수 있고, 덮어쓰지 않으면 이 값이 주입된다. spec/data/cta_presets.json에 정의된 preset 중 하나의 id를 저장한다 (예: 'consult_request'). 자유 문자열 타입은 유지하되(스키마 레벨 enum 아님), 값은 항상 cta_presets.json의 presets[].id 중 하나와 일치해야 한다 — presets 목록이 계속 늘어날 수 있어 JSON Schema enum으로 고정하지 않음 (issue #4)
 
 | Restrictions   |   |
 | -------------- | - |
@@ -576,5 +615,46 @@ Must be one of:
 | **Type**     | `string` |
 | **Required** | No       |
 
+## <a name="mascot"></a>7. Property `Preset > mascot`
+
+|                           |             |
+| ------------------------- | ----------- |
+| **Type**                  | `object`    |
+| **Required**              | No          |
+| **Additional properties** | Not allowed |
+
+**Description:** 프로젝트 고정 마스코트(issue #150). 선택 필드 — 없으면 기존 동작(시트는 그림체 기준만, 컷 문구 그대로)을 유지한다. required에 넣지 않는다 — 이미 저장된 프리셋이 깨진다
+
+| Property                              | Pattern | Type   | Deprecated | Definition | Title/Description                                              |
+| ------------------------------------- | ------- | ------ | ---------- | ---------- | -------------------------------------------------------------- |
+| + [label](#mascot_label )             | No      | string | No         | -          | 프로젝트에서 바뀌지 않는 cast ID(예: "mascot"). cast[].character_id에 들어갈 값 |
+| + [description](#mascot_description ) | No      | string | No         | -          | 시트·컷 프롬프트가 함께 쓰는 외형·역할 서술                                      |
+
+### <a name="mascot_label"></a>7.1. Property `Preset > mascot > label`
+
+|              |          |
+| ------------ | -------- |
+| **Type**     | `string` |
+| **Required** | Yes      |
+
+**Description:** 프로젝트에서 바뀌지 않는 cast ID(예: "mascot"). cast[].character_id에 들어갈 값
+
+| Restrictions   |   |
+| -------------- | - |
+| **Min length** | 1 |
+
+### <a name="mascot_description"></a>7.2. Property `Preset > mascot > description`
+
+|              |          |
+| ------------ | -------- |
+| **Type**     | `string` |
+| **Required** | Yes      |
+
+**Description:** 시트·컷 프롬프트가 함께 쓰는 외형·역할 서술
+
+| Restrictions   |   |
+| -------------- | - |
+| **Min length** | 1 |
+
 ----------------------------------------------------------------------------------------------------------------------------
-Generated using [json-schema-for-humans](https://github.com/coveooss/json-schema-for-humans) on 2026-08-18 at 17:58:18 +0900
+Generated using [json-schema-for-humans](https://github.com/coveooss/json-schema-for-humans) on 2026-10-01 at 12:29:45 +0900

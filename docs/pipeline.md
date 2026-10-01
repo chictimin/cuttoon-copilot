@@ -2,7 +2,7 @@
 
 머지된 코드만 기준으로 한다. 열려 있는 PR·이슈의 계획은 넣지 않는다. 함수명이 주 식별자이고 file:line은 보조다 — 라인은 커밋마다 밀린다.
 
-**범위**: 화면(`app/(studio)/`), 스키마·LLM(`lib/llm/`, `spec/`, `app/api/brainstorm/`), 백엔드·저장(`lib/db/`, `app/api/preset/`, `app/api/session/`, `app/api/upload/`) 위주로 채웠다. 이미지 생성·추출 영역(`lib/openai/`, `app/api/generate/`, `app/api/extract/`)과 렌더링 영역(`lib/render/`)은 내부를 전부 적지 않고, 화면·백엔드 쪽이 그 경계를 어떻게 호출하는지(계약)까지만 적었다. 이미지 생성(5-1)·추출·시트(5-1b) 절은 작성됐고, 렌더링(5-2) 절만 작성이 남아 있다. 영역별 담당자는 `README.md` 소유권 표를 본다.
+**범위**: 화면(`app/(studio)/`), 스키마·LLM(`lib/llm/`, `spec/`, `app/api/brainstorm/`), 백엔드·저장(`lib/db/`, `app/api/preset/`, `app/api/session/`, `app/api/upload/`) 위주로 채웠다. 이미지 생성·추출 영역(`lib/openai/`, `app/api/generate/`, `app/api/extract/`)과 렌더링 영역(`lib/render/`)은 내부를 전부 적지 않고, 화면·백엔드 쪽이 그 경계를 어떻게 호출하는지(계약)까지만 적었다. 이미지 생성(5-1)·추출·시트(5-1b)·합성·Export(5-2) 절은 모두 작성됐다. 영역별 담당자는 `README.md` 소유권 표를 본다.
 
 ## 1. 전체 흐름
 
@@ -61,9 +61,10 @@ flowchart TD
 | 5 | `recordAnswer` 반복 | `SessionFlow.tsx:190` | 3턴(또는 축소된 턴) 완료 시 `assembling`으로 전이 |
 | 6 | assembling effect | `SessionFlow.tsx:262` | `assembleStoryboard`(`storyboard-assembly.ts:85`) |
 | 7 | `assembleStoryboard` 내부 | `storyboard-assembly.ts` | `pickShirtColor`(`session-cast.ts:63`, #148), `getBeatsForFlow`/`getFlowOptions`(`narrative-flow.ts`, #153) |
-| 8 | `loadCoverVariants` | `SessionFlow.tsx:291` | `POST /api/generate { kind:'cover_variants', storyboard, preset, referenceAssets }` — 이미지 생성 경계 |
-| 9 | `handleSelectCover` | `SessionFlow.tsx:306` | `generateChainedCuts`(`generate-client.ts`, 화면) → `POST /api/generate { kind:'cut', ... }` × 3 — 이미지 생성 경계 |
-| 10 | `handleSave` | `SessionFlow.tsx:366` | `POST /api/session` (백엔드·저장, `lib/db/sessions.ts`에 저장) |
+| 8 | 대사 생성(F2) | `loadCaptions`(`SessionFlow.tsx:389`) | `POST /api/session/captions` — tone 단계 선택값 + subject·flow·beats·cast·context를 보내 4컷 대사와 연출(F4)을 받고 `applyCaptions`·`applyDirections`로 조립 컷에 반영. 컷별 다시 뽑기 `regenCutCaption`(:485)은 같은 경로에 `cut_index`를 함께 보냄 |
+| 9 | `loadCoverVariants` | `SessionFlow.tsx:291` | `POST /api/generate { kind:'cover_variants', storyboard, preset, referenceAssets }` — 이미지 생성 경계 |
+| 10 | `handleSelectCover` | `SessionFlow.tsx:306` | `generateChainedCuts`(`generate-client.ts`, 화면) → `POST /api/generate { kind:'cut', ... }` × 3 — 이미지 생성 경계 |
+| 11 | `handleSave` | `SessionFlow.tsx:366` | `POST /api/session` (백엔드·저장, `lib/db/sessions.ts`에 저장) |
 
 ## 4. 에디터 (화면)
 
@@ -77,7 +78,7 @@ flowchart TD
 
 ## 5. 이미지 생성·합성 파트
 
-아래 세 절은 특정 화면 단계(온보딩·세션·에디터)의 하위가 아니다 — 이미지 생성(5-1)은 온보딩·세션 양쪽에서 쓰이고, 합성·Export(5-2)는 에디터에서 쓰인다. 5-1·5-1b는 작성됐고, 5-2만 작성이 남아 있다(#156에서 추적 중). 영역별 담당자는 `README.md` 소유권 표를 본다.
+아래 세 절은 특정 화면 단계(온보딩·세션·에디터)의 하위가 아니다 — 이미지 생성(5-1)은 온보딩·세션 양쪽에서 쓰이고, 합성·Export(5-2)는 에디터에서 쓰인다. 5-1·5-1b·5-2 모두 작성됐다(B③ 반영, #156). 영역별 담당자는 `README.md` 소유권 표를 본다.
 
 ### 5-1. 텍스트/이미지 생성 (이미지 생성)
 
@@ -242,11 +243,40 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 `extract.ts`는 `vocabulary.json`을 직접 import하지 않는다. `./generate`에서 `ratioClause`만 가져와 쓴다(`extract.ts:4`). `ratioClause(value)`(`generate.ts:164-167`)는 내부에서 `promptHint('character_ratio', value)`(`generate.ts:141`)로 `vocabulary.json`의 `prompt_hints.character_ratio` 항목을 찾고, 없으면 `` `${value} body proportions` `` 문자열로 폴백한다. `buildCharacterPrompt`(`extract.ts:154`)가 이 결과를 시트 프롬프트에 그대로 넣는다 — `generate.ts`의 `buildCutPrompt`도 같은 헬퍼를 쓰기 때문에 시트와 컷이 항상 같은 비율 지시를 받는다(#126·#129 회귀 방지, PR #130).
 
-### 5-2. 텍스트 레이어 합성·Export (렌더링 — 작성 예정)
+### 5-2. 텍스트 레이어 합성·Export (렌더링 — B③)
 
-- **`GET /api/session/export`**(`app/api/session/export/route.ts`, 백엔드·저장 영역 라우트) — 세션의 `storyboard.cuts`를 받아 최종 합성 이미지 ZIP을 반환한다. 내부에서 `lib/render/`(렌더링 영역)의 합성·zip 로직을 호출한다.
+아래는 B③ 담당분이 #156에 남긴 내용이다(기준: `main` f8aad0f). 함수명이 주 식별자이고 file:line은 보조다.
 
-작성 예정 항목(#156에서 추적 중): `lib/render/`의 실제 함수·호출 순서, 캡션/말풍선 합성 방식, ZIP 구성 방식. 렌더링 영역 담당자는 `README.md` 소유권 표를 본다.
+**호출 순서**
+
+| 순서 | 함수 | 위치 | 하는 일 |
+|---|---|---|---|
+| 1 | `GET /api/session/export?id=` | `app/api/session/export/route.ts:15` | 세션 조회 → `toRenderCuts`(`:94`)로 `storyboard.cuts`를 `lib/render/`의 `Cut[]`로 좁힘(enum 밖 값은 `malformed`로 제외) |
+| 2 | `exportCuts(cuts)` | `lib/render/export.ts:17` | `cut_index` 순 정렬 → 컷마다 `readAsset(generated_image)` → `composeCut` → ZIP. 이미지 없는 컷은 건너뛰고 `skipped`에 남김 |
+| 3 | `composeCut(image, [caption], headTargets?)` | `lib/render/compose.ts:413` | 원본 이미지 위에 SVG 말풍선 오버레이를 sharp로 합성해 PNG 반환 |
+| 4 | `buildZip(entries)` | `lib/render/zip.ts:11` | archiver `ZipArchive`로 `cut_<n>.png`들을 묶음 |
+
+응답: `application/zip`, 헤더 `X-Export-Included` / `X-Export-Skipped`. 포함 컷이 0개면 빈 ZIP 대신 `409`.
+
+**합성 방식 (`compose.ts`)**
+
+- 대사는 **Export 시점에만** 이미지에 굽는다. 에디터 화면의 말풍선은 HTML 레이어라 합성과 별개다(PRD "텍스트 레이어" 원칙).
+- 자리: `caption.position` 5종을 `POSITION_BOX`(`:35`)의 고정 비율 박스로 바꾼다. 구석 자리는 일부러 캔버스 경계를 살짝 넘는다(웹툰식 "반 걸침").
+- 크기: 박스 폭 안에서 글자 수에 맞춰 폰트 40→22px로 줄이며 줄바꿈(`fitText`), 높이 상한은 캔버스의 30%(`:339`).
+- 모양: `rounded`는 텍스트 박스보다 가로 1.12배·세로 1.28배 타원(`:288-289`), `rect`·`cloud`는 사각형 기반. 몸통과 꼬리는 **하나의 폴리곤**으로 그린다(겹쳐 그리면 이음매가 보임). 불투명도 0.98.
+- 위 경계 보정: `rounded` 타원이 캔버스 위로 넘치면 넘친 만큼 아래로 민다(`:390`).
+- 꼬리: 목표점(`HeadTarget`) 방향으로, 몸통 경계~목표점 거리의 40%, 최대 캔버스 높이의 12%(`:142-143`, PR #163). `center` 자리는 고정 방향·고정 길이의 짧은 꼬리를 단다(`CENTER_TAIL_ANGLE` `:168`, `centerTail` `:171-172`, #192) — 화자 방향 반영은 #199 후속.
+- 목표점: 호출자가 컷별로 넘길 수 있지만 **지금 Export는 넘기지 않아** 항상 기본값(화면 가로 50%, 세로 42%, `:130`)이다. 인물이 한쪽에 있는 컷에서는 꼬리가 빈 곳을 가리킬 수 있다(9/30 골든패스 컷 3·4에서 관찰).
+
+**ZIP 구성**: 컷당 PNG 1장, 파일명 `cut_<cut_index>.png`. 파일명(ZIP 이름)은 `Content-Disposition`에서 subject 기반(한글은 `filename*`).
+
+**쓰지 않는 값 (현재)**: `reserved_zone`은 `compose.ts`가 읽지 않는다(크롭에서만 씀, #105/PR #166). `bubble_type`·`position`은 컷 프롬프트에 안 들어가고 여기서만 쓴다.
+
+**알려진 한계**
+
+- 폰트가 `Malgun Gothic`/`Apple SD Gothic Neo` 시스템 폰트에 의존한다(`:13`). 한글 폰트가 없는 리눅스 서버에 배포하면 글자가 깨질 수 있어, 배포 전 폰트 포함이 필요하다.
+- 글자 폭은 실제 폰트 측정이 아니라 추정치(한글 = 폰트 크기, 영문·숫자 = 0.55배)다.
+- 아주 긴 대사 경계·`center` 덮음은 #192로 해결. `center` 꼬리 방향(화자 쪽)은 #199 후속.
 
 ## 6. 데이터 파일 vs 코드 (화면·스키마·LLM·백엔드 영역분)
 
@@ -257,6 +287,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 | `cta_presets.json` | CTA 문구 8종 | `lib/llm/cta-presets.ts` |
 | `narrative-flow.json` | 서사 흐름 템플릿 3종(#153) | `lib/llm/narrative-flow.ts` |
 | `style-vocabulary.json` | 스타일 키워드 매핑 | `lib/llm/preset-guard.ts`(`checkUnmappedWordsPolicy` 관련) |
+| `caption-tones.json` | 컷 대사 톤 목록·설명 | `lib/llm/caption-tones.ts` |
 
 **`spec/vocabulary.json`**(위 `data/`와 다른 위치, 스키마·LLM 영역) — enum별 프롬프트 힌트. 이미지 생성 영역(`lib/openai/generate.ts`)이 프롬프트 조립에 쓴다. **캐릭터 시트 쪽 소비 경로는 5-1b절에 적었다**(`extract.ts` → `ratioClause` → `promptHint`). 컷 프롬프트(`buildCutPrompt`)의 소비 방식은 5-1절에 적었다.
 
