@@ -580,6 +580,13 @@ function buildPrompt(input: CaptionsRequest, wanted: number[]): string {
   const tone = getCaptionToneById(input.tone_id);
   const hasSupporting = input.cast.length > 1;
   const supportingId = resolveSupportingId(input);
+  const strength = resolveStrength(input);
+  // none이면 CTA 줄 자체를 넣지 않는다 — 프로젝트 기본 목적 문장("지금 상담
+  // 신청하기" 등)이 프롬프트에 남아 권유로 새는 것을 막는다.
+  const ctaLine =
+    strength === "none"
+      ? ""
+      : `${ctaContextLine(resolvePurposeId(input) ?? input.context.cta_format)}\n`;
   const cutLines = wanted
     .map((i) => {
       const beat = input.beats[i - 1];
@@ -604,8 +611,7 @@ ${tone ? `${tone.label}: ${tone.description}` : input.tone_id}
 <맥락>
 분야: ${input.context.industry.join(", ")}
 관심사: ${input.context.interests.join(", ")}
-${ctaContextLine(resolvePurposeId(input) ?? input.context.cta_format)}
-</맥락>
+${ctaLine}</맥락>
 ${strengthBlock(resolveStrength(input))}
 
 허용 목록(JSON 배열 그대로, 다른 값 금지):

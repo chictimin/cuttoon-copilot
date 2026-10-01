@@ -41,7 +41,7 @@
   },
   "allOf": [
     {
-      "if": { "properties": { "cta_strength": { "const": "none" } } },
+      "if": { "required": ["cta_strength"], "properties": { "cta_strength": { "const": "none" } } },
       "then": {
         "properties": {
           "cuts": {

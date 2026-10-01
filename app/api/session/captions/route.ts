@@ -127,6 +127,17 @@ export async function POST(request: Request) {
   if (!parsedCta.ok) {
     return Response.json({ error: parsedCta.error }, { status: 400 });
   }
+  // beats·강도 교차 검증 (issue #205 계약 "형식 오류는 400, 보정 없음"과 같은 원칙).
+  // none인데 beats에 cta가 있으면 400 — none 폴백이 cta 문장을 낼 경로를 없앤다.
+  // soft/clear(없음 포함)인데 4번이 cta가 아니면 400.
+  const beatList = beats as string[];
+  if (parsedCta.cta?.strength === "none") {
+    if (beatList.includes("cta")) {
+      return Response.json({ error: "cta.strength가 none인데 beats에 cta가 있습니다" }, { status: 400 });
+    }
+  } else if (beatList[3] !== "cta") {
+    return Response.json({ error: "beats 4번이 cta여야 합니다" }, { status: 400 });
+  }
 
   const input = {
     subject: subject.trim(),
