@@ -10,7 +10,7 @@
  *   preset 전체나 이미지·비밀값은 넘기지 않는다.
  * - 응답은 {captions:[{cut_index:1|2|3|4,text}]}. 공통 정규화 후 컷 인덱스
  *   1~4별 유효 문자열만 채택한다. 무효·누락 컷은 사유를 붙여 1회 재요청하고,
- *   여전히 무효인 그 컷만 기존 BEAT_CAPTION 문장으로 채운다.
+  *   여전히 무효인 그 컷만 컷 기본값 문장으로 채운다.
  * - 다른 컷의 유효 대사와 사용자 편집은 서버가 건드리지 않는다 — 합치기는 화면 몫이다.
  * - 캡션은 텍스트 레이어에만 둔다 (이미지 생성 프롬프트에 대사를 넣지 않는다).
  *
@@ -27,8 +27,8 @@
  * - 공통 정규화 뒤 각 enum 값을 vocabulary.json 배열과 비교한다(스키마 enum과
  *   동일 집합). 인덱스 1~4와 character_id는 기존 조립 컷에 정확히 대응해야 한다.
  *   유효한 필드별 값을 보존하고 무효·누락 필드만 사유를 붙여 최대 1회 재요청한다.
- *   재요청 후에도 무효면 그 필드에 한해 storyboard-assembly.ts 현행 기본값으로
- *   돌아간다. time_of_day null은 기본값 유지로 해석한다.
+  *   재요청 후에도 무효면 그 필드에 한해 cut-defaults.ts 기본값으로
+  *   돌아간다. time_of_day null은 기본값 유지로 해석한다.
  * - 연출 전체가 실패해도 F2 유효 대사는 보존하고, 반대로 대사만 무효면 유효한
  *   연출은 보존한다. 이미지 생성 전에 적용한다.
  *
@@ -42,6 +42,16 @@ import {
   logObservedLength,
   normalizeModelString,
 } from "./model-text";
+import {
+  defaultCaptionForBeat,
+  defaultReservedZoneFor,
+  getBeatExpressionPose,
+  getCaptionPositions,
+  getCutShotPlan,
+  getFirstCutTimeOfDay,
+  getSupportingCutIndex,
+  getSupportingDefault,
+} from "./cut-defaults";
 import { getCaptionToneById } from "./caption-tones";
 import vocabularyRaw from "@/spec/vocabulary.json";
 
@@ -117,68 +127,14 @@ function readVocabList(key: string): string[] {
   return list;
 }
 
-// 아래 기본값 3종은 storyboard-assembly.ts의 현행 값과 같은 내용이다. 그 파일은
-// OC-B 소유라 import하지 않고 서버에 둔다 — 값이 바뀌면 양쪽을 함께 맞춰야 한다.
-const BEAT_EXPRESSION_POSE: Record<string, { expression: string; pose: string }> = {
-  hook: { expression: "surprised", pose: "stand" },
-  problem: { expression: "worried", pose: "sit" },
-  solution: { expression: "determined", pose: "stand" },
-  cta: { expression: "laugh", pose: "walk" },
-  question: { expression: "worried", pose: "stand" },
-  fact: { expression: "neutral", pose: "stand" },
-  benefit: { expression: "smile", pose: "arms_up" },
-  before: { expression: "tired", pose: "slump" },
-  turning: { expression: "determined", pose: "point" },
-  after: { expression: "relieved", pose: "stretch" },
-};
+// 컷 기본값은 lib/llm/cut-defaults.ts 단일 출처에서 읽는다 —
+// storyboard-assembly.ts의 조립 기본값과 같은 값이다(issue #152 W1-a).
 
-const DEFAULT_SHOT_PLAN = [
-  { shot_type: "closeup", camera_angle: "eye" },
-  { shot_type: "full", camera_angle: "eye" },
-  { shot_type: "waist", camera_angle: "eye" },
-  { shot_type: "wide", camera_angle: "low" },
-];
-
-const DEFAULT_CAPTION_POSITIONS = ["top_left", "top_right", "top_left", "top_left"];
-
-const SUPPORTING_DEFAULT = { expression: "smile", pose: "point" };
-
-// storyboard-assembly.ts와 같은 규칙: 조연은 CTA 직전 컷(3번째)에만 함께 등장한다.
+// 조연은 CTA 직전 컷(supporting_cut_index)에만 함께 등장한다 — 조립과 같은 규칙.
 function expectedCharacterIds(cutIndex: number, hasSupporting: boolean): string[] {
   const ids = ["protagonist"];
-  if (hasSupporting && cutIndex === 3) ids.push("supporting");
+  if (hasSupporting && cutIndex === getSupportingCutIndex()) ids.push("supporting");
   return ids;
-}
-
-function defaultReservedFor(position: string): string {
-  return position.startsWith("top") ? "top" : "bottom";
-}
-
-function defaultCaptionForBeat(beat: string, subject: string): string {
-  switch (beat) {
-    case "hook":
-      return `${subject}, 이거 알고 계셨나요?`;
-    case "problem":
-      return `${subject} 때문에 정말 힘들었어요`;
-    case "before":
-      return "이러다 안 되겠다 싶었죠";
-    case "turning":
-      return "그러다 방법을 하나 찾았어요";
-    case "solution":
-      return "이렇게 하니까 확실히 달라졌어요";
-    case "after":
-      return "지금은 훨씬 편해졌어요";
-    case "benefit":
-      return "이 방법의 진짜 효과는 따로 있어요";
-    case "fact":
-      return "사실은 이런 이유가 있었어요";
-    case "question":
-      return `${subject}, 왜 그런 걸까요?`;
-    case "cta":
-      return "지금 바로 확인해보세요";
-    default:
-      return "지금 바로 확인해보세요";
-  }
 }
 
 /** 조립 현행 기본값으로 컷 연출 1개를 만든다. */
@@ -188,27 +144,30 @@ function defaultDirection(
   hasSupporting: boolean
 ): CutDirection {
   const i = cutIndex - 1;
-  const ep = BEAT_EXPRESSION_POSE[beat] ?? { expression: "neutral", pose: "stand" };
+  const ep = getBeatExpressionPose(beat) ?? { expression: "neutral", pose: "stand" };
+  const shotPlan = getCutShotPlan();
+  const captionPositions = getCaptionPositions();
+  const supportingDefault = getSupportingDefault();
   const characters: DirectionCharacter[] = [
     { character_id: "protagonist", expression: ep.expression, pose: ep.pose },
   ];
   if (expectedCharacterIds(cutIndex, hasSupporting).includes("supporting")) {
     characters.push({
       character_id: "supporting",
-      expression: SUPPORTING_DEFAULT.expression,
-      pose: SUPPORTING_DEFAULT.pose,
+      expression: supportingDefault.expression,
+      pose: supportingDefault.pose,
     });
   }
-  const caption_position = DEFAULT_CAPTION_POSITIONS[i];
+  const caption_position = captionPositions[i];
   const direction: CutDirection = {
     cut_index: cutIndex,
-    shot_type: DEFAULT_SHOT_PLAN[i].shot_type,
-    camera_angle: DEFAULT_SHOT_PLAN[i].camera_angle,
+    shot_type: shotPlan[i].shot_type,
+    camera_angle: shotPlan[i].camera_angle,
     characters,
     caption_position,
-    reserved_zone: defaultReservedFor(caption_position),
+    reserved_zone: defaultReservedZoneFor(caption_position),
   };
-  if (cutIndex === 1) direction.time_of_day = "morning";
+  if (cutIndex === 1) direction.time_of_day = getFirstCutTimeOfDay();
   return direction;
 }
 
@@ -414,11 +373,11 @@ function validateDirection(
     const entry = rawCharacters.find(
       (c): c is Record<string, unknown> => isRecord(c) && c.character_id === characterId
     );
-    const base =
-      fallback.characters.find((c) => c.character_id === characterId) ??
-      (characterId === "supporting"
-        ? { character_id: characterId, ...SUPPORTING_DEFAULT }
-        : { character_id: characterId, expression: "neutral", pose: "stand" });
+      const base =
+        fallback.characters.find((c) => c.character_id === characterId) ??
+        (characterId === "supporting"
+          ? { character_id: characterId, ...getSupportingDefault() }
+          : { character_id: characterId, expression: "neutral", pose: "stand" });
     if (!entry) {
       reasons.push(`cut ${cutIndex} characters.${characterId} 누락`);
       fields.characters[characterId] = false;
@@ -768,7 +727,7 @@ async function generateCaptionsForCuts(
     if (text) {
       captions.push({ cut_index: cutIndex, text });
     } else {
-      // 여전히 무효인 그 컷만 기존 BEAT_CAPTION 문장으로 채운다.
+      // 여전히 무효인 그 컷만 컷 기본값 문장으로 채운다.
       captions.push({
         cut_index: cutIndex,
         text: defaultCaptionForBeat(input.beats[i - 1], subject),

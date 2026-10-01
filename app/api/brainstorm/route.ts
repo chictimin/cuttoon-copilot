@@ -43,7 +43,13 @@ export async function POST(request: Request) {
     const extracted = suppliedDraft ? undefined : await extractDraftFromSubject(trimmed);
     const draft = suppliedDraft ?? extracted?.draft;
 
-    const { turns, flowSupplement } = await generateBrainstormTurns(trimmed, draft);
+    // 프로젝트 분야(문자열 배열, 없으면 빈 배열) — 프롬프트의 <프로젝트 분야> 태그에 넣는다.
+    const rawIndustry = (body.context as Record<string, unknown> | undefined)?.industry;
+    const industry = Array.isArray(rawIndustry)
+      ? rawIndustry.filter((v): v is string => typeof v === "string")
+      : [];
+
+    const { turns, flowSupplement } = await generateBrainstormTurns(trimmed, draft, { industry });
     // flowSupplement: flow 옵션 중 로컬 목록으로 보충한 위치. 화면은 서버가
     // 정규화한 flow 옵션을 사용한다(F1 계약).
     return Response.json({ turns, resolved: extracted?.resolved ?? [], flowSupplement });
