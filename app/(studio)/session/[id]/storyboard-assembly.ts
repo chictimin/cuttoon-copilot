@@ -10,7 +10,6 @@
 
 import { buildSessionCast, type MascotRef } from "@/lib/llm/session-cast";
 import { getBeatsForFlow, getFlowOptions } from "@/lib/llm/narrative-flow";
-import { NO_SUPPORTING_OPTION } from "@/lib/llm/brainstorm-options";
 import {
   defaultCaptionForBeat,
   defaultReservedZoneFor,
@@ -39,8 +38,6 @@ export interface BrainstormAnswers {
   protagonist: string;
   supporting: string | null;
   flow: string;
-  /** 프로젝트 마스코트(issue #150 C3). assembleStoryboard 4번째 인자로도 받을 수 있다. */
-  mascot?: MascotRef;
 }
 
 // TODO(A①): 실제 3턴 슬롯채우기 LLM 호출로 교체. 지금은 즉석에서 조립만 한다.
@@ -56,24 +53,24 @@ export function assembleStoryboard(
   subject: string,
   answers: BrainstormAnswers,
   palette: string[] = [],
-  mascotArg?: MascotRef
+  mascot?: MascotRef
 ): Storyboard {
   const beats = (getBeatsForFlow(answers.flow) ?? getBeatsForFlow(DEFAULT_FLOW_KEY)!) as NarrativeBeat[];
-  const hasSupporting = answers.supporting !== null && answers.supporting !== NO_SUPPORTING_OPTION;
   // 컷 기본값은 lib/llm/cut-defaults.ts 단일 출처에서 읽는다(captions.ts 폴백과 같은 값).
   const shotPlan = getCutShotPlan();
   const captionPositions = getCaptionPositions();
   const supportingCutIndex = getSupportingCutIndex();
 
-  // cast는 C2(buildSessionCast)가 확정한다. mascot은 인자 우선, 없으면 answers에서
-  // 읽고, 둘 다 없으면 현행 동작(자유 입력 조연·조연 없음)이다.
-  const mascot = mascotArg ?? answers.mascot;
+  // cast는 C2(buildSessionCast)가 확정한다. mascot은 4번째 인자로만 받는다.
   const { cast } = buildSessionCast({
     protagonist: answers.protagonist,
     supporting: answers.supporting,
     mascot,
     palette,
   });
+  // 조연 유무는 답변이 아니라 cast로 본다 — 빈·공백 조연은 cast에 조연이 없어
+  // 3번째 컷에 cast에 없는 "supporting" id가 남지 않는다.
+  const hasSupporting = cast.some((member) => member.role === "supporting");
   // 3번째 컷 조연의 character_id는 cast의 조연 값을 쓴다 — 마스코트면 mascot.label,
   // 자유 입력이면 "supporting"이다(값은 cut-defaults 로더 그대로).
   const supportingId =

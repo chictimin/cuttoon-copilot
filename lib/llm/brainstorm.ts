@@ -264,6 +264,13 @@ function validateTurns(
         reasons.push(`"${key}" options[${i}]이 중복 키`);
         continue;
       }
+      // supporting도 중복을 제거하고 센다 — [NO,NO,NO]나 중복 후보가 3개로
+      // 통과해 withMascotFirst 결과가 2개가 되는 것을 막는다. 3개 미만이면
+      // 아래 개수 검사에서 무효가 되어 기존 1회 재요청 경로를 탄다.
+      if (key === "supporting" && normalized.includes(opt)) {
+        reasons.push(`"${key}" options[${i}]이 중복`);
+        continue;
+      }
       normalized.push(opt);
     }
 
@@ -414,22 +421,19 @@ function isUsableMascot(mascot: MascotRef | undefined): mascot is MascotRef {
 
 /**
  * supporting 옵션 맨 앞에 마스코트 후보를 결정적으로 넣는다(issue #150 C5).
- * 모델이 만들게 하지 않고, 결과는 3개 유지 — 마스코트 + 모델 후보 1개 +
- * NO_SUPPORTING_OPTION. 모델 검증(정확히 3개·NO 포함)은 이미 통과한 뒤라
- * 규칙과 충돌하지 않는다.
+ * 모델이 만들게 하지 않고, 결과는 3개 — 마스코트 + 모델 후보에서 마스코트
+ * 문자열·NO를 뺀 첫 고유 후보 1개 + NO_SUPPORTING_OPTION. 검증에서 중복을
+ * 제거하고 3개를 세므로(위 validateTurns) 모델 후보는 항상 살아 있다.
  */
 function withMascotFirst(options: string[], mascot: MascotRef): string[] {
   const mascotStr = mascotOption(mascot);
-  const rest = options.filter((o) => o !== mascotStr && o !== NO_SUPPORTING_OPTION);
-  const out = [mascotStr, ...rest.slice(0, 1)];
-  if (!out.includes(NO_SUPPORTING_OPTION)) out.push(NO_SUPPORTING_OPTION);
-  // 모델이 NO_SUPPORTING_OPTION만 3개 낸 병적 경우에만 2개 — 남은 모델 옵션을
-  // 순서대로 보충한다.
+  let pick: string | undefined;
   for (const o of options) {
-    if (out.length >= 3) break;
-    if (!out.includes(o)) out.push(o);
+    if (o === mascotStr || o === NO_SUPPORTING_OPTION) continue;
+    pick = o;
+    break;
   }
-  return out.slice(0, 3);
+  return pick === undefined ? [mascotStr, NO_SUPPORTING_OPTION] : [mascotStr, pick, NO_SUPPORTING_OPTION];
 }
 
 export async function generateBrainstormTurns(
