@@ -9,7 +9,7 @@
 // 필수 슬롯이 전부 찼는가로 결정적이어야 한다."
 
 import { buildSessionCast, type MascotRef } from "@/lib/llm/session-cast";
-import { getBeatsForFlow, getFlowOptions } from "@/lib/llm/narrative-flow";
+import { getBeatsForFlow, getFlowOptions, type CtaStrength } from "@/lib/llm/narrative-flow";
 import {
   defaultCaptionForBeat,
   defaultReservedZoneFor,
@@ -40,6 +40,13 @@ export interface BrainstormAnswers {
   flow: string;
 }
 
+/** 조립용 CTA 지정 (issue #205 K3). 없으면 clear·목적 없음 = 현행 동작. */
+export interface AssembleCta {
+  strength: CtaStrength;
+  /** 이번 편의 CTA 목적(cta_presets id). null이면 프로젝트 기본. */
+  purpose_id: string | null;
+}
+
 // TODO(A①): 실제 3턴 슬롯채우기 LLM 호출로 교체. 지금은 즉석에서 조립만 한다.
 //
 // issue #123 (축소판): 주인공 상의 색을 세션당 1회 뽑아 cast[].description에 실어
@@ -53,9 +60,14 @@ export function assembleStoryboard(
   subject: string,
   answers: BrainstormAnswers,
   palette: string[] = [],
-  mascot?: MascotRef
+  mascot?: MascotRef,
+  cta?: AssembleCta
 ): Storyboard {
-  const beats = (getBeatsForFlow(answers.flow) ?? getBeatsForFlow(DEFAULT_FLOW_KEY)!) as NarrativeBeat[];
+  // none이면 cta 없는 시퀀스로 조립한다. 키가 어긋나면 DEFAULT 흐름의 같은 강도
+  // 시퀀스로 폴백한다(위 F1 주석의 안전망과 같은 자리).
+  const strength = cta?.strength ?? "clear";
+  const beats = (getBeatsForFlow(answers.flow, strength) ??
+    getBeatsForFlow(DEFAULT_FLOW_KEY, strength)!) as NarrativeBeat[];
   // 컷 기본값은 lib/llm/cut-defaults.ts 단일 출처에서 읽는다(captions.ts 폴백과 같은 값).
   const shotPlan = getCutShotPlan();
   const captionPositions = getCaptionPositions();
@@ -105,12 +117,12 @@ export function assembleStoryboard(
       ...(i === 0 ? { time_of_day: getFirstCutTimeOfDay() as Cut["time_of_day"] } : {}),
       characters_in_frame: charactersInFrame,
       caption: {
-        text: defaultCaptionForBeat(beat, subject),
+        text: defaultCaptionForBeat(beat, subject, strength),
         bubble_type: "rounded",
         position: captionPositions[i] as Cut["caption"]["position"],
       },
       reserved_zone: defaultReservedZoneFor(captionPositions[i]) as Cut["reserved_zone"],
-      ...(beat === "cta" ? { cta_override: null } : {}),
+      ...(beat === "cta" ? { cta_override: cta?.purpose_id ?? null } : {}),
       generated_image: null,
       prompt_used: null,
     };
@@ -121,6 +133,8 @@ export function assembleStoryboard(
     subject,
     cast,
     cuts,
+    // cta 인자가 있을 때만 기록한다 — 없으면 지금과 diff 0이어야 한다.
+    ...(cta !== undefined ? { cta_strength: cta.strength } : {}),
   };
 }
 

@@ -1,4 +1,4 @@
-import { assertValidPreset } from "@/lib/llm/preset-guard";
+import { assertValidPreset, type Preset } from "@/lib/llm/preset-guard";
 import {
   archiveProject,
   getPreset,
@@ -23,6 +23,14 @@ export async function POST(request: Request) {
       { error: e instanceof Error ? e.message : "프리셋 검증 실패" },
       { status: 400 }
     );
+  }
+
+  // CTA 강도 기본값 (issue #205): 생성 시에만 기록한다. 화면이 값을 보내지
+  // 않으면 "soft"를 기록하고, 읽을 때 필드가 없으면 "clear"로 해석한다
+  // (기존 프로젝트 회귀 없음). PATCH·기존 데이터는 건드리지 않는다.
+  const preset = body as Preset;
+  if (preset.rules.cta_strength === undefined) {
+    preset.rules.cta_strength = "soft";
   }
 
   // DB 실패는 요청 내용의 문제가 아니므로 400과 구분한다. 원문 메시지는

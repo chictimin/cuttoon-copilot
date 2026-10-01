@@ -13,9 +13,14 @@
 import narrativeFlowRaw from "@/spec/data/narrative-flow.json";
 import storyboardSchema from "@/spec/storyboard.schema.json";
 
+/** CTA 강도 (issue #205). none(이야기만)·soft(은근하게)·clear(확실하게). */
+export type CtaStrength = "none" | "soft" | "clear";
+
 export interface NarrativeFlow {
   key: string;
   beats: string[];
+  /** cta_strength none일 때 쓰는 4개 beat. cta 없음, 10 beat enum 안. */
+  no_cta_beats: string[];
 }
 
 export interface NarrativeFlowFile {
@@ -59,6 +64,7 @@ export class NarrativeFlowValidationError extends Error {}
  * - beats의 각 값이 narrative_beat enum에 속하는지
  * - "cta"가 정확히 1개, 그리고 마지막(4번째) 컷이어야 함 — storyboard.schema.json의
  *   $defs.cut.allOf(narrative_beat === "cta" ⇔ cut_index === 4) 제약과 같은 규칙
+ * - flows[].no_cta_beats가 정확히 4개·enum 안·cta 0개·중복 없음 (issue #205)
  */
 export function assertValidNarrativeFlowFile(data: unknown): asserts data is NarrativeFlowFile {
   if (!isRecord(data)) {
@@ -106,6 +112,30 @@ export function assertValidNarrativeFlowFile(data: unknown): asserts data is Nar
         `flows[${index}].beats는 "cta"를 정확히 1개, 마지막(4번째) 자리에 가져야 함 (key: ${raw.key})`
       );
     }
+
+    if (!Array.isArray(raw.no_cta_beats) || raw.no_cta_beats.length !== 4) {
+      throw new NarrativeFlowValidationError(
+        `flows[${index}].no_cta_beats는 정확히 4개여야 함 (key: ${raw.key})`
+      );
+    }
+    raw.no_cta_beats.forEach((beat) => {
+      if (!VALID_BEATS.includes(beat as string)) {
+        throw new NarrativeFlowValidationError(
+          `flows[${index}].no_cta_beats의 값 "${beat}"가 storyboard.schema.json의 narrative_beat ` +
+            `enum에 없음 (key: ${raw.key}). 스키마가 바뀌었는데 이 파일을 안 맞춘 것으로 보임.`
+        );
+      }
+    });
+    if (raw.no_cta_beats.includes("cta")) {
+      throw new NarrativeFlowValidationError(
+        `flows[${index}].no_cta_beats에 "cta"가 있으면 안 됨 (key: ${raw.key})`
+      );
+    }
+    if (new Set(raw.no_cta_beats).size !== raw.no_cta_beats.length) {
+      throw new NarrativeFlowValidationError(
+        `flows[${index}].no_cta_beats에 중복이 있음 (key: ${raw.key})`
+      );
+    }
   });
 }
 
@@ -124,6 +154,21 @@ export function getFlowOptions(): string[] {
 }
 
 /** 선택된 흐름 key에 대응하는 beats. 못 찾으면 undefined — 호출부가 폴백을 정한다. */
-export function getBeatsForFlow(key: string): string[] | undefined {
-  return narrativeFlowFile.flows.find((f) => f.key === key)?.beats;
+export function getBeatsForFlow(key: string, strength?: CtaStrength): string[] | undefined {
+  const flow = narrativeFlowFile.flows.find((f) => f.key === key);
+  if (!flow) return undefined;
+  // none이면 cta 없는 시퀀스. strength가 없으면 clear(현행) 취급.
+  if (strength === "none") return flow.no_cta_beats;
+  return flow.beats;
+}
+
+/**
+ * 흐름 라벨 표시용 (issue #205). 끝 "→ CTA"를 "→ 마무리"로 바꾼 문자열을
+ * 돌려준다 — key 자체는 그대로라 서버 계약·검증에 영향 없다.
+ * 클라이언트에서도 import한다(순수 함수).
+ */
+export function displayFlowLabel(key: string): string {
+  const suffix = "→ CTA";
+  if (key.endsWith(suffix)) return `${key.slice(0, -suffix.length)}→ 마무리`;
+  return key;
 }

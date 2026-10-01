@@ -289,7 +289,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 | 파일 | 내용 | 로더 |
 |---|---|---|
 | `cta_presets.json` | CTA 문구 8종 | `lib/llm/cta-presets.ts` |
-| `narrative-flow.json` | 서사 흐름 템플릿 3종(#153) | `lib/llm/narrative-flow.ts` |
+| `narrative-flow.json` | 서사 흐름 템플릿 3종(#153) + `no_cta_beats`(#205) | `lib/llm/narrative-flow.ts` |
 | `style-vocabulary.json` | 스타일 키워드 매핑 | `lib/llm/preset-guard.ts`(`checkUnmappedWordsPolicy` 관련) |
 | `caption-tones.json` | 컷 대사 톤 목록·설명 | `lib/llm/caption-tones.ts` |
 
@@ -303,6 +303,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 | `beat_caption_templates` | `cut-defaults.json:15-26` | narrative_beat별 캡션 문구 템플릿 |
 | `cut_shot_plan` | `cut-defaults.json:27-32` | 컷별 shot_type·camera_angle 고정 시퀀스 |
 | `caption_positions` | `cut-defaults.json:33` | 컷별 캡션 위치 고정 시퀀스 |
+| `cta_fallback` | `cut-defaults.json:37-40` | cta beat 폴백 대사 강도별(soft·clear, #205) |
 
 조연 기본값·등장 컷(`supporting_default`, `supporting_cut_index`)과 1컷 time_of_day(`first_cut_time_of_day`)도 같은 파일(:34-36)에 있다. `storyboard-assembly.ts`(조립)와 `captions.ts`(폴백)가 로더(`cut-defaults.ts`)로 같은 값을 읽는다.
 
