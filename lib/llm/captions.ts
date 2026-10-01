@@ -200,7 +200,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-async function callCaptionsModel(prompt: string, maxTokens: number): Promise<string> {
+/**
+ * 캡션 모델 1회 호출. retryOnTimeout이 true면(1차 호출만) TimeoutError 시 1회
+ * 다시 시도한다 — 실패 복구이지 품질 보정이 아니라서, 검증 재요청 호출에는
+ * 붙이지 않는다(최악 12초×3=36초 방지).
+ */
+async function callCaptionsModel(
+  prompt: string,
+  maxTokens: number,
+  retryOnTimeout = false
+): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY 환경 변수가 없습니다");
@@ -224,6 +233,10 @@ async function callCaptionsModel(prompt: string, maxTokens: number): Promise<str
     });
   } catch (err) {
     if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      if (retryOnTimeout) {
+        console.info("[captions-timeout] 1차 호출 타임아웃, 1회 재시도");
+        return callCaptionsModel(prompt, maxTokens, false);
+      }
       console.error("캡션 OpenAI 타임아웃");
       throw new Error("대사 생성 시간이 초과됐습니다. 다시 시도해주세요.");
     }
@@ -718,7 +731,7 @@ async function generateCaptionsForCuts(
 ): Promise<CaptionsResult> {
   const hasSupporting = input.cast.length > 1;
   const supportingId = resolveSupportingId(input);
-  const firstContent = await callCaptionsModel(buildPrompt(input, wanted), maxTokens);
+  const firstContent = await callCaptionsModel(buildPrompt(input, wanted), maxTokens, true);
   const first = parseResponseObject(firstContent);
   const captionState = collectValidCaptions(first.captions, wanted);
 
