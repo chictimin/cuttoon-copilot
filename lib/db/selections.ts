@@ -23,21 +23,30 @@ export interface SelectionInsert {
 }
 
 /**
- * 재시도 간격. 최악 추가 대기 200+400+800 = 1.4초(+시도 시간) — 저장 버튼
- * 응답성을 우선해 이 이상은 늘리지 않는다.
+ * 전체 시간 예산(deadline). selections 저장 시작 시점부터 잰다. 소량 insert에
+ * 저장 버튼 응답성을 더한 캡틴 결정값이다.
  */
-export const SELECTION_RETRY_DELAYS_MS = [200, 400, 800] as const;
+export const SELECTION_BUDGET_MS = 3000;
 
-/** 최대 3회 재시도 = 총 4번 시도. */
-export const SELECTION_MAX_RETRIES = 3;
+/** 시도별 타임아웃 상한. 실제 타임아웃은 min(1,000ms, 남은 예산)이다. */
+export const SELECTION_ATTEMPT_TIMEOUT_MS = 1000;
+
+/** 재시도 간격(남은 예산 안에서만 쉰다). */
+export const SELECTION_RETRY_DELAYS_MS = [200, 400] as const;
 
 /**
- * 시도별 요청 타임아웃. 소량 insert라 3초면 충분하고, 저장 버튼 응답성을 위해
- * 이 이상 기다리지 않는다. 연결이 매달리면 실패 자체가 오지 않아 재시도도 안
- * 걸리므로, 시도마다 끊어 주어야 한다. 최악 대기 = 4×3초(시도) + 1.4초(백오프)
- * = 13.4초.
+ * 다음 1회 시도를 걸 최소 남은 예산. 이보다 적으면 시도하지 않고 포기한다 —
+ * 타임아웃·왕복에 못 미치는 시도는 예산만 갉아먹기 때문이다.
  */
-export const SELECTION_ATTEMPT_TIMEOUT_MS = 3000;
+export const SELECTION_MIN_ATTEMPT_BUDGET_MS = 300;
+
+/**
+ * 무한루프 방지용 안전망. 고정 재시도 횟수 규칙이 아니라 예산이 시도 횟수를
+ * 결정한다(시도·백오프가 예산을 갉아먹어 언젠가 300ms 밑으로 떨어진다). 이 상수는
+ * 즉시 실패가 반복돼 예산이 줄지 않는 비정상 흐름에서만 걸린다 — 실측 왕복
+ * p50 120~175ms 기준으로 정상 흐름에선 예산이 먼저 바닥난다.
+ */
+export const SELECTION_MAX_ATTEMPTS = 20;
 
 export type SelectionSleep = (ms: number) => Promise<void>;
 
@@ -96,6 +105,10 @@ export function isTransientSelectionError(failure: SelectionFailure | null | und
 export interface InsertSelectionsDeps {
   client?: SupabaseClient;
   sleep?: SelectionSleep;
+  /** 전체 예산 덮어쓰기(기본 SELECTION_BUDGET_MS). 테스트용. */
+  budgetMs?: number;
+  /** 현재 시각 덮어쓰기(기본 Date.now). 테스트용 가짜 시계. */
+  now?: () => number;
 }
 
 /**
@@ -103,8 +116,18 @@ export interface InsertSelectionsDeps {
  * 응답 유실 뒤 재시도처럼 같은 묶음이 두 번 와도 행이 늘지 않으므로, 충돌 없이
  * 끝난 것과 중복으로 끝난 것 모두 성공으로 본다(upsert onConflict do nothing).
  *
- * 일시적 오류에 한해 최대 3회 재시도한다(총 4번 시도, 백오프 200·400·800ms).
- * rounds가 비어 있으면 DB에 닿지 않고 바로 끝난다.
+ * 일시적 오류에 한해 전체 예산(SELECTION_BUDGET_MS) 안에서 재시도한다.
+ * 시도별 타임아웃은 min(1,000ms, 남은 예산)이고, 백오프(200·400ms)는 남은 예산
+ * 안에서만 쉰다. 다음 시도에 쓸 남은 예산이 300ms 미만이면 시도하지 않고
+ * 포기한다. 예산을 넘기면 던지고, 호출자(POST /api/session)는 세션 200 +
+ * selectionsSaved:false로 응답한다. rounds가 비어 있으면 DB에 닿지 않고 끝난다.
+ *
+ * 예산 근거 — 읽기 전용 select 왕복 실측(n=14·15, 2026-10-01):
+ * sessions 콜드 제외 p50 175·p90 311·max 328ms, selections p50 123·p90 255·
+ * max 274ms, 콜드 첫 호출 1,532ms. selections 저장 직전 createSession이 같은
+ * DB에 2회 왕복(sessions insert·session_versions insert)해 연결이 데워져
+ * 있으므로 콜드 비용은 제외한다. 시도별 1초 = 따뜻한 p90(약 300ms)의 약 3배
+ * (쓰기 여유 — 쓰기 지연은 실DB 쓰기 금지라 미측정). 전체 3초는 캡틴 결정이다.
  */
 export async function insertSelections(
   sessionId: string,
@@ -115,6 +138,9 @@ export async function insertSelections(
 
   const client = deps?.client ?? getDb();
   const sleep = deps?.sleep ?? defaultSleep;
+  const budgetMs = deps?.budgetMs ?? SELECTION_BUDGET_MS;
+  const now = deps?.now ?? Date.now;
+  const deadline = now() + budgetMs;
 
   const rows = rounds.map((r) => ({
     session_id: sessionId,
@@ -129,22 +155,29 @@ export async function insertSelections(
   }));
 
   let lastFailure: SelectionFailure | null = null;
+  let attempts = 0;
 
-  for (let attempt = 0; attempt <= SELECTION_MAX_RETRIES; attempt++) {
-    if (attempt > 0) {
-      await sleep(SELECTION_RETRY_DELAYS_MS[attempt - 1]);
+  for (;;) {
+    const remaining = deadline - now();
+    if (remaining < SELECTION_MIN_ATTEMPT_BUDGET_MS || attempts >= SELECTION_MAX_ATTEMPTS) {
+      throw new Error(
+        lastFailure?.message
+          ? `선택 기록 저장 실패(예산 ${budgetMs}ms 소진): ${lastFailure.message}`
+          : `선택 기록 저장 실패(예산 ${budgetMs}ms 안에 시도 불가)`
+      );
     }
+    attempts++;
 
+    // 시도마다 타임아웃을 건다(.abortSignal은 PostgrestTransformBuilder의 실재
+    // API다 — src/PostgrestTransformBuilder.ts). 매달린 연결을 끊어야 위
+    // 재시도 분류가 동작한다.
     const { error, status } = await client
       .from("selections")
       .upsert(rows, {
         onConflict: "session_id,cut_index,round",
         ignoreDuplicates: true,
       })
-      // 시도마다 타임아웃을 건다(.abortSignal은 PostgrestTransformBuilder의 실재
-      // API다 — src/PostgrestTransformBuilder.ts). 매달린 연결을 끊어야 위
-      // 재시도 분류가 동작한다.
-      .abortSignal(AbortSignal.timeout(SELECTION_ATTEMPT_TIMEOUT_MS));
+      .abortSignal(AbortSignal.timeout(Math.min(SELECTION_ATTEMPT_TIMEOUT_MS, remaining)));
 
     if (!error) return;
 
@@ -160,9 +193,13 @@ export async function insertSelections(
     if (!isTransientSelectionError(failure)) {
       throw new Error(`선택 기록 저장 실패: ${error.message}`);
     }
-  }
 
-  throw new Error(
-    `선택 기록 저장 실패(재시도 ${SELECTION_MAX_RETRIES}회 소진): ${lastFailure?.message ?? "알 수 없는 오류"}`
-  );
+    const backoff =
+      SELECTION_RETRY_DELAYS_MS[Math.min(attempts - 1, SELECTION_RETRY_DELAYS_MS.length - 1)];
+    // 예산이 바닥났으면 쉬지 않고 바로 포기한다.
+    const afterAttempt = deadline - now();
+    if (afterAttempt > 0) {
+      await sleep(Math.min(backoff, afterAttempt));
+    }
+  }
 }
