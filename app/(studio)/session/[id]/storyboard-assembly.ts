@@ -9,7 +9,7 @@
 // 필수 슬롯이 전부 찼는가로 결정적이어야 한다."
 
 import { buildSessionCast, type MascotRef } from "@/lib/llm/session-cast";
-import { getBeatsForFlow, getFlowOptions, type CtaStrength } from "@/lib/llm/narrative-flow";
+import { getBeatsForFlow, getFlowOptions, type CtaRequest } from "@/lib/llm/narrative-flow";
 import {
   defaultCaptionForBeat,
   defaultReservedZoneFor,
@@ -41,11 +41,7 @@ export interface BrainstormAnswers {
 }
 
 /** 조립용 CTA 지정 (issue #205 K3). 없으면 clear·목적 없음 = 현행 동작. */
-export interface AssembleCta {
-  strength: CtaStrength;
-  /** 이번 편의 CTA 목적(cta_presets id). null이면 프로젝트 기본. */
-  purpose_id: string | null;
-}
+export type AssembleCta = CtaRequest;
 
 // TODO(A①): 실제 3턴 슬롯채우기 LLM 호출로 교체. 지금은 즉석에서 조립만 한다.
 //
@@ -122,7 +118,9 @@ export function assembleStoryboard(
         position: captionPositions[i] as Cut["caption"]["position"],
       },
       reserved_zone: defaultReservedZoneFor(captionPositions[i]) as Cut["reserved_zone"],
-      ...(beat === "cta" ? { cta_override: cta?.purpose_id ?? null } : {}),
+      ...(beat === "cta"
+        ? { cta_override: cta !== undefined && cta.strength !== "none" ? cta.purpose_id : null }
+        : {}),
       generated_image: null,
       prompt_used: null,
     };

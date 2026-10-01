@@ -5,6 +5,7 @@ import {
 } from "@/lib/llm/captions";
 import { isValidToneId } from "@/lib/llm/caption-tones";
 import { isValidCtaId } from "@/lib/llm/cta-presets";
+import type { CtaRequest } from "@/lib/llm/narrative-flow";
 
 export const runtime = "nodejs";
 
@@ -12,26 +13,29 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((x) => typeof x === "string");
 }
 
-type CtaStrength = "none" | "soft" | "clear";
-
 /**
  * cta 요청을 검증한다 (issue #205 K4). 형식 오류는 400 — 다른 강도·기본값으로
- * 보정하지 않는다. none이면 purpose_id를 보내도 무시한다.
+ * 보정하지 않는다. soft/clear는 purpose_id 키 필수(null이면 프로젝트 기본,
+ * 키 생략은 400). none이면 purpose_id를 보내도 무시한다.
  * cta 없음(undefined)도 정상 — clear + 프로젝트 기본 목적(현행)이다.
  */
 function parseCta(
   value: unknown
-): { ok: true; cta?: { strength: CtaStrength; purpose_id?: string | null } } | { ok: false; error: string } {
+): { ok: true; cta?: CtaRequest } | { ok: false; error: string } {
   if (value === undefined) return { ok: true };
   if (typeof value !== "object" || value === null) {
     return { ok: false, error: "cta는 객체여야 합니다" };
   }
-  const { strength, purpose_id } = value as Record<string, unknown>;
+  const record = value as Record<string, unknown>;
+  const { strength, purpose_id } = record;
   if (strength !== "none" && strength !== "soft" && strength !== "clear") {
     return { ok: false, error: "cta.strength는 none·soft·clear 중 하나여야 합니다" };
   }
   if (strength === "none") return { ok: true, cta: { strength } };
-  if (purpose_id === undefined || purpose_id === null) {
+  if (!("purpose_id" in record)) {
+    return { ok: false, error: "cta.purpose_id가 필요합니다(null이면 프로젝트 기본)" };
+  }
+  if (purpose_id === null) {
     return { ok: true, cta: { strength, purpose_id: null } };
   }
   if (typeof purpose_id !== "string" || purpose_id.length === 0) {

@@ -54,7 +54,7 @@ import {
 } from "./cut-defaults";
 import { getCaptionToneById } from "./caption-tones";
 import { getCtaPresetById, getFallbackCtaId } from "./cta-presets";
-import type { CtaStrength } from "./narrative-flow";
+import type { CtaRequest, CtaStrength } from "./narrative-flow";
 import vocabularyRaw from "@/spec/vocabulary.json";
 
 export interface CaptionContext {
@@ -82,10 +82,7 @@ export interface CaptionsRequest {
    * CTA 강도 요청 (issue #205). 없으면 clear + 프로젝트 기본 목적(현행).
    * none이면 purpose_id를 보내도 무시한다.
    */
-  cta?: {
-    strength: CtaStrength;
-    purpose_id?: string | null;
-  };
+  cta?: CtaRequest;
 }
 
 export interface CutCaption {
@@ -535,11 +532,12 @@ function resolveStrength(input: CaptionsRequest): CtaStrength {
 
 /**
  * 이번 편의 CTA 목적 id를 정한다. none이면 목적을 쓰지 않는다(undefined).
- * purpose_id가 null·없음이면 프로젝트 기본(context.cta_format)이다.
+ * purpose_id가 null이면 프로젝트 기본(context.cta_format)이다.
  */
 function resolvePurposeId(input: CaptionsRequest): string | undefined {
-  if (resolveStrength(input) === "none") return undefined;
-  return input.cta?.purpose_id ?? input.context.cta_format;
+  const cta = input.cta;
+  if (!cta || cta.strength === "none") return undefined;
+  return cta.purpose_id ?? input.context.cta_format;
 }
 
 /**

@@ -16,6 +16,15 @@ import storyboardSchema from "@/spec/storyboard.schema.json";
 /** CTA 강도 (issue #205). none(이야기만)·soft(은근하게)·clear(확실하게). */
 export type CtaStrength = "none" | "soft" | "clear";
 
+/**
+ * 조립·대사 CTA 요청 (issue #205). soft/clear는 purpose_id 키 필수
+ * (null이면 프로젝트 기본) — 키 생략은 형식 오류다. none은 목적을 쓰지 않는다.
+ * 정의 1곳 — storyboard-assembly.ts·captions.ts·captions route가 함께 쓴다.
+ */
+export type CtaRequest =
+  | { strength: "none" }
+  | { strength: "soft" | "clear"; purpose_id: string | null };
+
 export interface NarrativeFlow {
   key: string;
   beats: string[];
