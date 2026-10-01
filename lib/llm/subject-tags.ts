@@ -8,7 +8,9 @@
  * 목록을 얻고(화면 값을 믿지 않는다), category는 subject_tags에서 순서대로
  * 대응시킨다. 개수가 다르거나 누락되면 그 태그는 "제품"으로 둔다.
  *
- * 누출 방지 원칙(원문 브랜드는 어떤 경우에도 LLM·이미지로 보내지 않는다):
+ * 누출 방지 원칙(원문 브랜드는 어떤 경우에도 LLM·이미지로 보내지 않는다 —
+ * 단, 카테고리 추론 호출(K9)은 원문을 입력으로 쓴다. 그 출력은 category만
+ * 정리해 채택하고 raw는 버린다):
  * - 매칭은 절단 전 원문(fullRaw)으로 한다. 30자 절단은 저장·표시용 raw에만
  *   적용한다. 절단 꼬리가 텍스트에 남아도 매칭돼 category로 바뀐다.
  * - raw 매칭은 대소문자 무시 + 글자 사이 공백 유무 무시("New Balance" ↔
@@ -69,15 +71,28 @@ export interface ParsedSubjectTag {
  *   다음 위치에서 다시 시도하므로 안쪽 `[A]`만 잡힌다.
  * - `[A:B]`는 raw=A·category=B(사용자 지정). 콜론이 여러 개면 첫 번째 기준이다.
  *   category가 비면 지정 없음으로 취급한다. raw가 비면 태그가 아니다.
- * - 최대 3개. raw는 30자로 잘라 저장하고, 매칭은 절단 전 원문으로 한다.
+ * - limit까지만 받는다. raw는 30자로 잘라 저장하고, 매칭은 절단 전 원문으로 한다.
  * - raw 정규화(소문자·공백 제거) 기준 중복 제거 — 먼저 나온 것을 유지한다.
  */
 export function parseSubjectTagDetails(subject: string): ParsedSubjectTag[] {
+  return parseTagDetails(subject, SUBJECT_TAG_MAX_COUNT);
+}
+
+/**
+ * 상한 없는 파싱. 투영(projectForModel) 전용이다 — 4번째 이후 태그도 "제품"으로
+ * 투영해야 해서 파싱 자체는 전부 본다. 저장(subject_tags)·추론 대상은
+ * parseSubjectTagDetails의 3개 제한을 그대로 둔다.
+ */
+function parseAllTagDetails(subject: string): ParsedSubjectTag[] {
+  return parseTagDetails(subject, Number.MAX_SAFE_INTEGER);
+}
+
+function parseTagDetails(subject: string, limit: number): ParsedSubjectTag[] {
   const tags: ParsedSubjectTag[] = [];
   const seen = new Set<string>();
 
   for (const match of subject.matchAll(TAG_PATTERN)) {
-    if (tags.length >= SUBJECT_TAG_MAX_COUNT) break;
+    if (tags.length >= limit) break;
     const inner = match[1].trim();
     if (!inner) continue;
 
@@ -152,9 +167,11 @@ function categoryAt(
  * - 서버가 subject를 스스로 다시 파싱해 raw 목록을 얻는다. category는
  *   subjectTags에서 순서대로 대응시키며, subjectTags 원소의 raw는 보지 않는다
  *   (위치가 식별자다). 개수 불일치·누락이면 그 태그는 "제품"이다.
- * - 매칭은 절단 전 원문 + 대소문자 무시 + 공백 유무 무시 + 괄호 포함·미포함
- *   둘 다다. 모든 raw(긴 것 먼저)를 하나의 교대 정규식으로 묶어 한 번만 훑고
- *   콜백으로 category를 넣는다.
+ * - 매칭은 절단 전 원문 + 대소문자 무시 + 공백 유무 무시 + 괄호 span 전체
+ *   (`[raw:category]`·`[raw]`) 먼저 + 괄호 밖 맨몸 raw 나중이다. 둘을 하나의
+ *   교대 정규식으로 묶어 한 번만 훑고 콜백으로 category를 넣는다(span 안의
+ *   `:category` 표기는 버리고 매핑값을 쓴다).
+ * - 4번째 이후 태그도 전부 투영한다(3개 초과분은 "제품" — 조용한 누출 금지).
  * - 바꾼 뒤 남은 괄호 기호는 지운다.
  */
 export function projectForModel(
@@ -162,7 +179,7 @@ export function projectForModel(
   subject: string,
   subjectTags?: SubjectTag[]
 ): string {
-  const details = parseSubjectTagDetails(subject);
+  const details = parseAllTagDetails(subject);
   const fullRaws = details.map((tag) => tag.fullRaw);
   const ordered = details
     .map((tag, index) => ({ fullRaw: tag.fullRaw, index }))
@@ -172,7 +189,7 @@ export function projectForModel(
 
   const parts = ordered.map(({ fullRaw }, k) => {
     const chars = [...normalizeTagText(fullRaw)].map(escapeRegExpChar).join("\\s*");
-    return `(?<t${k}>\\[${chars}\\]|${chars})`;
+    return `(?<t${k}>\\[${chars}(?::[^\\[\\]\\n]*)?\\]|${chars})`;
   });
   const pattern = new RegExp(parts.join("|"), "giu");
 
