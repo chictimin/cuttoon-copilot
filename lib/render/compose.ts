@@ -95,8 +95,8 @@ function wrapText(text: string, fontSize: number, maxWidth: number): string[] {
   return lines.length > 0 ? lines : [""];
 }
 
-function fitText(text: string, maxWidth: number, maxHeight: number) {
-  for (let fontSize = FONT_MAX; fontSize >= FONT_MIN; fontSize -= 2) {
+function fitText(text: string, maxWidth: number, maxHeight: number, fontMax: number = FONT_MAX) {
+  for (let fontSize = fontMax; fontSize >= FONT_MIN; fontSize -= 2) {
     const lines = wrapText(text, fontSize, maxWidth - PADDING * 2);
     if (lines.length * fontSize * LINE_HEIGHT <= maxHeight) {
       return { fontSize, lines };
@@ -151,11 +151,25 @@ function tailGeometry(canvasW: number, canvasH: number, cx: number, cy: number, 
   return { angle, totalDist, maxProtrude };
 }
 
-type Tail = { angle: number; totalDist: number; maxProtrude: number };
+// fixedProtrude가 있으면 목표점 거리와 상관없이 그 길이만큼만 튀어나온다 — center용(#170).
+type Tail = { angle: number; totalDist: number; maxProtrude: number; fixedProtrude?: number };
 
 function protrudeFrom(boundaryDist: number, tail: Tail): number {
+  if (tail.fixedProtrude !== undefined) return tail.fixedProtrude;
   const remaining = Math.max(tail.totalDist - boundaryDist, 0);
   return Math.min(remaining * TAIL_REACH_RATIO, tail.maxProtrude);
+}
+
+// center는 원래(2026-08-19) 꼬리를 안 그렸다 — 기본 목표점(화면 중앙, 세로 42%)이
+// center 말풍선 몸통 안쪽에 들어가서 방향 자체가 의미가 없기 때문. 그런데 꼬리가
+// 없으면 누가 말하는지 안 보여서(#170), 웹툰에서 흔한 "아래쪽 화자를 향한 짧은
+// 꼬리"를 고정 방향·고정 길이로 단다. 살짝 왼쪽으로 기울인 건 정확히 수직이면
+// 꼬리가 몸통 한가운데에 박혀 장식처럼 보여서다.
+const CENTER_TAIL_ANGLE = Math.PI * 0.58;
+const CENTER_TAIL_PROTRUDE_RATIO = 0.045;
+
+function centerTail(canvasH: number): Tail {
+  return { angle: CENTER_TAIL_ANGLE, totalDist: 0, maxProtrude: 0, fixedProtrude: canvasH * CENTER_TAIL_PROTRUDE_RATIO };
 }
 
 // 타원 테두리 중 꼬리가 나갈 좁은 구간만 갈라서, 그 경계점에서 목표점 쪽으로
@@ -239,10 +253,11 @@ function rectPath(x: number, y: number, w: number, h: number, rx: number, tail: 
 function bubbleShapeSvg(
   bubbleType: BubbleType, x: number, y: number, w: number, h: number,
   position: Position, canvasW: number, canvasH: number, headTarget: HeadTarget,
+  radii: { rx: number; ry: number },
 ): string {
   const cx = x + w / 2;
   const cy = y + h / 2;
-  const tail = position === "center" ? null : tailGeometry(canvasW, canvasH, cx, cy, headTarget);
+  const tail = position === "center" ? centerTail(canvasH) : tailGeometry(canvasW, canvasH, cx, cy, headTarget);
 
   if (bubbleType === "rect") {
     return rectPath(x, y, w, h, 6, tail);
@@ -257,11 +272,44 @@ function bubbleShapeSvg(
     }).join("");
     return `${base}${bumps}`;
   }
-  // rounded: 사각형이 아니라 실제 웹툰처럼 타원으로 — 텍스트 박스보다 넉넉하게 감싼다
-  const rx = (w / 2) * 1.12;
-  const ry = (h / 2) * 1.28;
-  return ellipsePath(cx, cy, rx, ry, tail);
+  // rounded: 사각형이 아니라 실제 웹툰처럼 타원으로 — 크기는 ellipseRadii()가 정한다
+  return ellipsePath(cx, cy, radii.rx, radii.ry, tail);
 }
+
+// rounded 타원 크기. 가로는 텍스트 박스의 1.12배, 세로는 1.28배가 기본이다. 그런데
+// 대사가 길어 줄이 많아지면 맨 윗줄·아랫줄 양 끝(텍스트 박스의 모서리 쪽)이 타원
+// 곡선 밖으로 삐져나가 글자가 테두리에 닿았다(#170, 9/30 QA — 7줄에서 첫 줄이 닿음).
+// 타원 식 (a/rx)² + (b/ry)² ≤ 1 로, 가장 긴 줄의 반폭(a)과 글자 묶음의 반높이(b)가
+// 여유(ELLIPSE_TEXT_FIT) 안에 들어오도록 필요하면 세로만 더 키운다 — 짧은 대사는
+// 기본 크기 그대로라 모양이 안 바뀐다.
+const ELLIPSE_TEXT_FIT = 0.85;
+
+function ellipseRadii(w: number, bubbleH: number, widestLine: number, textH: number) {
+  const rx = (w / 2) * 1.12;
+  let ry = (bubbleH / 2) * 1.28;
+  const a = widestLine / 2;
+  const b = textH / 2;
+  const xShare = Math.min((a / rx) ** 2, ELLIPSE_TEXT_FIT * 0.9);
+  const needRy = b / Math.sqrt(ELLIPSE_TEXT_FIT - xShare);
+  if (needRy > ry) ry = needRy;
+  return { rx, ry };
+}
+
+// 말풍선 도형(테두리)은 구석 자리에서 일부러 캔버스 밖으로 살짝 걸치지만(위
+// POSITION_BOX 주석, 2026-08-19), 글자는 항상 캔버스 안쪽 TEXT_SAFE_MARGIN 안에
+// 있어야 한다 — 글자 폭 추정 기준으로 top_right의 긴 줄 끝이 1024px 캔버스에서
+// 약 1030px까지 나가는 경우가 있었다(#169).
+const TEXT_SAFE_MARGIN = 16;
+// 이 줄 수를 넘으면 "살짝 걸침"을 그만두고 도형 전체를 캔버스 안으로 당긴다 —
+// 말풍선이 세로로 길어지면 같은 폭만큼 걸쳐도 잘린 테두리가 길게 보여서(#169).
+const OVERHANG_MAX_LINES = 3;
+// center는 줄이 많아지면 위아래로 커져 인물을 덮으므로(#170), 먼저 옆으로 넓혀
+// 줄 수를 줄인다 — 캔버스 폭의 CENTER_MAX_W까지.
+const CENTER_MAX_W = 0.8;
+const CENTER_WIDEN_STEP = 0.04;
+const ROUNDED_WRAP_RATIO = 0.9;
+// 줄이 많아 도형 전체를 안으로 당길 때 테두리 선(두께 3) 절반이 잘리지 않을 만큼만 띄운다.
+const STROKE_MARGIN = 2;
 
 const VALID_BUBBLE_TYPES: BubbleType[] = ["rounded", "rect", "cloud"];
 
@@ -286,14 +334,48 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   }
 
   const box = POSITION_BOX[position];
-  const x = box.x * canvasW;
-  const maxWidth = box.w * canvasW;
+  let x = box.x * canvasW;
+  let maxWidth = box.w * canvasW;
   const maxHeight = canvasH * 0.3;
 
-  const { fontSize, lines } = fitText(caption.text, maxWidth, maxHeight);
+  // rounded는 글자를 박스 폭보다 조금 좁게 감싼다 — 줄 양 끝이 타원 곡선에 덜 걸려서
+  // ellipseRadii()가 세로를 덜 키워도 된다(#170).
+  const wrapWidth = (w: number) => (bubbleType === "rounded" ? w * ROUNDED_WRAP_RATIO : w);
+
+  let { fontSize, lines } = fitText(caption.text, wrapWidth(maxWidth), maxHeight);
+
+  if (position === "center") {
+    // 줄이 OVERHANG_MAX_LINES를 넘으면 가운데를 기준으로 폭을 넓혀 줄 수를 줄인다(#170).
+    // 글자 크기는 원래 폭에서 정해진 값을 넘지 않게 묶는다 — 안 묶으면 폭이 넓어진
+    // 만큼 fitText가 글자를 키워 버려서 줄 수(=높이)가 그대로다(9/30 테스트에서 확인).
+    const baseFont = fontSize;
+    let w = box.w;
+    while (lines.length > OVERHANG_MAX_LINES && w + CENTER_WIDEN_STEP <= CENTER_MAX_W + 1e-9) {
+      w += CENTER_WIDEN_STEP;
+      ({ fontSize, lines } = fitText(caption.text, wrapWidth(w * canvasW), maxHeight, baseFont));
+    }
+    maxWidth = w * canvasW;
+    x = ((1 - w) / 2) * canvasW;
+  }
+
   const textH = lines.length * fontSize * LINE_HEIGHT;
   const bubbleH = textH + PADDING * 2;
+  const widestLine = Math.max(...lines.map((l) => textWidth(l, fontSize)));
+  const radii = ellipseRadii(maxWidth, bubbleH, widestLine, textH);
   let y = box.y * canvasH;
+
+  // 좌우 경계(#169). 도형은 짧은 대사에서만 살짝 걸치게 두고, 줄이 많으면 도형 전체를
+  // 캔버스 안으로 당긴다. 어느 경우든 글자는 TEXT_SAFE_MARGIN 안쪽에 둔다.
+  {
+    const cx = x + maxWidth / 2;
+    const shapeHalf = bubbleType === "rounded" ? radii.rx : maxWidth / 2;
+    const keepHalf = lines.length > OVERHANG_MAX_LINES ? shapeHalf : widestLine / 2;
+    const margin = lines.length > OVERHANG_MAX_LINES ? STROKE_MARGIN : TEXT_SAFE_MARGIN;
+    const overRight = cx + keepHalf - (canvasW - margin);
+    const overLeft = margin - (cx - keepHalf);
+    if (overRight > 0) x -= overRight;
+    else if (overLeft > 0) x += overLeft;
+  }
 
   // rounded는 텍스트 박스보다 위아래로 28% 더 큰 타원이라, top_left/top_right처럼
   // y가 0에 가까운 자리에서는 타원 윗부분이 캔버스 경계(0) 위로 넘어간다. composeCut의
@@ -304,15 +386,14 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   // 원래 y를 써서 "글씨가 위에 떠있는" 결함이 있었다).
   if (bubbleType === "rounded") {
     const cy = y + bubbleH / 2;
-    const ry = (bubbleH / 2) * 1.28;
-    const overflowTop = ry - cy;
+    const overflowTop = radii.ry - cy;
     if (overflowTop > 0) y += overflowTop;
   }
 
   // #79/#92 fallback을 여기서도 그대로 이어받는다 — bubbleShapeSvg에 원본 caption.*을
   // 넘기면 몸통/꼬리 계산에 유효하지 않은 enum이 들어가 버리므로, 위에서 이미
   // center/rounded로 정리한 position/bubbleType을 넘긴다.
-  const shape = bubbleShapeSvg(bubbleType, x, y, maxWidth, bubbleH, position, canvasW, canvasH, headTarget);
+  const shape = bubbleShapeSvg(bubbleType, x, y, maxWidth, bubbleH, position, canvasW, canvasH, headTarget, radii);
 
   const cx = x + maxWidth / 2;
   const firstLineY = y + PADDING + fontSize * 0.85;
