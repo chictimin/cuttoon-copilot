@@ -33,5 +33,9 @@
   "caption_positions": ["top_left", "top_right", "top_left", "top_left"],
   "supporting_default": { "expression": "smile", "pose": "point" },
   "supporting_cut_index": 3,
-  "first_cut_time_of_day": "morning"
+  "first_cut_time_of_day": "morning",
+  "cta_fallback": {
+    "soft": "오늘도 좋은 하루 보내세요",
+    "clear": "지금 바로 확인해보세요"
+  }
 }
