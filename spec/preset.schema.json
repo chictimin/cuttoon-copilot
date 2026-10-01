@@ -168,6 +168,24 @@
           "description": "industry 안에서 이 프로젝트가 반복해 다루는 주제군(예: 카페라면 원두·디카페인·신메뉴). 컷툰 한 편의 실제 소재는 여기가 아니라 세션에서 받는다. 단어 단위 태그 — enum 아님. forbidden과 동일하게 프롬프트 조립 시 미매핑 단어 위험 있음"
         }
       }
+    },
+    "mascot": {
+      "type": "object",
+      "required": ["label", "description"],
+      "additionalProperties": false,
+      "description": "프로젝트 고정 마스코트(issue #150). 선택 필드 — 없으면 기존 동작(시트는 그림체 기준만, 컷 문구 그대로)을 유지한다. required에 넣지 않는다 — 이미 저장된 프리셋이 깨진다",
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "프로젝트에서 바뀌지 않는 cast ID(예: \"mascot\"). cast[].character_id에 들어갈 값"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "시트·컷 프롬프트가 함께 쓰는 외형·역할 서술"
+        }
+      }
     }
   }
 }
