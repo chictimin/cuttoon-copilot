@@ -21,7 +21,8 @@ function parseContext(value: unknown): CaptionContext | undefined {
 
 /**
  * F2 컷 대사 + F4 컷 연출 생성. 이미지 호출 전에 화면이 부른다.
- * body: { subject, flow, beats(4개), cast(description 목록), tone_id, context, cut_index? }
+ * body: { subject, flow, beats(4개), cast(description 목록), tone_id, context, cut_index?, supporting_id? }
+ * - supporting_id: 조연 character_id(마스코트 조연이면 mascot.label). 없으면 "supporting".
  * - cut_index(1~4)가 있으면 그 컷의 대사와 연출을 함께 다시 뽑아
  *   {captions:[1개], directions:[1개]}로 돌려준다.
  * - 없으면 4컷 전체를 {captions:[4개], directions:[4개]}로 돌려준다.
@@ -45,6 +46,7 @@ export async function POST(request: Request) {
     tone_id,
     context,
     cut_index,
+    supporting_id,
   } = (body ?? {}) as Record<string, unknown>;
 
   if (typeof subject !== "string" || subject.trim().length === 0) {
@@ -77,6 +79,14 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  // 조연 character_id(issue #150 C4). 없으면 lib에서 "supporting"으로 둔다.
+  let resolvedSupportingId: string | undefined;
+  if (supporting_id !== undefined) {
+    if (typeof supporting_id !== "string" || supporting_id.length === 0) {
+      return Response.json({ error: "supporting_id는 비어 있지 않은 문자열이어야 합니다" }, { status: 400 });
+    }
+    resolvedSupportingId = supporting_id;
+  }
 
   const input = {
     subject: subject.trim(),
@@ -85,6 +95,7 @@ export async function POST(request: Request) {
     cast: cast as string[],
     tone_id,
     context: parsedContext,
+    ...(resolvedSupportingId !== undefined ? { supporting_id: resolvedSupportingId } : {}),
   };
 
   try {

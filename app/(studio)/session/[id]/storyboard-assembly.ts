@@ -8,7 +8,7 @@
 // PRD.md 6절: "최대 3턴, 매 턴 선택지 3개 + 직접 쓸게 + 알아서 해줘. 종료 판정은
 // 필수 슬롯이 전부 찼는가로 결정적이어야 한다."
 
-import { pickShirtColor } from "@/lib/llm/session-cast";
+import { buildSessionCast, type MascotRef } from "@/lib/llm/session-cast";
 import { getBeatsForFlow, getFlowOptions } from "@/lib/llm/narrative-flow";
 import { NO_SUPPORTING_OPTION } from "@/lib/llm/brainstorm-options";
 import {
@@ -22,7 +22,7 @@ import {
   getSupportingDefault,
 } from "@/lib/llm/cut-defaults";
 import storyboardSchema from "@/spec/storyboard.schema.json";
-import type { CastMember, Cut, CutCharacter, NarrativeBeat, Storyboard } from "./storyboard-types";
+import type { Cut, CutCharacter, NarrativeBeat, Storyboard } from "./storyboard-types";
 
 // issue #119-2 (갈래 3): 흐름 템플릿 3종(키·beats 시퀀스)은 spec/data/narrative-flow.json
 // 으로 옮겼다 — 값은 하나도 안 바뀌었다(lib/llm/narrative-flow.ts 참고).
@@ -39,6 +39,8 @@ export interface BrainstormAnswers {
   protagonist: string;
   supporting: string | null;
   flow: string;
+  /** 프로젝트 마스코트(issue #150 C3). assembleStoryboard 4번째 인자로도 받을 수 있다. */
+  mascot?: MascotRef;
 }
 
 // TODO(A①): 실제 3턴 슬롯채우기 LLM 호출로 교체. 지금은 즉석에서 조립만 한다.
@@ -53,7 +55,8 @@ export interface BrainstormAnswers {
 export function assembleStoryboard(
   subject: string,
   answers: BrainstormAnswers,
-  palette: string[] = []
+  palette: string[] = [],
+  mascotArg?: MascotRef
 ): Storyboard {
   const beats = (getBeatsForFlow(answers.flow) ?? getBeatsForFlow(DEFAULT_FLOW_KEY)!) as NarrativeBeat[];
   const hasSupporting = answers.supporting !== null && answers.supporting !== NO_SUPPORTING_OPTION;
@@ -62,17 +65,19 @@ export function assembleStoryboard(
   const captionPositions = getCaptionPositions();
   const supportingCutIndex = getSupportingCutIndex();
 
-  const shirtColor = pickShirtColor(palette);
-  const protagonistDescription = shirtColor
-    ? [answers.protagonist, `상의 ${shirtColor}`].filter(Boolean).join(", ")
-    : answers.protagonist;
-
-  const cast: CastMember[] = [
-    { character_id: "protagonist", role: "protagonist", description: protagonistDescription },
-  ];
-  if (hasSupporting && answers.supporting) {
-    cast.push({ character_id: "supporting", role: "supporting", description: answers.supporting });
-  }
+  // cast는 C2(buildSessionCast)가 확정한다. mascot은 인자 우선, 없으면 answers에서
+  // 읽고, 둘 다 없으면 현행 동작(자유 입력 조연·조연 없음)이다.
+  const mascot = mascotArg ?? answers.mascot;
+  const { cast } = buildSessionCast({
+    protagonist: answers.protagonist,
+    supporting: answers.supporting,
+    mascot,
+    palette,
+  });
+  // 3번째 컷 조연의 character_id는 cast의 조연 값을 쓴다 — 마스코트면 mascot.label,
+  // 자유 입력이면 "supporting"이다(값은 cut-defaults 로더 그대로).
+  const supportingId =
+    cast.find((member) => member.role === "supporting")?.character_id ?? "supporting";
 
   const cuts: Cut[] = beats.map((beat, i) => {
     const ep = getBeatExpressionPose(beat) ?? { expression: "neutral", pose: "stand" };
@@ -87,7 +92,7 @@ export function assembleStoryboard(
     if (hasSupporting && i === supportingCutIndex - 1) {
       const supportingDefault = getSupportingDefault();
       charactersInFrame.push({
-        character_id: "supporting",
+        character_id: supportingId,
         expression: supportingDefault.expression as Cut["characters_in_frame"][number]["expression"],
         pose: supportingDefault.pose as Cut["characters_in_frame"][number]["pose"],
       });
