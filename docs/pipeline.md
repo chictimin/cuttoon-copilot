@@ -260,14 +260,16 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 **`spec/vocabulary.json`**(위 `data/`와 다른 위치, 스키마·LLM 영역) — enum별 프롬프트 힌트. 이미지 생성 영역(`lib/openai/generate.ts`)이 프롬프트 조립에 쓴다. **캐릭터 시트 쪽 소비 경로는 5-1b절에 적었다**(`extract.ts` → `ratioClause` → `promptHint`). 컷 프롬프트(`buildCutPrompt`)의 소비 방식은 5-1절에 적었다.
 
-**아직 코드에 남은 상수** (`storyboard-assembly.ts`, 화면 영역, #152 대상)
+**컷 기본값 — `spec/data/cut-defaults.json` + `lib/llm/cut-defaults.ts`로 분리됨** (#152, 화면·스키마·LLM 영역)
 
-| 상수 | 위치 | 내용 |
+| 값 | 위치 | 내용 |
 |---|---|---|
-| `BEAT_EXPRESSION_POSE` | :30 | narrative_beat별 표정·포즈 매핑 |
-| `BEAT_CAPTION` | :43 | narrative_beat별 캡션 문구 템플릿 |
-| `CUT_SHOT_PLAN` | :56 | 컷별 shot_type·camera_angle 고정 시퀀스 |
-| `CAPTION_POSITIONS` | :63 | 컷별 캡션 위치 고정 시퀀스 |
+| `beat_expression_pose` | `cut-defaults.json:3-14` | narrative_beat별 표정·포즈 매핑 |
+| `beat_caption_templates` | `cut-defaults.json:15-26` | narrative_beat별 캡션 문구 템플릿 |
+| `cut_shot_plan` | `cut-defaults.json:27-32` | 컷별 shot_type·camera_angle 고정 시퀀스 |
+| `caption_positions` | `cut-defaults.json:33` | 컷별 캡션 위치 고정 시퀀스 |
+
+조연 기본값·등장 컷(`supporting_default`, `supporting_cut_index`)과 1컷 time_of_day(`first_cut_time_of_day`)도 같은 파일(:34-36)에 있다. `storyboard-assembly.ts`(조립)와 `captions.ts`(폴백)가 로더(`cut-defaults.ts`)로 같은 값을 읽는다.
 
 ## 7. 소유 경계
 

@@ -11,7 +11,6 @@
 import { pickShirtColor } from "@/lib/llm/session-cast";
 import { getBeatsForFlow, getFlowOptions } from "@/lib/llm/narrative-flow";
 import { NO_SUPPORTING_OPTION } from "@/lib/llm/brainstorm-options";
-export { FLOW_QUESTION } from "@/lib/llm/brainstorm-options";
 import {
   defaultCaptionForBeat,
   defaultReservedZoneFor,

@@ -9,7 +9,7 @@
  *   (context.industry, context.interests, rules.cta_format)으로 제한한다.
  *   preset 전체나 이미지·비밀값은 넘기지 않는다.
  * - 응답은 {captions:[{cut_index:1|2|3|4,text}]}. 공통 정규화 후 컷 인덱스
- *   1~4별 유효 문자열만 채택한다. 무효·누락 컷은 사유를 붙여 1회 재요청하고,
+  *   1~4별 유효 문자열만 채택한다. 무효·누락 컷은 사유를 붙여 1회 재요청하고,
   *   여전히 무효인 그 컷만 컷 기본값 문장으로 채운다.
  * - 다른 컷의 유효 대사와 사용자 편집은 서버가 건드리지 않는다 — 합치기는 화면 몫이다.
  * - 캡션은 텍스트 레이어에만 둔다 (이미지 생성 프롬프트에 대사를 넣지 않는다).
@@ -26,7 +26,7 @@
  *   bubble_type은 F4 응답에서 제외한다.
  * - 공통 정규화 뒤 각 enum 값을 vocabulary.json 배열과 비교한다(스키마 enum과
  *   동일 집합). 인덱스 1~4와 character_id는 기존 조립 컷에 정확히 대응해야 한다.
- *   유효한 필드별 값을 보존하고 무효·누락 필드만 사유를 붙여 최대 1회 재요청한다.
+  *   유효한 필드별 값을 보존하고 무효·누락 필드만 사유를 붙여 최대 1회 재요청한다.
   *   재요청 후에도 무효면 그 필드에 한해 cut-defaults.ts 기본값으로
   *   돌아간다. time_of_day null은 기본값 유지로 해석한다.
  * - 연출 전체가 실패해도 F2 유효 대사는 보존하고, 반대로 대사만 무효면 유효한
@@ -373,11 +373,11 @@ function validateDirection(
     const entry = rawCharacters.find(
       (c): c is Record<string, unknown> => isRecord(c) && c.character_id === characterId
     );
-      const base =
-        fallback.characters.find((c) => c.character_id === characterId) ??
-        (characterId === "supporting"
-          ? { character_id: characterId, ...getSupportingDefault() }
-          : { character_id: characterId, expression: "neutral", pose: "stand" });
+    const base =
+      fallback.characters.find((c) => c.character_id === characterId) ??
+      (characterId === "supporting"
+        ? { character_id: characterId, ...getSupportingDefault() }
+        : { character_id: characterId, expression: "neutral", pose: "stand" });
     if (!entry) {
       reasons.push(`cut ${cutIndex} characters.${characterId} 누락`);
       fields.characters[characterId] = false;
