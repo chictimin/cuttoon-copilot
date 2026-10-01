@@ -253,8 +253,8 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 |---|---|---|---|
 | 1 | `GET /api/session/export?id=` | `app/api/session/export/route.ts:15` | 세션 조회 → `toRenderCuts`(`:94`)로 `storyboard.cuts`를 `lib/render/`의 `Cut[]`로 좁힘(enum 밖 값은 `malformed`로 제외) |
 | 2 | `exportCuts(cuts)` | `lib/render/export.ts:17` | `cut_index` 순 정렬 → 컷마다 `readAsset(generated_image)` → `composeCut` → ZIP. 이미지 없는 컷은 건너뛰고 `skipped`에 남김 |
-| 3 | `composeCut(image, [caption], headTargets?)` | `lib/render/compose.ts:332` | 원본 이미지 위에 SVG 말풍선 오버레이를 sharp로 합성해 PNG 반환 |
-| 4 | `buildZip(entries)` | `lib/render/zip.ts` | archiver `ZipArchive`로 `cut_<n>.png`들을 묶음 |
+| 3 | `composeCut(image, [caption], headTargets?)` | `lib/render/compose.ts:413` | 원본 이미지 위에 SVG 말풍선 오버레이를 sharp로 합성해 PNG 반환 |
+| 4 | `buildZip(entries)` | `lib/render/zip.ts:11` | archiver `ZipArchive`로 `cut_<n>.png`들을 묶음 |
 
 응답: `application/zip`, 헤더 `X-Export-Included` / `X-Export-Skipped`. 포함 컷이 0개면 빈 ZIP 대신 `409`.
 
@@ -262,10 +262,10 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 - 대사는 **Export 시점에만** 이미지에 굽는다. 에디터 화면의 말풍선은 HTML 레이어라 합성과 별개다(PRD "텍스트 레이어" 원칙).
 - 자리: `caption.position` 5종을 `POSITION_BOX`(`:35`)의 고정 비율 박스로 바꾼다. 구석 자리는 일부러 캔버스 경계를 살짝 넘는다(웹툰식 "반 걸침").
-- 크기: 박스 폭 안에서 글자 수에 맞춰 폰트 40→22px로 줄이며 줄바꿈(`fitText`), 높이 상한은 캔버스의 30%(`:291`).
-- 모양: `rounded`는 텍스트 박스보다 가로 1.12배·세로 1.28배 타원(`:261-262`), `rect`·`cloud`는 사각형 기반. 몸통과 꼬리는 **하나의 폴리곤**으로 그린다(겹쳐 그리면 이음매가 보임). 불투명도 0.98.
-- 위 경계 보정: `rounded` 타원이 캔버스 위로 넘치면 넘친 만큼 아래로 민다(`:309`).
-- 꼬리: 목표점(`HeadTarget`) 방향으로, 몸통 경계~목표점 거리의 40%, 최대 캔버스 높이의 12%(`:142-143`, PR #163). `center` 자리는 꼬리를 그리지 않는다(`:245`).
+- 크기: 박스 폭 안에서 글자 수에 맞춰 폰트 40→22px로 줄이며 줄바꿈(`fitText`), 높이 상한은 캔버스의 30%(`:339`).
+- 모양: `rounded`는 텍스트 박스보다 가로 1.12배·세로 1.28배 타원(`:288-289`), `rect`·`cloud`는 사각형 기반. 몸통과 꼬리는 **하나의 폴리곤**으로 그린다(겹쳐 그리면 이음매가 보임). 불투명도 0.98.
+- 위 경계 보정: `rounded` 타원이 캔버스 위로 넘치면 넘친 만큼 아래로 민다(`:390`).
+- 꼬리: 목표점(`HeadTarget`) 방향으로, 몸통 경계~목표점 거리의 40%, 최대 캔버스 높이의 12%(`:142-143`, PR #163). `center` 자리는 고정 방향·고정 길이의 짧은 꼬리를 단다(`CENTER_TAIL_ANGLE` `:168`, `centerTail` `:171-172`, #192) — 화자 방향 반영은 #199 후속.
 - 목표점: 호출자가 컷별로 넘길 수 있지만 **지금 Export는 넘기지 않아** 항상 기본값(화면 가로 50%, 세로 42%, `:130`)이다. 인물이 한쪽에 있는 컷에서는 꼬리가 빈 곳을 가리킬 수 있다(9/30 골든패스 컷 3·4에서 관찰).
 
 **ZIP 구성**: 컷당 PNG 1장, 파일명 `cut_<cut_index>.png`. 파일명(ZIP 이름)은 `Content-Disposition`에서 subject 기반(한글은 `filename*`).
@@ -276,7 +276,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 - 폰트가 `Malgun Gothic`/`Apple SD Gothic Neo` 시스템 폰트에 의존한다(`:13`). 한글 폰트가 없는 리눅스 서버에 배포하면 글자가 깨질 수 있어, 배포 전 폰트 포함이 필요하다.
 - 글자 폭은 실제 폰트 측정이 아니라 추정치(한글 = 폰트 크기, 영문·숫자 = 0.55배)다.
-- 아주 긴 대사: 오른쪽 구석 박스가 캔버스 밖으로 크게 잘림(#169), `center` 말풍선이 인물을 덮음(#170).
+- 아주 긴 대사 경계·`center` 덮음은 #192로 해결. `center` 꼬리 방향(화자 쪽)은 #199 후속.
 
 ## 6. 데이터 파일 vs 코드 (화면·스키마·LLM·백엔드 영역분)
 
