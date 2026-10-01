@@ -36,6 +36,12 @@ export async function POST(request: Request) {
   }
 }
 
+/** sessions.id는 uuid다. 형식이 다르면 DB에 물어보지 않는다 — PostgREST가
+ *  "invalid input syntax for type uuid"를 뱉어 500이 되므로 없는 세션과 같게
+ *  404로 취급한다. 화면은 !res.ok를 새 골든패스로 둔다. */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** 최신 버전의 스토리보드와 함께 세션을 읽는다. id 없이 호출하면 목록을 준다. */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -52,6 +58,10 @@ export async function GET(request: Request) {
       console.error("[GET /api/session] 목록 조회 실패:", e);
       return Response.json({ error: "세션 목록 조회에 실패했습니다" }, { status: 500 });
     }
+  }
+
+  if (!UUID_PATTERN.test(id)) {
+    return Response.json({ error: "없음" }, { status: 404 });
   }
 
   try {

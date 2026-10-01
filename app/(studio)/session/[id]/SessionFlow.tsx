@@ -12,6 +12,7 @@ import type { BrainstormTurn, ExtractedSlot } from "@/lib/llm/brainstorm";
 import { NO_SUPPORTING_OPTION } from "@/lib/llm/brainstorm-options";
 import {
   assembleStoryboard,
+  applyCutDirections,
   FLOW_OPTIONS,
   FLOW_QUESTION,
   type BrainstormAnswers,
@@ -19,17 +20,20 @@ import {
 import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
 import type { Cut, Storyboard } from "./storyboard-types";
 
-type Step = "subject" | "brainstorm" | "assembling" | "cover" | "generating" | "cuts" | "saved";
+type Step = "subject" | "brainstorm" | "tone" | "assembling" | "captions" | "cover" | "generating" | "cuts" | "saved";
 
 const TURN_ORDER: BrainstormTurn["key"][] = ["protagonist", "supporting", "flow"];
 
 // LLM 응답을 화면이 쓸 수 있는 형태로 맞춘다. 모델 응답은 순서·개수·문자열을
 // 보장하지 않으므로 세 가지를 여기서 고정한다.
 //
-// 1. flow 턴은 LLM 선택지를 버리고 로컬 FLOW_OPTIONS 로 교체한다. 흐름 선택은
+// 1. flow 턴은 서버가 정규화한 선택지를 쓴다(F1, spec-llm-line.md). 흐름 선택은
 //    자유 텍스트가 아니라 NarrativeBeat 템플릿을 고르는 것이라(스키마의
-//    narrative_beat enum), 임의 문자열이 오면 assembleStoryboard 가 조용히 첫
-//    템플릿으로 폴백해 어떤 흐름을 골라도 같은 4컷이 나온다.
+//    narrative_beat enum), 허용 키와 일치하는 서버 옵션만 순서대로 살리고 빠진
+//    키만 로컬 FLOW_OPTIONS 에서 채운다. 허용 키 밖 문자열은 여기서 덜어낸다 —
+//    남기면 assembleStoryboard 가 조용히 기본 흐름으로 폴백해 어떤 흐름을 골라도
+//    같은 4컷이 나온다. question 은 서버 값을 쓰되 비어 있으면 로컬 FLOW_QUESTION
+//    으로 둔다(설명 문구 고정은 서버 몫).
 // 2. 조연 없이 진행하는 선택지는 PRD 6절의 필수 경로다(조연 유무가 cast 구성을
 //    바꾼다). 프롬프트가 그 문자열을 리터럴로 지시하지만 모델이 무시할 수 있어
 //    빠져 있으면 되살린다 — 사용자 입력을 덮어쓰는 게 아니라 사라진 선택지를
@@ -40,7 +44,7 @@ function normalizeTurns(turns: BrainstormTurn[]): BrainstormTurn[] {
 
   return TURN_ORDER.map((key) => {
     if (key === "flow") {
-      return { key, question: FLOW_QUESTION, options: FLOW_OPTIONS };
+      return normalizeFlowTurn(byKey.get(key));
     }
 
     const turn = byKey.get(key);
@@ -60,6 +64,35 @@ const FALLBACK_QUESTION: Record<"protagonist" | "supporting", string> = {
   protagonist: "주인공은 누구인가요?",
   supporting: "함께 등장할 인물이 있나요?",
 };
+
+function normalizeFlowTurn(turn: BrainstormTurn | undefined): BrainstormTurn {
+  const question = turn?.question?.trim() ? turn.question : FLOW_QUESTION;
+  const valid = [...new Set((turn?.options ?? []).filter((option) => FLOW_OPTIONS.includes(option)))];
+  for (const key of FLOW_OPTIONS) {
+    if (!valid.includes(key)) valid.push(key);
+  }
+  return { key: "flow", question, options: valid };
+}
+
+// F2 실물 계약(OC-A PR #188, spec-llm-line.md F2절). tone_id 3개 문자열·요청의
+// context{industry, interests, cta_format}·응답 fallbackCutIndexes·컷별 재생성
+// (같은 경로에 문맥+cut_index) 확정.
+// F4(OC-A F2+F4 단일 API, spec-llm-line.md F4절): 응답 directions[]와
+// fallbackDirectionCuts를 받아 검증된 연출만 조립된 컷에 적용한다. 컷별 다시
+// 뽑기는 그 컷의 대사+연출을 함께 교체한다.
+const CAPTIONS_ROUTE = "/api/session/captions";
+const CAPTION_TONES = [
+  { id: "empathy", label: "공감형" },
+  { id: "informative", label: "정보형" },
+  { id: "case", label: "사례형" },
+] as const;
+
+interface CaptionsResponse {
+  captions?: Array<{ cut_index?: unknown; text?: unknown }>;
+  fallbackCutIndexes?: unknown;
+  directions?: unknown;
+  fallbackDirectionCuts?: unknown;
+}
 
 function promptForCut(subject: string, cut: Cut): string {
   return `${subject} · ${cut.narrative_beat} · ${cut.shot_type}/${cut.camera_angle}`;
@@ -111,6 +144,16 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [answers, setAnswers] = useState<Partial<Record<BrainstormTurn["key"], string>>>({});
   const [customText, setCustomText] = useState("");
   const [isCustomOpen, setIsCustomOpen] = useState(false);
+  // F1: flow 턴에서 허용 키 밖 직접 입력을 거부했을 때 보여줄 안내.
+  const [answerError, setAnswerError] = useState<string | null>(null);
+  // F2: 대사 생성 직전 방향 선택(톤). 3턴 구조는 유지하고 그 다음에 한 번만 묻는다.
+  const [toneId, setToneId] = useState<string | null>(null);
+  // F2: 이미지 호출 전 생성 대사의 상태. "idle"이면 captions 단계 진입 시 1회 호출.
+  const [captionStatus, setCaptionStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [captionError, setCaptionError] = useState<string | null>(null);
+  // F2: 기본 대사로 남은 컷 번호(서버 fallbackCutIndexes 기준). "기본 대사" 표시에 쓴다.
+  const [defaultCutIndexes, setDefaultCutIndexes] = useState<number[]>([]);
+  const [regenCutIndex, setRegenCutIndex] = useState<number | null>(null);
   const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
   const [preset, setPreset] = useState<Preset | null>(null);
   const [coverVariants, setCoverVariants] = useState<GeneratedCut[] | null>(null);
@@ -194,6 +237,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   function recordAnswer(value: string) {
     if (!turns) return;
     const key = turns[turnIndex].key;
+    // F1: flow 직접 입력은 정규화 후 허용 키만 받는다. 자유 입력 값은 조립 전에
+    // 거부한다 — 남기면 assembleStoryboard 의 기본 흐름 폴백이 조용히 타 어떤
+    // 흐름을 골라도 같은 4컷이 나온다.
+    if (key === "flow" && !FLOW_OPTIONS.includes(value)) {
+      setAnswerError("흐름은 제시된 선택지 중에서 골라주세요");
+      return;
+    }
+    setAnswerError(null);
     const next = { ...answers, [key]: value };
     setAnswers(next);
     setIsCustomOpen(false);
@@ -202,8 +253,17 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     if (turnIndex < turns.length - 1) {
       setTurnIndex(turnIndex + 1);
     } else {
-      setStep("assembling");
+      // F2: 3턴을 마치면 바로 조립하지 않고 톤(말투 방향)을 먼저 고른다.
+      setStep("tone");
     }
+  }
+
+  function handleSelectTone(id: string) {
+    setToneId(id);
+    setCaptionStatus("idle");
+    setCaptionError(null);
+    setDefaultCutIndexes([]);
+    setStep("assembling");
   }
 
   // 소재에 맞는 선택지를 실제 LLM 으로 받아온다 (issue #84). 이전에는 화면 안의
@@ -280,11 +340,185 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
     const timer = setTimeout(() => {
       setStoryboard(assembleStoryboard(subject, full, preset.style.palette));
-      setStep("cover");
+      // F2: 조립된 기본 대사를 먼저 보여주고 이미지 호출 전에 생성 대사로 바꾼다.
+      setStep("captions");
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, preset]);
+
+  useEffect(() => {
+    if (step !== "captions" || !storyboard || !preset || !toneId) return;
+    if (captionStatus !== "idle") return;
+    void loadCaptions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, storyboard, captionStatus]);
+
+  // F2: 이미지 호출 전에 생성 대사를 받아 편집 화면에 둔다. preset 전체나
+  // 이미지·비밀값은 넘기지 않는다(spec-llm-line.md F2절, OC-A PR #188).
+  async function loadCaptions() {
+    if (!storyboard || !preset || !toneId) return;
+    setCaptionStatus("loading");
+    setCaptionError(null);
+
+    try {
+      const res = await fetch(CAPTIONS_ROUTE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject,
+          flow: answers.flow ?? "",
+          beats: storyboard.cuts.map((cut) => cut.narrative_beat),
+          cast: storyboard.cast.map((member) => member.description),
+          tone_id: toneId,
+          context: {
+            industry: preset.context.industry,
+            interests: preset.context.interests,
+            cta_format: preset.rules.cta_format,
+          },
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "대사를 만들지 못했습니다");
+      }
+      const data = (await res.json()) as CaptionsResponse;
+      applyCaptions(
+        data.captions,
+        storyboard.cuts.map((cut) => cut.cut_index),
+        data.fallbackCutIndexes
+      );
+      // F4: 검증된 연출만 조립된 컷에 적용한다. 생략·무효·fallback 목록의 컷은
+      // 조립 기본값이 그대로 남는다.
+      applyDirections(data.directions, data.fallbackDirectionCuts);
+      setCaptionStatus("ready");
+    } catch {
+      setCaptionError("대사를 만드는 데 실패했어요. 다시 시도해주세요");
+      setCaptionStatus("error");
+    }
+  }
+
+  // F2: 컷 인덱스 1~4별 유효 문자열만 채택한다. 기본 대사 표시는 서버의
+  // fallbackCutIndexes를 쓰고, 없을 때만 유효 대사를 못 받은 컷으로 본다.
+  // 다른 컷의 유효 대사·사용자 편집은 건드리지 않는다.
+  function applyCaptions(
+    list: CaptionsResponse["captions"],
+    cutIndexes: number[],
+    fallback: CaptionsResponse["fallbackCutIndexes"]
+  ) {
+    const valid = new Map<number, string>();
+    if (Array.isArray(list)) {
+      for (const entry of list) {
+        if (typeof entry !== "object" || entry === null) continue;
+        const { cut_index, text } = entry as Record<string, unknown>;
+        if (
+          typeof cut_index === "number" &&
+          Number.isInteger(cut_index) &&
+          cut_index >= 1 &&
+          cut_index <= 4 &&
+          typeof text === "string" &&
+          text.trim().length > 0
+        ) {
+          valid.set(cut_index, text);
+        }
+      }
+    }
+    setStoryboard((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        cuts: prev.cuts.map((cut) =>
+          valid.has(cut.cut_index)
+            ? { ...cut, caption: { ...cut.caption, text: valid.get(cut.cut_index) as string } }
+            : cut
+        ),
+      };
+    });
+    setDefaultCutIndexes(
+      Array.isArray(fallback)
+        ? fallback.filter((n): n is number => typeof n === "number")
+        : cutIndexes.filter((n) => !valid.has(n))
+    );
+  }
+
+  // F4: 서버 연출안을 조립된 컷에 반영한다. 검증·기본값 유지는
+  // applyCutDirections(storyboard-assembly.ts)가 맡는다.
+  function applyDirections(directions: unknown, fallbackCuts: unknown) {
+    setStoryboard((prev) => {
+      if (!prev) return prev;
+      return { ...prev, cuts: applyCutDirections(prev.cuts, directions, fallbackCuts) };
+    });
+  }
+
+  // F2: 컷별 다시 뽑기 — 같은 경로에 문맥과 cut_index를 함께 보내 그 컷의
+  // 대사+연출을 함께 교체한다(F4). 다른 컷의 대사·연출·사용자 편집은 보존한다.
+  async function regenCutCaption(cutIndex: number) {
+    if (!storyboard || !preset || !toneId) return;
+    setRegenCutIndex(cutIndex);
+    try {
+      const res = await fetch(CAPTIONS_ROUTE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject,
+          flow: answers.flow ?? "",
+          beats: storyboard.cuts.map((cut) => cut.narrative_beat),
+          cast: storyboard.cast.map((member) => member.description),
+          tone_id: toneId,
+          context: {
+            industry: preset.context.industry,
+            interests: preset.context.interests,
+            cta_format: preset.rules.cta_format,
+          },
+          cut_index: cutIndex,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "대사를 다시 뽑지 못했습니다");
+      }
+      const data = (await res.json()) as CaptionsResponse;
+      const list = data.captions;
+      const entry = Array.isArray(list)
+        ? list.find(
+            (item): item is { cut_index: number; text: string } =>
+              typeof item === "object" &&
+              item !== null &&
+              (item as Record<string, unknown>).cut_index === cutIndex &&
+              typeof (item as Record<string, unknown>).text === "string" &&
+              ((item as Record<string, unknown>).text as string).trim().length > 0
+          )
+        : undefined;
+      if (!entry) throw new Error("대사를 다시 뽑지 못했습니다");
+      const text = entry.text;
+      const directions = data.directions;
+      const directionFallback = data.fallbackDirectionCuts;
+      setStoryboard((prev) => {
+        if (!prev) return prev;
+        const withCaption = prev.cuts.map((cut) =>
+          cut.cut_index === cutIndex ? { ...cut, caption: { ...cut.caption, text } } : cut
+        );
+        return { ...prev, cuts: applyCutDirections(withCaption, directions, directionFallback) };
+      });
+      const fellBack =
+        Array.isArray(data.fallbackCutIndexes) && data.fallbackCutIndexes.includes(cutIndex);
+      setDefaultCutIndexes((prev) => {
+        const next = prev.filter((n) => n !== cutIndex);
+        if (fellBack) next.push(cutIndex);
+        return next;
+      });
+    } catch {
+      setCaptionError("그 컷 대사를 다시 뽑지 못했어요. 다시 시도해주세요");
+    } finally {
+      setRegenCutIndex(null);
+    }
+  }
+
+  function updateCaptionAndClearDefault(index: number, text: string) {
+    updateCaption(index, text);
+    const cutIndex = storyboard?.cuts[index]?.cut_index;
+    if (cutIndex != null) setDefaultCutIndexes((prev) => prev.filter((n) => n !== cutIndex));
+  }
 
   useEffect(() => {
     if (step !== "cover" || !storyboard || coverVariants) return;
@@ -533,6 +767,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             ))}
           </div>
 
+          {answerError && (
+            <p className="w-full rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">
+              {answerError}
+            </p>
+          )}
           {isCustomOpen ? (
             <div className="flex w-full gap-2">
               <input
@@ -552,13 +791,16 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             </div>
           ) : (
             <div className="flex gap-2 text-sm">
-              <button
-                type="button"
-                onClick={() => setIsCustomOpen(true)}
-                className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-600 hover:bg-zinc-50"
-              >
-                직접 쓸게
-              </button>
+              {/* F1 선택 제안: flow 턴은 허용 키만 받으므로 직접 입력을 숨긴다(통합 WIP 436ae7b hunk). */}
+              {turns[turnIndex].key !== "flow" && (
+                <button
+                  type="button"
+                  onClick={() => setIsCustomOpen(true)}
+                  className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-600 hover:bg-zinc-50"
+                >
+                  직접 쓸게
+                </button>
+              )}
               {/* 선택지가 비면(모델이 그 턴을 빼먹은 경우) 고를 것이 없으니 감춘다 */}
               {turns[turnIndex].options.length > 0 && (
                 <button
@@ -574,7 +816,98 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
+      {step === "tone" && (
+        <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
+          <h1 className="text-xl font-semibold">어떤 말투로 풀어볼까요?</h1>
+          <div className="flex w-full flex-col gap-2">
+            {CAPTION_TONES.map((tone) => (
+              <button
+                key={tone.id}
+                type="button"
+                onClick={() => handleSelectTone(tone.id)}
+                className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+              >
+                {tone.label}
+              </button>
+            ))}
+          </div>
+          {/* #186 지적 5(캡틴 확정): 톤 단계 알아서 해줘는 공감형(empathy) 고정 적용(통합 WIP 436ae7b hunk). */}
+          <button
+            type="button"
+            onClick={() => handleSelectTone("empathy")}
+            className="rounded-md border border-dashed border-zinc-300 px-4 py-2.5 text-sm text-zinc-600 hover:bg-zinc-50"
+          >
+            알아서 해줘
+          </button>
+        </div>
+      )}
+
       {step === "assembling" && !presetError && <Spinner text="이야기를 엮고 있어요..." />}
+
+      {step === "captions" && storyboard && (
+        <div className="flex w-full max-w-2xl flex-col items-center gap-4">
+          <h1 className="text-xl font-semibold">대사를 확인하고 다듬어주세요</h1>
+          {captionStatus === "loading" && <Spinner text="대사를 만들고 있어요..." />}
+          {captionError && (
+            <div className="flex w-full flex-col items-center gap-3 rounded-md bg-red-50 px-4 py-3 text-center">
+              <p className="text-sm text-red-600">{captionError}</p>
+              <button
+                type="button"
+                onClick={() => setCaptionStatus("idle")}
+                className="rounded-md bg-zinc-900 px-4 py-2 text-xs font-medium text-white hover:bg-zinc-700"
+              >
+                다시 시도
+              </button>
+            </div>
+          )}
+          {captionStatus !== "loading" && (
+            <>
+              <div className="flex w-full flex-col gap-3">
+                {storyboard.cuts.map((cut, i) => (
+                  <div
+                    key={cut.cut_index}
+                    className="flex w-full flex-col gap-2 rounded-lg border border-zinc-200 p-3"
+                  >
+                    <div className="flex items-center gap-2 text-xs text-zinc-500">
+                      <span>
+                        {cut.cut_index}컷 · {cut.narrative_beat}
+                      </span>
+                      {defaultCutIndexes.includes(cut.cut_index) && (
+                        <span className="rounded bg-zinc-100 px-2 py-0.5 text-zinc-600">
+                          기본 대사
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex w-full gap-2">
+                      <input
+                        value={cut.caption.text}
+                        onChange={(e) => updateCaptionAndClearDefault(i, e.target.value)}
+                        className="flex-1 rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                      <button
+                        type="button"
+                        disabled={regenCutIndex === cut.cut_index}
+                        onClick={() => void regenCutCaption(cut.cut_index)}
+                        className="shrink-0 rounded-md border border-zinc-300 px-3 py-2 text-xs font-medium hover:bg-zinc-50 disabled:opacity-40"
+                      >
+                        {regenCutIndex === cut.cut_index ? "뽑는 중…" : "다시 뽑기"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                disabled={regenCutIndex !== null}
+                onClick={() => setStep("cover")}
+                className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
+              >
+                이 대사로 그림 만들기
+              </button>
+            </>
+          )}
+        </div>
+      )}
       {step === "cover" && !coverVariants && !genError && <Spinner text="표지 3안을 그리고 있어요..." />}
       {step === "generating" && !genError && (
         <Spinner

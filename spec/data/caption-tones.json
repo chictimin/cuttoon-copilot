@@ -1,0 +1,20 @@
+{
+  "caption_tones_version": "1.0",
+  "tones": [
+    {
+      "id": "empathy",
+      "label": "공감형",
+      "description": "독자의 고민에 먼저 공감하고 위로하는 말투"
+    },
+    {
+      "id": "informative",
+      "label": "정보형",
+      "description": "사실과 이유를 또렷하게 전달하는 말투"
+    },
+    {
+      "id": "case",
+      "label": "사례형",
+      "description": "겪어본 사람의 이야기로 풀어내는 말투"
+    }
+  ]
+}
