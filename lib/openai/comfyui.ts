@@ -40,8 +40,16 @@ const NEGATIVE =
 
 const POLL_INTERVAL_MS = 1000
 // 한 장 대기 상한. 1장 90초 기준은 통과 조건이 아니라 기록 항목이라(#190 10-01),
-// 여기서는 멈춘 큐를 영원히 기다리지 않을 만큼만 넉넉히 둔다.
-const TIMEOUT_MS = 5 * 60 * 1000
+// 여기서는 멈춘 큐를 영원히 기다리지 않을 만큼만 넉넉히 둔다. 대기 시간은 요청을 넣은 때부터
+// 세므로 표지 3안처럼 줄 서 있는 시간도 포함된다. Z-Image 처럼 느린 모델은 COMFYUI_TIMEOUT_MS 로
+// 늘린다(#190 10-02 시민님 의견). 비우면 5분.
+function comfyuiTimeoutMs(): number {
+  const raw = process.env.COMFYUI_TIMEOUT_MS?.trim()
+  if (!raw) return 5 * 60 * 1000
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`COMFYUI_TIMEOUT_MS=${raw} 는 0보다 큰 밀리초 숫자여야 합니다`)
+  return n
+}
 
 export function comfyuiBaseUrl(): string {
   const raw = process.env[COMFYUI_URL_ENV]?.trim()
@@ -100,6 +108,18 @@ function zimageCfg(): number {
   if (!Number.isFinite(n) || n < 1) throw new Error(`COMFYUI_ZIMAGE_CFG=${raw} 는 1 이상의 숫자여야 합니다`)
   return n
 }
+function zimageTranslate(): boolean {
+  const raw = process.env.COMFYUI_ZIMAGE_TRANSLATE?.trim().toLowerCase()
+  if (!raw || raw === 'off') return false
+  if (raw === 'on') return true
+  throw new Error(`COMFYUI_ZIMAGE_TRANSLATE=${raw} 는 모르는 값입니다 — on | off 중 하나로 두거나 비워 두세요`)
+}
+
+async function toZimagePrompt(prompt: string): Promise<string> {
+  const translated = zimageTranslate() ? await toEnglishPrompt(prompt) : prompt
+  return zimageStripPrompt() ? stripNegations(translated) : translated
+}
+
 function zimageStripPrompt(): boolean {
   const raw = process.env.COMFYUI_ZIMAGE_PROMPT?.trim().toLowerCase()
   if (!raw || raw === 'full') return false
@@ -262,10 +282,12 @@ export async function generateWithComfyui(
   const started = Date.now()
   const model = comfyuiModel()
   const seed = Math.floor(Math.random() * 2 ** 32)
-  // zimage 는 한국어를 읽으므로 번역(유료 텍스트 호출)·CLIP 정리를 건너뛰고 원문 그대로 보낸다.
+  const timeoutMs = comfyuiTimeoutMs()
+  // zimage 는 한국어를 읽으므로 기본은 원문 그대로 보낸다. COMFYUI_ZIMAGE_TRANSLATE=on 이면 SDXL 과
+  // 같은 번역을 거친다 — 원문을 그대로 넣으면 한국어 소재 문장을 말풍선 글자로 그렸다(10-02 실측).
   const workflow =
     model === 'zimage'
-      ? buildZimageWorkflow(zimageStripPrompt() ? stripNegations(prompt) : prompt, seed, size.width, size.height)
+      ? buildZimageWorkflow(await toZimagePrompt(prompt), seed, size.width, size.height)
       : buildWorkflow(toClipPrompt(await toEnglishPrompt(prompt)), seed, size.width, size.height)
 
   const queued = await comfyFetch(base, '/prompt', {
@@ -278,8 +300,8 @@ export async function generateWithComfyui(
 
   let image: HistoryImage | undefined
   while (!image) {
-    if (Date.now() - started > TIMEOUT_MS) {
-      throw new Error(`ComfyUI 생성이 ${TIMEOUT_MS / 1000}초 안에 끝나지 않았습니다 (prompt_id ${promptId})`)
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(`ComfyUI 생성이 ${timeoutMs / 1000}초 안에 끝나지 않았습니다 (prompt_id ${promptId}) — 느린 모델이면 COMFYUI_TIMEOUT_MS 를 늘리세요`)
     }
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
     const history = (await (await comfyFetch(base, `/history/${promptId}`)).json()) as Record<
