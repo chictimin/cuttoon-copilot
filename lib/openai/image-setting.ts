@@ -6,10 +6,13 @@
 // 한다. 저가 설정은 그림이 달라서, 거기서 합격해도 기본 설정에서 합격한다는 보장이
 // 없다(#190 QA 인정 범위).
 //
-// 이후 comfyui 가 여기 추가된다(#190 스파이크 통과 시).
+// comfyui 는 로컬 ComfyUI 로 그리는 개발 테스트 전용 POC 다(#190 10-01 결정). 체이닝·시트
+// reference 가 없어 그림 조건이 다르다 — 자세한 차이는 comfyui.ts 머리말.
+import { comfyuiBaseUrl } from './comfyui'
+
 export const IMAGE_SETTING_ENV = 'IMAGE_PROVIDER'
 
-const SETTINGS = ['openai', 'openai-low'] as const
+const SETTINGS = ['openai', 'openai-low', 'comfyui'] as const
 export type ImageSetting = (typeof SETTINGS)[number]
 
 // 호출 시점에 읽는다 — COVER_VARIANT_RETRY 와 같은 이유로, 모듈 로드 때 캐시하면
@@ -21,7 +24,12 @@ export type ImageSetting = (typeof SETTINGS)[number]
 export function imageSetting(): ImageSetting {
   const raw = process.env[IMAGE_SETTING_ENV]?.trim().toLowerCase()
   if (!raw) return 'openai'
-  if ((SETTINGS as readonly string[]).includes(raw)) return raw as ImageSetting
+  if ((SETTINGS as readonly string[]).includes(raw)) {
+    // comfyui 는 주소가 없으면 여기서 막는다. 표지 3안은 allSettled 배치라 안에서 던지면
+    // "3안 모두 실패"로 원인이 뭉개진다. 연결 실패는 호출 때 comfyui.ts 가 던진다.
+    if (raw === 'comfyui') comfyuiBaseUrl()
+    return raw as ImageSetting
+  }
   throw new Error(`${IMAGE_SETTING_ENV}=${raw} 는 모르는 값입니다 — ${SETTINGS.join(' | ')} 중 하나로 두거나 비워 두세요`)
 }
 
