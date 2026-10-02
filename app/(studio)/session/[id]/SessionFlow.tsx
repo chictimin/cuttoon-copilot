@@ -17,6 +17,9 @@ import {
 } from "@/lib/llm/brainstorm-options";
 // caption-tones.ts도 JSON 로더라 OPENAI_API_KEY를 쓰지 않아 클라이언트에서 안전하다.
 import { loadCaptionTones } from "@/lib/llm/caption-tones";
+// #205: 흐름 라벨 표시·CTA 요청 타입과 CTA 목록도 JSON 로더·순수 함수라 클라이언트에서 안전하다.
+import { displayFlowLabel, type CtaRequest, type CtaStrength } from "@/lib/llm/narrative-flow";
+import { getCtaPresetById, resolveCandidates, type CtaPreset } from "@/lib/llm/cta-presets";
 import {
   assembleStoryboard,
   applyCutDirections,
@@ -103,6 +106,21 @@ function normalizeFlowTurn(turn: BrainstormTurn | undefined): BrainstormTurn {
 const CAPTIONS_ROUTE = "/api/session/captions";
 // 톤 목록은 spec/data/caption-tones.json 단일 출처에서 읽는다.
 const CAPTION_TONES = loadCaptionTones();
+// #205 화면 계약: 마무리 강도 3단 슬라이더(왼쪽부터 none → clear).
+const CTA_STRENGTHS: { id: CtaStrength; label: string }[] = [
+  { id: "none", label: "이야기만" },
+  { id: "soft", label: "은근하게" },
+  { id: "clear", label: "확실하게" },
+];
+
+// #205: 이번 편 목적 후보 — 온보딩(DetailsStep)과 같은 resolveCandidates 기준.
+// 프로젝트 기본 목적이 후보 밖이면 맨 앞에 넣어 기본값이 항상 보이게 한다.
+function ctaPurposeOptions(preset: Preset): CtaPreset[] {
+  const candidates = resolveCandidates(preset.context.interests);
+  if (candidates.some((p) => p.id === preset.rules.cta_format)) return candidates;
+  const current = getCtaPresetById(preset.rules.cta_format);
+  return current ? [current, ...candidates] : candidates;
+}
 
 interface CaptionsResponse {
   captions?: Array<{ cut_index?: unknown; text?: unknown }>;
@@ -170,6 +188,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [answerError, setAnswerError] = useState<string | null>(null);
   // F2: 대사 생성 직전 방향 선택(톤). 3턴 구조는 유지하고 그 다음에 한 번만 묻는다.
   const [toneId, setToneId] = useState<string | null>(null);
+  // #205: 말투와 마무리 화면의 선택값. null이면 프로젝트 기본값(강도는
+  // preset.rules.cta_strength ?? "clear", 목적은 rules.cta_format)을 그대로 쓴다.
+  const [ctaStrengthChoice, setCtaStrengthChoice] = useState<CtaStrength | null>(null);
+  const [ctaPurposeChoice, setCtaPurposeChoice] = useState<string | null>(null);
+  // #205: 말투를 고른 순간 확정한 이번 편 CTA. 조립·대사 생성·컷별 다시 뽑기가 같은 값을 쓴다.
+  const [sessionCta, setSessionCta] = useState<CtaRequest | undefined>(undefined);
   // F2: 이미지 호출 전 생성 대사의 상태. "idle"이면 captions 단계 진입 시 1회 호출.
   const [captionStatus, setCaptionStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [captionError, setCaptionError] = useState<string | null>(null);
@@ -285,8 +309,17 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     }
   }
 
+  // #205: 화면에 보이는 강도 — 사용자가 고르지 않았으면 프로젝트 기본값.
+  const ctaStrength: CtaStrength = ctaStrengthChoice ?? preset?.rules.cta_strength ?? "clear";
+
   function handleSelectTone(id: string) {
     setToneId(id);
+    // 사용자가 고른 강도를 보정 없이 보낸다. none이면 목적은 보내지 않는다(#205 화면 계약).
+    setSessionCta(
+      ctaStrength === "none"
+        ? { strength: "none" }
+        : { strength: ctaStrength, purpose_id: ctaPurposeChoice }
+    );
     setCaptionStatus("idle");
     setCaptionError(null);
     setDefaultCutIndexes([]);
@@ -389,7 +422,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     };
 
     const timer = setTimeout(() => {
-      setStoryboard(assembleStoryboard(subject, full, preset.style.palette));
+      setStoryboard(assembleStoryboard(subject, full, preset.style.palette, undefined, sessionCta));
       // F2: 조립된 기본 대사를 먼저 보여주고 이미지 호출 전에 생성 대사로 바꾼다.
       setStep("captions");
     }, 600);
@@ -426,6 +459,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             interests: preset.context.interests,
             cta_format: preset.rules.cta_format,
           },
+          // #205: 조립에 쓴 것과 같은 cta. 빠지면 서버가 clear로 보고 none 4컷에 400을 낸다.
+          cta: sessionCta,
         }),
       });
       if (!res.ok) {
@@ -520,6 +555,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             interests: preset.context.interests,
             cta_format: preset.rules.cta_format,
           },
+          cta: sessionCta,
           cut_index: cutIndex,
         }),
       });
@@ -674,7 +710,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     if (!storyboard) return;
 
     try {
-      assertStoryboardRuntimeInvariants(storyboard.cuts);
+      // #205: 강도를 함께 넘겨야 none(CTA 컷 0개)이 기존 규칙(CTA 1개)에 막히지 않는다.
+      assertStoryboardRuntimeInvariants(storyboard.cuts, storyboard.cta_strength);
     } catch {
       setSaveError("스토리보드에 문제가 있어요. 처음부터 다시 시도해주세요");
       return;
@@ -869,7 +906,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 onClick={() => recordAnswer(option)}
                 className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
               >
-                {option}
+                {/* #205: "→ CTA"는 "→ 마무리"로 보여주기만 하고, 보내는 값은 원래 키 그대로. */}
+                {displayFlowLabel(option)}
               </button>
             ))}
           </div>
@@ -925,7 +963,69 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
       {step === "tone" && (
         <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
-          <h1 className="text-xl font-semibold">어떤 말투로 풀어볼까요?</h1>
+          <h1 className="text-xl font-semibold">말투와 마무리를 골라주세요</h1>
+
+          {/* #205: 마무리 강도·이번 편 목적은 기본값이 채워져 있어 말투만 눌러도 넘어간다. */}
+          <div className="flex w-full flex-col gap-4 rounded-md border border-zinc-200 px-4 py-3 text-left">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="cta-strength" className="text-sm font-medium">
+                마무리 강도
+              </label>
+              <input
+                id="cta-strength"
+                type="range"
+                min={0}
+                max={CTA_STRENGTHS.length - 1}
+                step={1}
+                value={CTA_STRENGTHS.findIndex((s) => s.id === ctaStrength)}
+                onChange={(e) => setCtaStrengthChoice(CTA_STRENGTHS[Number(e.target.value)].id)}
+                aria-valuetext={CTA_STRENGTHS.find((s) => s.id === ctaStrength)?.label}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs">
+                {CTA_STRENGTHS.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setCtaStrengthChoice(s.id)}
+                    className={s.id === ctaStrength ? "font-semibold text-zinc-900" : "text-zinc-400"}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label htmlFor="cta-purpose" className="text-sm font-medium">
+                이번 편 목적
+              </label>
+              <select
+                id="cta-purpose"
+                disabled={!preset || ctaStrength === "none"}
+                value={ctaPurposeChoice ?? preset?.rules.cta_format ?? ""}
+                onChange={(e) =>
+                  // 프로젝트 기본 목적으로 되돌리면 null(= 프로젝트 기본)로 둔다.
+                  setCtaPurposeChoice(
+                    e.target.value === preset?.rules.cta_format ? null : e.target.value
+                  )
+                }
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-40"
+              >
+                {preset &&
+                  ctaPurposeOptions(preset).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+              </select>
+              {ctaStrength === "none" && (
+                <p className="text-xs text-zinc-400">이야기만으로 끝내서 목적은 쓰지 않아요</p>
+              )}
+            </div>
+          </div>
+
+          <p className="w-full text-left text-sm font-medium">말투</p>
           <div className="flex w-full flex-col gap-2">
             {CAPTION_TONES.map((tone) => (
               <button

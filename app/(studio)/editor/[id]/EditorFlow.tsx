@@ -194,7 +194,8 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
     if (!draft) return;
 
     try {
-      assertStoryboardRuntimeInvariants(draft.cuts);
+      // #205: 강도를 함께 넘겨야 none(CTA 컷 0개)이 기존 규칙(CTA 1개)에 막히지 않는다.
+      assertStoryboardRuntimeInvariants(draft.cuts, draft.cta_strength);
     } catch {
       setActionError("스토리보드에 문제가 있어요");
       return;
