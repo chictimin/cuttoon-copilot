@@ -313,6 +313,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const ctaStrength: CtaStrength = ctaStrengthChoice ?? preset?.rules.cta_strength ?? "clear";
 
   function handleSelectTone(id: string) {
+    if (!preset) return;
     setToneId(id);
     // 사용자가 고른 강도를 보정 없이 보낸다. none이면 목적은 보내지 않는다(#205 화면 계약).
     setSessionCta(
@@ -1026,13 +1027,19 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           </div>
 
           <p className="w-full text-left text-sm font-medium">말투</p>
+          {/* #223 리뷰 제안 1: 프로젝트 정보 전에 말투를 누르면 강도가 기본값("clear")으로
+              굳으므로, 도착할 때까지 막는다. 불러오기 실패는 위 presetError 안내가 맡는다. */}
+          {!preset && !presetError && (
+            <p className="w-full text-left text-xs text-zinc-400">프로젝트 정보를 불러오는 중이에요</p>
+          )}
           <div className="flex w-full flex-col gap-2">
             {CAPTION_TONES.map((tone) => (
               <button
                 key={tone.id}
                 type="button"
+                disabled={!preset}
                 onClick={() => handleSelectTone(tone.id)}
-                className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+                className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50 disabled:opacity-40"
               >
                 {tone.label}
               </button>
@@ -1041,8 +1048,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           {/* #186 지적 5(캡틴 확정): 톤 단계 알아서 해줘는 공감형(empathy) 고정 적용(통합 WIP 436ae7b hunk). */}
           <button
             type="button"
+            disabled={!preset}
             onClick={() => handleSelectTone("empathy")}
-            className="rounded-md border border-dashed border-zinc-300 px-4 py-2.5 text-sm text-zinc-600 hover:bg-zinc-50"
+            className="rounded-md border border-dashed border-zinc-300 px-4 py-2.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
           >
             알아서 해줘
           </button>
