@@ -8,9 +8,15 @@
 //     매 컷 반복되는 cast[].description 문장에만 기댄다(PRD 2절의 방어선 중 하나만 남음).
 //   - 캐릭터 시트를 reference 이미지로 넣지 않는다(IP-Adapter 같은 노드 없이 text→image).
 //   - 글자·말풍선 억제는 negative prompt 로 한다.
+//   - SDXL 의 CLIP 은 한국어를 거의 못 읽는다. 그래서 프롬프트에 한글이 있으면 그 프롬프트만
+//     OpenAI 텍스트 모델(기본 gpt-4o-mini)로 영어로 옮긴 뒤 그린다(toEnglishPrompt). 그림은
+//     로컬에서 그리고, OpenAI 로 가는 것은 이 번역 호출 하나뿐이다. 말풍선 대사는 원래
+//     프롬프트에 없으므로(PRD 6절) 번역과 무관하게 한국어 그대로다.
 //
 // COMFYUI_URL 에 닿지 않으면 OpenAI 로 조용히 넘어가지 않고 던진다(스텁 3규칙 ②).
 // "로컬로 돌린 줄 알았는데 유료로 나가는" 실패가 가장 비싸다.
+import OpenAI from 'openai'
+
 export const COMFYUI_URL_ENV = 'COMFYUI_URL'
 
 // 모델 파일 이름은 ComfyUI 의 models/ 폴더 기준이다. 바꾸려면 env 로 덮는다 — POC 라
@@ -91,6 +97,57 @@ function buildWorkflow(prompt: string, seed: number, width: number, height: numb
 
 type HistoryImage = { filename: string; subfolder: string; type: string }
 
+const HANGUL = /[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]/
+const TRANSLATE_MODEL = process.env.COMFYUI_TRANSLATE_MODEL ?? 'gpt-4o-mini'
+
+// 표지 3안은 같은 프롬프트로 동시에 세 번 불린다 — 번역 결과(Promise)를 프롬프트 문자열로
+// 기억해 한 번만 번역한다. 실패한 번역은 지워서 다음 호출이 다시 시도하게 한다.
+const translations = new Map<string, Promise<string>>()
+const TRANSLATION_CACHE_MAX = 50
+
+// 프롬프트의 한국어 부분(소재·cast 서술 등 사용자·LLM 입력)을 영어로 옮긴다. 한글이 없으면
+// 호출하지 않는다. 실패하면 한글을 지운 채 그리지 않고 던진다 — 인물 정보가 빠진 그림을
+// "성공"으로 돌려주면 동일성 문제가 조용히 숨는다(스텁 3규칙 ②).
+export async function toEnglishPrompt(prompt: string): Promise<string> {
+  if (!HANGUL.test(prompt)) return prompt
+  const cached = translations.get(prompt)
+  if (cached) return cached
+
+  const job = (async () => {
+    // 번역 한 번이 그림 대기 전체를 붙잡지 않게 짧게 끊는다(10-02 실측: 네트워크가 흔들릴 때
+    // 기본값으로는 한참 매달렸다). 재시도는 SDK 기본(2회)을 따른다.
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 20_000 })
+    let out: string | undefined
+    try {
+      const res = await client.chat.completions.create({
+        model: TRANSLATE_MODEL,
+        temperature: 0,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You translate prompts for an image generation model. Translate every non-English part into ' +
+              'natural English and keep the parts that are already English exactly as they are. Keep hex color ' +
+              'codes and numbers unchanged. Output only the translated prompt, with no notes or quotes.',
+          },
+          { role: 'user', content: prompt },
+        ],
+      })
+      out = res.choices[0]?.message?.content?.trim()
+    } catch (e) {
+      throw new Error(`ComfyUI 프롬프트 번역(${TRANSLATE_MODEL}) 실패 — 한국어 서술 없이 그리지 않습니다: ${String(e)}`)
+    }
+    if (!out) throw new Error(`ComfyUI 프롬프트 번역(${TRANSLATE_MODEL}) 응답이 비어 있음`)
+    console.info(`[image] comfyui translate model=${TRANSLATE_MODEL} chars=${prompt.length}→${out.length}`)
+    return out
+  })()
+
+  if (translations.size >= TRANSLATION_CACHE_MAX) translations.clear()
+  translations.set(prompt, job)
+  job.catch(() => translations.delete(prompt))
+  return job
+}
+
 // OpenAI 와 같은 프롬프트를 받되, CLIP 계열 텍스트 인코더에 넘기기 전에 부정 지시 문장을
 // 뺀다. "No speech bubbles", "never draw charts…" 의 speech bubble·chart 같은 단어를 CLIP 은
 // 부정이 아니라 "그 단어가 있다"로 읽어 오히려 그린다(10-02 POC 실측: 7장 중 2장에 말풍선·
@@ -100,8 +157,8 @@ type HistoryImage = { filename: string; subfolder: string; type: string }
 // 불러온다(실측: 컷 4가 6칸 페이지로 나옴) — 한 장면 그림이라는 표현으로 바꾼다.
 //
 // 한글은 뺀다. SDXL 의 CLIP 은 한국어를 거의 못 읽고, 한글 토큰이 들어가면 그림 안에 알아볼
-// 수 없는 글자·말풍선이 생겼다(실측: 한국어 소재·인물 서술로 3장 모두 말풍선). 대신 한국어로만
-// 적힌 소재·인물 정보는 사라진다 — 이 경로의 알려진 한계다(#190 기록).
+// 수 없는 글자·말풍선이 생겼다(실측: 한국어 소재·인물 서술로 3장 모두 말풍선). 정상 경로에서는
+// toEnglishPrompt 가 먼저 영어로 옮기므로, 여기서는 번역에 남은 한글만 지우는 안전장치다.
 export function toClipPrompt(prompt: string): string {
   return prompt
     .replace(/Single webtoon\/comic panel\./i, 'A single full-frame illustration of one scene, in a clean webtoon art style.')
@@ -121,12 +178,13 @@ export async function generateWithComfyui(
 ): Promise<{ base64: string; responseId: string; elapsedMs: number }> {
   const base = comfyuiBaseUrl()
   const started = Date.now()
+  const clipPrompt = toClipPrompt(await toEnglishPrompt(prompt))
   const seed = Math.floor(Math.random() * 2 ** 32)
 
   const queued = await comfyFetch(base, '/prompt', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ prompt: buildWorkflow(toClipPrompt(prompt), seed, size.width, size.height) }),
+    body: JSON.stringify({ prompt: buildWorkflow(clipPrompt, seed, size.width, size.height) }),
   })
   const { prompt_id: promptId } = (await queued.json()) as { prompt_id?: string }
   if (!promptId) throw new Error('ComfyUI /prompt 응답에 prompt_id 가 없음')
