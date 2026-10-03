@@ -1,6 +1,7 @@
 // POST /api/generate 스모크 테스트. dev 서버를 띄운 뒤 실행한다.
 //   npm run dev
 //   node app/api/generate/_smoke-test.mjs
+//   node app/api/generate/_smoke-test.mjs --static-only  # 서버 없이 정적 배선 검사만
 // 표준 라이브러리만 사용 — 테스트 러너를 추가하지 않는다.
 //
 // #18: generateCharacterSheet/generateCut/generateCoverVariants가 실제 모델을
@@ -235,6 +236,9 @@ function checkStyleParity() {
 
 let failed = 0;
 
+// #219: CI에서 `next dev` 없이 돌리는 정적 전용 모드.
+const STATIC_ONLY = process.argv.includes("--static-only");
+
 try {
   checkWiring();
   console.log("ok   [정적] route가 continueFrom을 읽어 generateCut에 전달");
@@ -265,6 +269,16 @@ try {
 } catch (err) {
   failed++;
   console.error(`FAIL [정적] ${err.message}`);
+}
+
+if (STATIC_ONLY) {
+  console.log("(--static-only: 서버 필요 HTTP 케이스는 건너뜀)");
+  if (failed > 0) {
+    console.error(`\n${failed}건 실패`);
+    process.exit(1);
+  }
+  console.log("\n4건 통과");
+  process.exit(0);
 }
 
 const json = (body) => ({
