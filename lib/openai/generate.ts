@@ -14,6 +14,7 @@ import vocabulary from '@/spec/vocabulary.json'
 import type { ImageProvider, GeneratedImageResult, ReservedZone } from './provider'
 import { readAsset, uploadAsset } from '../asset-store'
 import { imageQuality, imageSetting, logImageSetting, type ImageSetting } from './image-setting'
+import { generateWithComfyui } from './comfyui'
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -410,9 +411,13 @@ async function callImageGeneration(
   kind: 'cover_variant' | 'cut',
   previousResponseId?: string
 ): Promise<{ base64: string; responseId: string }> {
+  logImageSetting(kind, setting)
+  // ComfyUI 는 시트를 reference 로 받지 않고 체이닝도 없다(comfyui.ts 머리말). 아래
+  // reference 0장 차단은 유료 호출을 막는 장치라 여기서는 읽지 않는다.
+  if (setting === 'comfyui') return generateWithComfyui(prompt, OUTPUT_SIZE)
+
   const inputImages = await toInputImages(referenceUris(referenceAssets, preset))
   const quality = imageQuality(setting)
-  logImageSetting(kind, setting)
 
   // openai SDK(^7.5.0)의 Responses 타입이 image_generation 도구 옵션을 아직 못
   // 따라와 as any로 우회한다 — 실제 호출로 요청/응답 모양을 검증했다 (#18).

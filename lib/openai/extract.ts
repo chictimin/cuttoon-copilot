@@ -4,6 +4,7 @@ import { uploadAsset } from "../asset-store";
 import { OUTPUT_SIZE, activeMascot, ratioClause } from "./generate";
 import type { GeneratedImageResult } from "./provider";
 import { imageQuality, imageSetting, logImageSetting } from "./image-setting";
+import { generateWithComfyui } from "./comfyui";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -217,16 +218,7 @@ async function resizeToOutput(
   }
 }
 
-export async function generateCharacterSheet(
-  preset: PresetInput
-): Promise<GeneratedImageResult> {
-  const prompt = buildCharacterPrompt(preset);
-  // 유료 호출 전에 읽어 모르는 값이면 여기서 멈춘다(#190). 컷과 같은 설정을 따른다 —
-  // 시트만 기본 화질이면 저가 QA에서도 시트 비용은 그대로 나간다.
-  const setting = imageSetting();
-  const quality = imageQuality(setting);
-  logImageSetting("character_sheet", setting);
-
+async function generateSheetWithOpenAI(prompt: string, quality: "low" | undefined): Promise<string> {
   const response = await client.images.generate({
     model: "gpt-image-1",
     prompt,
@@ -239,11 +231,28 @@ export async function generateCharacterSheet(
   if (!data?.b64_json) {
     throw new Error("gpt-image-1 응답에 이미지 데이터가 없음");
   }
+  return data.b64_json;
+}
+
+export async function generateCharacterSheet(
+  preset: PresetInput
+): Promise<GeneratedImageResult> {
+  const prompt = buildCharacterPrompt(preset);
+  // 유료 호출 전에 읽어 모르는 값이면 여기서 멈춘다(#190). 컷과 같은 설정을 따른다 —
+  // 시트만 기본 화질이면 저가 QA에서도 시트 비용은 그대로 나간다.
+  const setting = imageSetting();
+  const quality = imageQuality(setting);
+  logImageSetting("character_sheet", setting);
+
+  const b64 =
+    setting === "comfyui"
+      ? (await generateWithComfyui(prompt, OUTPUT_SIZE)).base64
+      : await generateSheetWithOpenAI(prompt, quality);
 
   // #104: 여기까지 오면 유료 호출은 이미 성공한 뒤다 — 리사이즈가 실패해도
   // 결과를 버리지 않는다. resizeToOutput이 실패 시 원본 버퍼 + 실제 메타데이터를
   // 반환하므로 width/height도 실제 값과 어긋나지 않는다.
-  const { buffer, width, height } = await resizeToOutput(data.b64_json);
+  const { buffer, width, height } = await resizeToOutput(b64);
   const { assetUri } = await uploadAsset(buffer, "image/png", "character-sheet.png");
 
   return {
