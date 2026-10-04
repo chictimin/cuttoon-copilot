@@ -26,6 +26,7 @@ import {
   FLOW_OPTIONS,
   type BrainstormAnswers,
 } from "./storyboard-assembly";
+import { CTA_STRENGTHS } from "../../cta-strength-options";
 import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
 // 순수 헬퍼라 클라이언트에서 값으로 import해도 된다(서버 모듈·DB import 없음, #207).
 import {
@@ -106,13 +107,6 @@ function normalizeFlowTurn(turn: BrainstormTurn | undefined): BrainstormTurn {
 const CAPTIONS_ROUTE = "/api/session/captions";
 // 톤 목록은 spec/data/caption-tones.json 단일 출처에서 읽는다.
 const CAPTION_TONES = loadCaptionTones();
-// #205 화면 계약: 마무리 강도 3단 슬라이더(왼쪽부터 none → clear).
-const CTA_STRENGTHS: { id: CtaStrength; label: string }[] = [
-  { id: "none", label: "이야기만" },
-  { id: "soft", label: "은근하게" },
-  { id: "clear", label: "확실하게" },
-];
-
 // #205: 이번 편 목적 후보 — 온보딩(DetailsStep)과 같은 resolveCandidates 기준.
 // 프로젝트 기본 목적이 후보 밖이면 맨 앞에 넣어 기본값이 항상 보이게 한다.
 function ctaPurposeOptions(preset: Preset): CtaPreset[] {
