@@ -8,6 +8,7 @@ import {
   resolveCandidates,
 } from "@/lib/llm/cta-presets";
 import type { CtaStrength } from "@/lib/llm/narrative-flow";
+import { CTA_STRENGTHS } from "../cta-strength-options";
 
 // PRD.md 4절 "딸깍 UX 판정 기준": enum 다중선택은 체크박스로 받는 게 허용된다.
 // 아래 세 목록은 preset.schema.json의 context.interests/age_band/life_stage enum 값이다.
@@ -51,13 +52,6 @@ export interface DetailsFormValue {
   ctaId: string;
   ctaStrength: CtaStrength;
 }
-
-// #205 2단: 프로젝트 기본 마무리 강도. 세션 "말투와 마무리" 화면의 슬라이더와 같은 순서·라벨.
-const CTA_STRENGTHS: { id: CtaStrength; label: string }[] = [
-  { id: "none", label: "이야기만" },
-  { id: "soft", label: "은근하게" },
-  { id: "clear", label: "확실하게" },
-];
 
 function parseTags(text: string): string[] {
   return text
