@@ -39,6 +39,7 @@ export interface Preset {
   };
   style: {
     keywords: string[];
+    keyword_hints?: string[];
     line_weight: LineWeight;
     palette: string[];
     saturation: Saturation;
@@ -48,6 +49,7 @@ export interface Preset {
   };
   rules: {
     forbidden: string[];
+    forbidden_hints?: string[];
     cta_format: string;
     /** 프로젝트 CTA 강도 기본값 (issue #205). 없으면 clear로 해석. */
     cta_strength?: CtaStrength;
@@ -164,6 +166,9 @@ export function assertValidPreset(data: unknown): asserts data is Preset {
   if (typeof d.style !== "object" || d.style === null) fail("style 누락");
   const style = d.style as Record<string, unknown>;
   if (!isStringArray(style.keywords)) fail("style.keywords는 문자열 배열이어야 함");
+  if (style.keyword_hints !== undefined && !isStringArray(style.keyword_hints)) {
+    fail("style.keyword_hints는 문자열 배열이어야 함");
+  }
   if (!VALID.line_weight.includes(style.line_weight as string)) {
     fail(`style.line_weight 값이 유효하지 않음: ${String(style.line_weight)}`);
   }
@@ -191,6 +196,9 @@ export function assertValidPreset(data: unknown): asserts data is Preset {
   if (typeof d.rules !== "object" || d.rules === null) fail("rules 누락");
   const rules = d.rules as Record<string, unknown>;
   if (!isStringArray(rules.forbidden)) fail("rules.forbidden은 문자열 배열이어야 함");
+  if (rules.forbidden_hints !== undefined && !isStringArray(rules.forbidden_hints)) {
+    fail("rules.forbidden_hints는 문자열 배열이어야 함");
+  }
   if (typeof rules.cta_format !== "string" || rules.cta_format.length < 1) {
     fail("rules.cta_format 누락");
   }
