@@ -12,6 +12,7 @@
 
 import cutDefaultsRaw from "@/spec/data/cut-defaults.json";
 import storyboardSchema from "@/spec/storyboard.schema.json";
+import { displaySubject } from "./subject-tags";
 
 export interface BeatExpressionPose {
   expression: string;
@@ -278,7 +279,7 @@ export function getBeatExpressionPose(beat: string): BeatExpressionPose | undefi
   return cutDefaultsFile.beat_expression_pose[beat];
 }
 
-/** beat별 폴백 대사. 템플릿의 {subject} 자리에 소재를 넣는다. */
+/** beat별 폴백 대사. 템플릿의 {subject} 자리에 표시용 plain 소재를 넣는다. */
 export function defaultCaptionForBeat(beat: string, subject: string, ctaStrength = "clear"): string {
   // cta beat는 선택 강도를 따른다 (issue #205 K4b). soft면 전용 은근한 폴백,
   // 그 외(clear·없음·none)는 현행 문장 — none은 CTA beat가 없어 이 경로를 타지 않는다.
@@ -286,7 +287,7 @@ export function defaultCaptionForBeat(beat: string, subject: string, ctaStrength
     return cutDefaultsFile.cta_fallback.soft;
   }
   const template = cutDefaultsFile.beat_caption_templates[beat] ?? "지금 바로 확인해보세요";
-  return template.split("{subject}").join(subject);
+  return template.split("{subject}").join(displaySubject(subject));
 }
 
 /** 4컷 샷·앵글 기본 시퀀스. */
