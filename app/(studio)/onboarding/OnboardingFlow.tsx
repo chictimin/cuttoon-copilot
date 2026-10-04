@@ -145,6 +145,7 @@ export default function OnboardingFlow() {
       rules: {
         forbidden: details.forbidden,
         cta_format: details.ctaId,
+        cta_strength: details.ctaStrength,
       },
       context: {
         industry: details.industry,

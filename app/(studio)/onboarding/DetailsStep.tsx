@@ -7,6 +7,8 @@ import {
   getFallbackCtaId,
   resolveCandidates,
 } from "@/lib/llm/cta-presets";
+import type { CtaStrength } from "@/lib/llm/narrative-flow";
+import { CTA_STRENGTHS } from "../cta-strength-options";
 
 // PRD.md 4절 "딸깍 UX 판정 기준": enum 다중선택은 체크박스로 받는 게 허용된다.
 // 아래 세 목록은 preset.schema.json의 context.interests/age_band/life_stage enum 값이다.
@@ -48,6 +50,7 @@ export interface DetailsFormValue {
   ageBand: AgeBand[];
   lifeStage: LifeStage[];
   ctaId: string;
+  ctaStrength: CtaStrength;
 }
 
 function parseTags(text: string): string[] {
@@ -107,6 +110,7 @@ export default function DetailsStep({
   const [ageBand, setAgeBand] = useState<Set<AgeBand>>(new Set());
   const [lifeStage, setLifeStage] = useState<Set<LifeStage>>(new Set());
   const [ctaId, setCtaId] = useState<string | null>(null);
+  const [ctaStrength, setCtaStrength] = useState<CtaStrength>("soft");
 
   const ctaCandidates = useMemo(
     () => resolveCandidates(Array.from(interests)),
@@ -123,6 +127,7 @@ export default function DetailsStep({
       ageBand: Array.from(ageBand),
       lifeStage: Array.from(lifeStage),
       ctaId: ctaId ?? getFallbackCtaId(),
+      ctaStrength,
     });
   }
 
@@ -240,6 +245,35 @@ export default function DetailsStep({
             선택됨: {getCtaPresetById(ctaId)?.label ?? ctaId}
           </p>
         )}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="cta-strength" className="text-sm font-medium text-zinc-700">
+          마무리 강도 기본값 <span className="font-normal text-zinc-400">(편마다 바꿀 수 있어요)</span>
+        </label>
+        <input
+          id="cta-strength"
+          type="range"
+          min={0}
+          max={CTA_STRENGTHS.length - 1}
+          step={1}
+          value={CTA_STRENGTHS.findIndex((s) => s.id === ctaStrength)}
+          onChange={(e) => setCtaStrength(CTA_STRENGTHS[Number(e.target.value)].id)}
+          aria-valuetext={CTA_STRENGTHS.find((s) => s.id === ctaStrength)?.label}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs">
+          {CTA_STRENGTHS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setCtaStrength(s.id)}
+              className={s.id === ctaStrength ? "font-semibold text-zinc-900" : "text-zinc-400"}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
