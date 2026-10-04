@@ -626,6 +626,7 @@ function buildPrompt(input: CaptionsRequest, wanted: number[]): string {
       : `${ctaContextLine(resolvePurposeId(input) ?? input.context.cta_format)}\n`;
   // S3: 모델에 보내는 소재·cast 서술은 서버가 받은 subject로 다시 파싱해 투영한다.
   const projectedSubject = projectForModel(input.subject, input.subject, input.subject_tags);
+  const projectedFlow = projectForModel(input.flow, input.subject, input.subject_tags);
   const projectedCast = input.cast.map((c) => projectForModel(c, input.subject, input.subject_tags));
   const tagInstruction = subjectTagInstruction(input.subject, input.subject_tags);
   const cutLines = wanted
@@ -641,7 +642,7 @@ function buildPrompt(input: CaptionsRequest, wanted: number[]): string {
 ${projectedSubject}
 </소재>
 <흐름>
-${input.flow}
+${projectedFlow}
 </흐름>
 <등장인물>
 ${projectedCast.map((c) => `- ${c}`).join("\n")}
