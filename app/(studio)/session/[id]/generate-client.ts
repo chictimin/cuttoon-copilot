@@ -8,6 +8,7 @@
 // 해준다), 나머지 3컷은 kind: 'cut'을 continueFrom으로 체이닝하며 순차 호출한다.
 
 import type { Preset } from "@/lib/llm/preset-guard";
+import { fetchAssetUrl } from "../../asset-url";
 import type { Storyboard } from "./storyboard-types";
 
 export interface GeneratedCut {
@@ -23,17 +24,8 @@ function referenceAssetsOf(preset: Preset): string[] {
   return [preset.assets.character_sheet, ...preset.assets.style_refs];
 }
 
-async function resolveAssetUrl(uri: string): Promise<string> {
-  const res = await fetch(`/api/session/asset-url?uri=${encodeURIComponent(uri)}`);
-  if (!res.ok) {
-    throw new Error("이미지 URL을 가져오지 못했습니다");
-  }
-  const { url } = (await res.json()) as { url: string };
-  return url;
-}
-
 async function toGeneratedCut(result: { asset: string; continuationToken?: string }): Promise<GeneratedCut> {
-  const image = await resolveAssetUrl(result.asset);
+  const image = await fetchAssetUrl(result.asset);
   return { asset: result.asset, image, continuationToken: result.continuationToken };
 }
 
@@ -161,7 +153,7 @@ export async function generateChainedCuts(
     // 이 컷의 표시용 image만 비우고(저장은 asset 기준이라 영향 없음) 계속한다.
     let image = "";
     try {
-      image = await resolveAssetUrl(raw.asset);
+      image = await fetchAssetUrl(raw.asset);
     } catch (e) {
       console.error(
         `[generateChainedCuts] 컷 ${cuts[i].cut_index} 이미지 URL 리졸브 실패 — asset은 보존됨:`,
