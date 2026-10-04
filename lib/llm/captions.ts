@@ -56,6 +56,7 @@ import { getCaptionToneById } from "./caption-tones";
 import { getCtaPresetById, getFallbackCtaId } from "./cta-presets";
 import type { CtaRequest, CtaStrength } from "./narrative-flow";
 import {
+  displaySubject,
   parseSubjectTagDetails,
   projectForModel,
   restoreFirstMention,
@@ -875,10 +876,10 @@ async function generateCaptionsForCuts(
     if (text) {
       captions.push({ cut_index: cutIndex, text });
     } else {
-      // 여전히 무효인 그 컷만 컷 기본값 문장으로 채운다.
+      // 여전히 무효인 그 컷만 컷 기본값 문장으로 채운다. 표시용 plain 소재를 쓴다.
       captions.push({
         cut_index: cutIndex,
-        text: defaultCaptionForBeat(input.beats[i - 1], subject, fallbackStrength),
+        text: defaultCaptionForBeat(input.beats[i - 1], displaySubject(subject), fallbackStrength),
       });
       fallbackCutIndexes.push(i);
     }
