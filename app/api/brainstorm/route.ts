@@ -3,6 +3,13 @@ import {
   extractDraftFromSubject,
   type DraftStoryboard,
 } from "@/lib/llm/brainstorm";
+import { inferSubjectTagCategories } from "@/lib/llm/subject-tag-inference";
+import {
+  parseSubjectTags,
+  projectForModel,
+  SUBJECT_TAG_FALLBACK_CATEGORY,
+  type SubjectTag,
+} from "@/lib/llm/subject-tags";
 
 export const runtime = "nodejs";
 
@@ -36,13 +43,6 @@ export async function POST(request: Request) {
       console.info(`[llm-length] brainstorm-subject length=${trimmed.length} over_limit=200`);
     }
 
-    // issue #119-1: 클라이언트가 draft를 보내는 경로는 아직 없다(첫 호출 시점엔
-    // 답변이 하나도 없어 만들 수 없다) — 대신 서버가 subject에서 자체 추출한다.
-    // body.draft가 명시적으로 오면(향후 확장 대비, 지금은 안 옴) 그걸 우선한다.
-    const suppliedDraft = parseDraft(body.draft);
-    const extracted = suppliedDraft ? undefined : await extractDraftFromSubject(trimmed);
-    const draft = suppliedDraft ?? extracted?.draft;
-
     // 프로젝트 분야(문자열 배열, 없으면 빈 배열) — 프롬프트의 <프로젝트 분야> 태그에 넣는다.
     const rawIndustry = (body.context as Record<string, unknown> | undefined)?.industry;
     const industry = Array.isArray(rawIndustry)
@@ -62,13 +62,40 @@ export async function POST(request: Request) {
         ? (rawMascot as { label: string; description: string })
         : undefined;
 
-    const { turns, flowSupplement } = await generateBrainstormTurns(trimmed, draft, {
+    // issue #206 S2: 화면이 보낸 subject_tags는 받지 않는다 — 매 호출 재추론한다.
+    // 태그가 없으면 아래 infer·투영을 통째로 건너뛰어 현행 그대로(추가 호출 0) 둔다.
+    const parsedTags = parseSubjectTags(trimmed);
+    let subjectTags: SubjectTag[] = [];
+    let modelSubject = trimmed;
+    if (parsedTags.length > 0) {
+      const inferStart = Date.now();
+      try {
+        subjectTags = await inferSubjectTagCategories({ subject: trimmed, industry });
+      } catch {
+        subjectTags = parsedTags.map((tag) => ({
+          raw: tag.raw,
+          category: tag.category ?? SUBJECT_TAG_FALLBACK_CATEGORY,
+        }));
+      }
+      console.info(`[subject-tags] infer ms=${Date.now() - inferStart}`);
+      modelSubject = projectForModel(trimmed, trimmed, subjectTags);
+    }
+
+    // issue #119-1: 클라이언트가 draft를 보내는 경로는 아직 없다(첫 호출 시점엔
+    // 답변이 하나도 없어 만들 수 없다) — 대신 서버가 subject에서 자체 추출한다.
+    // body.draft가 명시적으로 오면(향후 확장 대비, 지금은 안 옴) 그걸 우선한다.
+    // 태그가 있으면 투영 소재(modelSubject)로 추출한다 — 원문은 추출·브레인스토밍에 안 간다.
+    const suppliedDraft = parseDraft(body.draft);
+    const extracted = suppliedDraft ? undefined : await extractDraftFromSubject(modelSubject);
+    const draft = suppliedDraft ?? extracted?.draft;
+
+    const { turns, flowSupplement } = await generateBrainstormTurns(modelSubject, draft, {
       industry,
       ...(mascot ? { mascot } : {}),
     });
     // flowSupplement: flow 옵션 중 로컬 목록으로 보충한 위치. 화면은 서버가
     // 정규화한 flow 옵션을 사용한다(F1 계약).
-    return Response.json({ turns, resolved: extracted?.resolved ?? [], flowSupplement });
+    return Response.json({ turns, resolved: extracted?.resolved ?? [], flowSupplement, subjectTags });
   } catch (error) {
     console.error("브레인스토밍 에러:", error);
     return Response.json(
