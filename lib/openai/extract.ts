@@ -119,7 +119,9 @@ export async function extractStyle(refs: Buffer[]): Promise<StyleExtractionResul
 // --- generateCharacterSheet ---
 
 export interface PresetInput {
-  style: StyleExtractionResult & { keywords: string[] };
+  // #151: keyword_hints 는 keywords 를 어휘 사전으로 바꾼 영문 힌트(선택). 있으면
+  // 프롬프트에 이쪽을 쓴다 — generate.ts buildCutPrompt 와 같은 규칙.
+  style: StyleExtractionResult & { keywords: string[]; keyword_hints?: string[] };
   context: {
     industry: string[];
     age_band: string[];
@@ -142,7 +144,8 @@ export function buildCharacterPrompt(preset: PresetInput): string {
   const c = preset.context ?? ({} as PresetInput["context"]);
 
   const paletteStr = (s.palette ?? []).join(", ") || "designer's choice";
-  const keywordsStr = s.keywords?.length ? s.keywords.join(", ") : "default comic style";
+  const keywords = s.keyword_hints ?? s.keywords;
+  const keywordsStr = keywords?.length ? keywords.join(", ") : "default comic style";
   const industryStr = c.industry?.length ? c.industry.join(", ") : "general";
   const ageStr = c.age_band?.length ? c.age_band.join(", ") : "all ages";
   const lifeStr = c.life_stage?.length ? c.life_stage.join(", ") : "general";
