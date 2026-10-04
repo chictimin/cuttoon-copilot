@@ -40,7 +40,7 @@ npm run lint             # 린트
 npm run spec:sync-check  # 스키마 · 데이터 정합 검사
 ```
 
-`.env`는 저장소에 없다(추적 제외). 팀 내부 채널로 전달받는다. 필수 환경변수는 `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` 세 개다. 선택 변수는 `IMAGE_PROVIDER` — 비우면 `openai`, 개발·QA 비용 절감용 `openai-low`(#190). 키 이름은 `.env.example` 참고. 이미지 생성 테스트는 `OPENAI_API_KEY`를 각자 개인 키로 바꿔 쓴다.
+`.env`는 저장소에 없다(추적 제외). 팀 내부 채널로 전달받는다. 필수 환경변수는 `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` 세 개다. 선택 변수는 `IMAGE_PROVIDER` — 비우면 `openai`, 개발·QA 비용 절감용 `openai-low`(#190), 로컬 ComfyUI로 그리는 개발 테스트 전용 `comfyui`(#226, `COMFYUI_*` 변수 필요). P0 판정·발표·최종 회귀는 `openai`로만 한다. 키 이름은 `.env.example` 참고. 이미지 생성 테스트는 `OPENAI_API_KEY`를 각자 개인 키로 바꿔 쓴다.
 
 ### Supabase 셋업
 
@@ -76,7 +76,7 @@ cuttoon-copilot/
 │      ├─ session/             세션 관리 · Export             chictimin
 │      ├─ upload/              레퍼런스 업로드                chictimin
 │      ├─ brainstorm/          브레인스토밍 3턴                chictimin
-│      ├─ generate/            이미지 생성 (maxDuration=300)  joniverse-ai
+│      ├─ generate/            이미지 생성                    joniverse-ai
 │      └─ extract/             스타일 추출                    joniverse-ai
 ├─ lib/
 │  ├─ asset-store.ts           업로드 검증 · Storage 저장      chictimin
