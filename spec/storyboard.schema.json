@@ -44,7 +44,7 @@
       "description": "소재 [태그]의 저장 매핑 (issue #206). 없으면 기존 세션 그대로 유효(cta_strength 없음과 같은 원칙). subject는 원문(괄호 포함) 그대로 둔다.",
       "items": {
         "type": "object",
-        "required": ["raw"],
+        "required": ["raw", "category"],
         "additionalProperties": false,
         "properties": {
           "raw": {
