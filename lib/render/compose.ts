@@ -152,12 +152,16 @@ function tailGeometry(canvasW: number, canvasH: number, cx: number, cy: number, 
 }
 
 // fixedProtrude가 있으면 목표점 거리와 상관없이 그 길이만큼만 튀어나온다 — center용(#170).
-type Tail = { angle: number; totalDist: number; maxProtrude: number; fixedProtrude?: number };
+// minProtrude는 길이 하한 — center가 화자 쪽으로 꼬리를 낼 때 화자가 몸통 바로 옆이면
+// "남은 거리의 40%"가 몇 px밖에 안 돼 꼬리가 안 보여서, 고정 꼬리 길이보다 짧아지지 않게 한다(#199).
+export type Tail = {
+  angle: number; totalDist: number; maxProtrude: number; fixedProtrude?: number; minProtrude?: number;
+};
 
 function protrudeFrom(boundaryDist: number, tail: Tail): number {
   if (tail.fixedProtrude !== undefined) return tail.fixedProtrude;
   const remaining = Math.max(tail.totalDist - boundaryDist, 0);
-  return Math.min(remaining * TAIL_REACH_RATIO, tail.maxProtrude);
+  return Math.max(Math.min(remaining * TAIL_REACH_RATIO, tail.maxProtrude), tail.minProtrude ?? 0);
 }
 
 // center는 원래(2026-08-19) 꼬리를 안 그렸다 — 기본 목표점(화면 중앙, 세로 42%)이
@@ -170,6 +174,23 @@ const CENTER_TAIL_PROTRUDE_RATIO = 0.045;
 
 function centerTail(canvasH: number): Tail {
   return { angle: CENTER_TAIL_ANGLE, totalDist: 0, maxProtrude: 0, fixedProtrude: canvasH * CENTER_TAIL_PROTRUDE_RATIO };
+}
+
+// center도 목표점(화자 머리)이 몸통 밖에 있으면 그쪽으로 꼬리를 낸다(#199, PRD 4절
+// "꼬리는 화자 방향으로"). 목표점이 몸통 안이면 방향이 의미 없으므로 지금의 고정
+// 꼬리로 폴백한다 — 기본 목표점(화면 중앙, 세로 42%)은 늘 center 몸통 안에 들어가서,
+// headTarget을 넘기지 않는 호출(지금의 Export)은 결과가 바뀌지 않는다.
+// halfW/halfH는 도형의 반폭·반높이(rounded는 타원 반지름, rect/cloud는 박스 절반).
+export function resolveTail(
+  position: Position, shape: "ellipse" | "box", cx: number, cy: number, halfW: number, halfH: number,
+  canvasW: number, canvasH: number, headTarget: HeadTarget,
+): Tail {
+  if (position !== "center") return tailGeometry(canvasW, canvasH, cx, cy, headTarget);
+  const nx = (canvasW * headTarget.x - cx) / halfW;
+  const ny = (canvasH * headTarget.y - cy) / halfH;
+  const inside = shape === "ellipse" ? nx * nx + ny * ny <= 1 : Math.abs(nx) <= 1 && Math.abs(ny) <= 1;
+  if (inside) return centerTail(canvasH);
+  return { ...tailGeometry(canvasW, canvasH, cx, cy, headTarget), minProtrude: canvasH * CENTER_TAIL_PROTRUDE_RATIO };
 }
 
 // 타원 테두리 중 꼬리가 나갈 좁은 구간만 갈라서, 그 경계점에서 목표점 쪽으로
@@ -257,7 +278,9 @@ function bubbleShapeSvg(
 ): string {
   const cx = x + w / 2;
   const cy = y + h / 2;
-  const tail = position === "center" ? centerTail(canvasH) : tailGeometry(canvasW, canvasH, cx, cy, headTarget);
+  const tail = bubbleType === "rounded"
+    ? resolveTail(position, "ellipse", cx, cy, radii.rx, radii.ry, canvasW, canvasH, headTarget)
+    : resolveTail(position, "box", cx, cy, w / 2, h / 2, canvasW, canvasH, headTarget);
 
   if (bubbleType === "rect") {
     return rectPath(x, y, w, h, 6, tail);

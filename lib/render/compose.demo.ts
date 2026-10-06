@@ -2,11 +2,12 @@
 // 값이 box·shape·tail 전부에 일관되게 쓰이는지(#79) 확인하는 스크립트.
 // storyboard.schema.json enum 밖의 값은 저장 시점 검증을 뚫고 들어올 수 있으므로
 // (app/api/session/validate.ts, #70/#79 이슈 참고) 타입을 `as Position`으로 우회해 재현한다.
+// #199: center 꼬리가 화자 방향을 향하는지, 기본 목표점(몸통 안)에서는 예전 고정 꼬리 그대로인지도 본다.
 //
 // 실행: npx tsx lib/render/compose.demo.ts
 
 import sharp from "sharp";
-import { composeCut } from "./compose";
+import { composeCut, resolveTail, type HeadTarget } from "./compose";
 import type { Caption, Position } from "./types";
 
 async function blankImage(): Promise<Buffer> {
@@ -73,11 +74,66 @@ async function main() {
     console.error(`FAIL center 폴백 비교 — ${(err as Error).message}`);
   }
 
+  // #199: center 꼬리 — 목표점이 몸통 밖이면 그쪽을 향하고, 몸통 안이면 고정 꼬리로 폴백한다.
+  // 캔버스 1000×1000, 몸통 중심 (500, 450), 반폭 280·반높이 70 기준.
+  {
+    const dirs: [string, HeadTarget, (cos: number, sin: number) => boolean][] = [
+      ["왼쪽", { x: 0.1, y: 0.45 }, (c) => c < -0.9],
+      ["오른쪽", { x: 0.9, y: 0.45 }, (c) => c > 0.9],
+      ["위", { x: 0.5, y: 0.1 }, (_, s) => s < -0.9],
+      ["아래", { x: 0.5, y: 0.9 }, (_, s) => s > 0.9],
+    ];
+    for (const shape of ["ellipse", "box"] as const) {
+      for (const [name, target, ok] of dirs) {
+        const t = resolveTail("center", shape, 500, 450, 280, 70, 1000, 1000, target);
+        if (t.fixedProtrude === undefined && ok(Math.cos(t.angle), Math.sin(t.angle))) {
+          console.log(`ok   center 꼬리 ${shape} — 화자가 ${name}에 있으면 그쪽을 향함`);
+        } else {
+          failed++;
+          console.error(`FAIL center 꼬리 ${shape} — 화자가 ${name}인데 각도 ${t.angle.toFixed(2)}, 고정=${t.fixedProtrude !== undefined}`);
+        }
+      }
+      const inside = resolveTail("center", shape, 500, 450, 280, 70, 1000, 1000, { x: 0.55, y: 0.47 });
+      if (inside.fixedProtrude !== undefined) {
+        console.log(`ok   center 꼬리 ${shape} — 목표점이 몸통 안이면 고정 꼬리로 폴백`);
+      } else {
+        failed++;
+        console.error(`FAIL center 꼬리 ${shape} — 목표점이 몸통 안인데 고정 꼬리로 폴백하지 않음`);
+      }
+    }
+  }
+
+  // #199 회귀: headTarget을 안 넘긴 center(지금의 Export)는 기본 목표점이 몸통 안이라 결과가 그대로여야 한다
+  // — 기본 목표점을 명시적으로 넘긴 것, 몸통 안의 다른 점을 넘긴 것과 렌더 결과가 같아야 한다.
+  try {
+    const long: Caption = {
+      text: "아침마다 무릎이 뻣뻣해서 계단 내려갈 때마다 조심하게 되는데 스트레칭을 하면 정말 좀 나아질까 궁금해요",
+      bubble_type: "rounded",
+      position: "center",
+    };
+    for (const caption of [long, { ...long, bubble_type: "rect" } satisfies Caption]) {
+      const [a, b, c] = await Promise.all([
+        composeCut(img, [caption]),
+        composeCut(img, [caption], [{ x: 0.5, y: 0.42 }]),
+        composeCut(img, [caption], [{ x: 0.52, y: 0.45 }]),
+      ]);
+      if (Buffer.compare(a, b) === 0 && Buffer.compare(a, c) === 0) {
+        console.log(`ok   center ${caption.bubble_type} 긴 대사 — headTarget 생략·몸통 안 목표점 모두 기존 고정 꼬리와 동일`);
+      } else {
+        failed++;
+        console.error(`FAIL center ${caption.bubble_type} 긴 대사 — 몸통 안 목표점인데 렌더 결과가 달라짐`);
+      }
+    }
+  } catch (err) {
+    failed++;
+    console.error(`FAIL center 회귀 비교 — ${(err as Error).message}`);
+  }
+
   if (failed > 0) {
     console.error(`\n${failed}건 실패`);
     process.exit(1);
   }
-  console.log("\n3건 통과");
+  console.log("\n15건 통과");
 }
 
 main();
