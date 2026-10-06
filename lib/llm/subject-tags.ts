@@ -313,6 +313,86 @@ export interface CaptionLine {
 }
 
 /**
+ * spec-c1 rev2 4-2b 받침 판정. raw 마지막 글자 기준.
+ * - 한글 음절이면 종성 유무로 "yes"(받침 있음) / "no"(받침 없음).
+ * - 비한글로 끝나면 "non-hangul"(받침 판정 없이 조사 없는 표현).
+ * - 으로/로 ㄹ 예외는 이분법으로 구분하지 않는다(알려진 한계, spec 4-2b).
+ */
+export function batchimKindOf(raw: string): "yes" | "no" | "non-hangul" {
+  const chars = Array.from(raw);
+  const last = chars[chars.length - 1] ?? "";
+  const code = last.codePointAt(0) ?? 0;
+  if (code < 0xac00 || code > 0xd7a3) return "non-hangul";
+  return (code - 0xac00) % 28 === 0 ? "no" : "yes";
+}
+
+/** spec-c1 rev2 4-3 표식 문법. ASCII 대괄호 + 수평 공백만(줄바꿈 불허) + 한 자리 순번. */
+export const BRAND_MARKER_PATTERN_SOURCE = "\\[[ \\t]*브랜드[ \\t]*([1-9])[ \\t]*\\]";
+
+function brandMarkerRegex(): RegExp {
+  return new RegExp(BRAND_MARKER_PATTERN_SOURCE, "g");
+}
+
+/**
+ * spec-c1 rev2 4-3 고정 표식 대입 (순수 함수).
+ *
+ * - 대상: 입력 captions 중 3번 컷(targetCutIndex)만. 다른 컷은 손대지 않는다.
+ * - 원본 3번 컷 텍스트에서 일치 위치를 먼저 전부 수집한 뒤 한 번에 치환한다.
+ *   대입한 raw나 남은 표식을 다시 훑지 않는다.
+ * - 순번 n이 태그 개수 범위 안이면 그 순번의 첫 일치 1곳만 raw로. 같은 순번의
+ *   두 번째 이후·범위 밖 순번은 그대로 둔다.
+ * - 값은 parseSubjectTagDetails(subject)[n-1].raw에서만(화면이 보낸 raw 무시).
+ * - subjectTags가 없거나 파싱 결과와 개수가 다르면 아무것도 바꾸지 않는다.
+ * - 순번에 대응하는 subjectTags 원소의 category가 없거나 빈 문자열이면 그 순번은
+ *   대입하지 않고 표식을 둔다(태그 누락·빈 category).
+ * - category 정확 일치 복원은 하지 않는다(4-4 폴백은 호출부 몫).
+ * - 입력 배열을 고치지 않고 새 배열을 반환한다.
+ */
+export function applyBrandMarkers(
+  captions: CaptionLine[],
+  subject: string,
+  subjectTags: SubjectTag[] | undefined,
+  targetCutIndex = 3
+): CaptionLine[] {
+  const details = parseSubjectTagDetails(subject);
+  if (!subjectTags || details.length !== subjectTags.length) return captions;
+
+  return captions.map((caption) => {
+    if (caption.cut_index !== targetCutIndex) return caption;
+    const text = caption.text;
+    const re = brandMarkerRegex();
+    const matches: Array<{ index: number; length: number; n: number }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      matches.push({ index: m.index, length: m[0].length, n: Number(m[1]) });
+    }
+    if (matches.length === 0) return caption;
+    const seen = new Set<number>();
+    const parts: string[] = [];
+    let pos = 0;
+    let changed = false;
+    for (const mm of matches) {
+      parts.push(text.slice(pos, mm.index));
+      const inRange = mm.n >= 1 && mm.n <= details.length;
+      const cat = inRange ? subjectTags[mm.n - 1]?.category : undefined;
+      const valid =
+        inRange && typeof cat === "string" && cat.trim().length > 0;
+      if (valid && !seen.has(mm.n)) {
+        seen.add(mm.n);
+        parts.push(details[mm.n - 1].raw);
+        changed = true;
+      } else {
+        parts.push(text.slice(mm.index, mm.index + mm.length));
+      }
+      pos = mm.index + mm.length;
+    }
+    parts.push(text.slice(pos));
+    const next = parts.join("");
+    return changed ? { ...caption, text: next } : caption;
+  });
+}
+
+/**
  * 대사 생성 직후 한 번만 적용하는 복원. 대상 컷 하나에서만, 태그 순서대로
  * category의 첫 등장 1곳을 raw로 바꾼다.
  *

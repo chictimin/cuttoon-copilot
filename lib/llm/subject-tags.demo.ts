@@ -5,12 +5,15 @@
 // 실행: npx tsx lib/llm/subject-tags.demo.ts
 
 import {
+  applyBrandMarkers,
+  batchimKindOf,
   normalizeStoredSubjectTags,
   normalizeTagText,
   projectForModel,
   restoreFirstMention,
   type SubjectTag,
 } from "./subject-tags";
+import { subjectTagInstruction } from "./captions";
 
 let failed = 0;
 
@@ -172,6 +175,169 @@ function assertNoLeak(name: string, output: string, subject: string, categories:
     ),
     { tags: [], dropped: "raw_mismatch" }
   );
+}
+
+// 6. spec-c1 rev2 5절 결정표 1~12 (3번 컷 기준) + 6-1 무료 케이스.
+{
+  const S1 = "[별빛핏] 신메뉴";
+  const T1: SubjectTag[] = [{ raw: "별빛핏", category: "커피 브랜드" }];
+  const c3 = (t: string) => [{ cut_index: 3, text: t }];
+  const o3 = (t: string, s: string, tt: SubjectTag[] | undefined) =>
+    applyBrandMarkers(c3(t), s, tt)[0].text;
+
+  // 표식 0개: 대입 없음(apply는 category를 건드리지 않음).
+  eq("C1-0개", o3("커피 브랜드 최고", S1, T1), "커피 브랜드 최고");
+  // 표식 1개.
+  eq("C1-1개", o3("맛은 [브랜드1] 최고", S1, T1), "맛은 별빛핏 최고");
+  // 표식 2개(같은 순번 반복): 첫 1곳만.
+  eq("C1-2개-반복", o3("[브랜드1]와 [브랜드1] 최고", S1, T1), "별빛핏와 [브랜드1] 최고");
+  // 표식 3개(같은 순번 3회): 첫 1곳만.
+  eq("C1-3개-반복", o3("[브랜드1][브랜드1][브랜드1]", S1, T1), "별빛핏[브랜드1][브랜드1]");
+
+  // 5-1: 3번에 [브랜드1] 1회.
+  eq("C1-5.1", o3("[브랜드1] 최고", S1, T1), "별빛핏 최고");
+  // 5-2: 3번에 [브랜드1] 2회.
+  eq("C1-5.2", o3("[브랜드1]와 [브랜드1] 최고", S1, T1), "별빛핏와 [브랜드1] 최고");
+  // 5-3: 1번과 3번에 [브랜드1].
+  {
+    const both = applyBrandMarkers(
+      [
+        { cut_index: 1, text: "1번 [브랜드1]" },
+        { cut_index: 3, text: "3번 [브랜드1]" },
+      ],
+      S1,
+      T1
+    );
+    eq("C1-5.3-1번유지", both[0].text, "1번 [브랜드1]");
+    eq("C1-5.3-3번대입", both[1].text, "3번 별빛핏");
+  }
+  // 5-4: 1번에만 [브랜드1] (3번 대입 없음).
+  eq(
+    "C1-5.4",
+    applyBrandMarkers([{ cut_index: 1, text: "1번 [브랜드1]" }], S1, T1)[0].text,
+    "1번 [브랜드1]"
+  );
+  // 5-5: 3번 재생성 표식 → 대입(3번 경로).
+  eq("C1-5.5", o3("[브랜드1] 최고", S1, T1), "별빛핏 최고");
+  // 5-6: 1번 재생성 표식 → 대입 없음.
+  eq(
+    "C1-5.6",
+    applyBrandMarkers([{ cut_index: 1, text: "[브랜드1] 최고" }], S1, T1)[0].text,
+    "[브랜드1] 최고"
+  );
+  // 5-7: 3번에 [브랜드1]+[브랜드7](태그 1개).
+  eq("C1-5.7", o3("[브랜드1]와 [브랜드7] 최고", S1, T1), "별빛핏와 [브랜드7] 최고");
+  // 5-8: 3번에 표식 없이 category만 → apply는 그대로(폴백은 호출부).
+  eq("C1-5.8-apply유지", o3("커피 브랜드 최고", S1, T1), "커피 브랜드 최고");
+  eq(
+    "C1-5.8-폴백",
+    restoreFirstMention(c3("커피 브랜드 최고"), S1, T1)[0].text,
+    "별빛핏 최고"
+  );
+  // 5-9: 태그 2개, 3번에 [브랜드1]만.
+  {
+    const S2 = "[별빛핏][달빛핏] 비교";
+    const T2: SubjectTag[] = [
+      { raw: "별빛핏", category: "음료" },
+      { raw: "달빛핏", category: "과자" },
+    ];
+    eq("C1-5.9", o3("[브랜드1] 최고", S2, T2), "별빛핏 최고");
+  }
+  // 5-10: 태그 2개, 3번에 [브랜드1]+태그2 category → category 그대로.
+  {
+    const S2 = "[별빛핏][달빛핏] 비교";
+    const T2: SubjectTag[] = [
+      { raw: "별빛핏", category: "음료" },
+      { raw: "달빛핏", category: "과자" },
+    ];
+    eq("C1-5.10", o3("[브랜드1] 과자 최고", S2, T2), "별빛핏 과자 최고");
+  }
+  // 5-11: [ 브랜드 1 ] 공백 변형.
+  eq("C1-5.11-공백", o3("맛은 [ 브랜드 1 ] 최고", S1, T1), "맛은 별빛핏 최고");
+  eq("C1-5.11-탭", o3("맛은 [\t브랜드\t1\t] 최고", S1, T1), "맛은 별빛핏 최고");
+  // 5-12: 전각·괄호·영문·두 자리 변형은 그대로.
+  eq("C1-5.12-전각숫자", o3("맛은 [브랜드１] 최고", S1, T1), "맛은 [브랜드１] 최고");
+  eq("C1-5.12-전각괄호", o3("맛은 【브랜드1】 최고", S1, T1), "맛은 【브랜드1】 최고");
+  eq("C1-5.12-영문", o3("맛은 [Brand1] 최고", S1, T1), "맛은 [Brand1] 최고");
+  eq("C1-5.12-두자리", o3("맛은 [브랜드10] 최고", S1, T1), "맛은 [브랜드10] 최고");
+  // 5-13: 지어낸 이름은 그대로(감지 불가).
+  eq("C1-5.13", o3("카페X 최고", S1, T1), "카페X 최고");
+
+  // 같은 category 두 태그: 순번 지시 둘 다 존재.
+  {
+    const S3 = "[별빛핏][달빛핏] 출시";
+    const T3: SubjectTag[] = [
+      { raw: "별빛핏", category: "커피 브랜드" },
+      { raw: "달빛핏", category: "커피 브랜드" },
+    ];
+    eq("C1-같은카테고리-대입", o3("[브랜드1]와 [브랜드2] 최고", S3, T3), "별빛핏와 달빛핏 최고");
+    const inst = subjectTagInstruction(S3, T3);
+    eq(
+      "C1-같은카테고리-지시둘다",
+      String(inst.includes("[브랜드1]") && inst.includes("[브랜드2]")),
+      "true"
+    );
+  }
+
+  // 순번 충돌 raw: 소재 [별빛핏]과 [브랜드1] 비교.
+  {
+    const SC = "[별빛핏]과 [브랜드1] 비교";
+    const TC: SubjectTag[] = [
+      { raw: "별빛핏", category: "커피 브랜드" },
+      { raw: "브랜드1", category: "음료" },
+    ];
+    eq("C1-순번충돌", o3("[브랜드1]와 [브랜드2]", SC, TC), "별빛핏와 브랜드1");
+  }
+
+  // raw에 브랜드2 포함: 재치환 없음.
+  {
+    const S4 = "[AB브랜드2CD] 출시";
+    const T4: SubjectTag[] = [{ raw: "AB브랜드2CD", category: "커피 브랜드" }];
+    eq("C1-재치환없음", o3("[브랜드1] 최고", S4, T4), "AB브랜드2CD 최고");
+  }
+
+  // 태그 누락·개수 불일치·빈 category.
+  eq("C1-태그없음", o3("[브랜드1] 최고", S1, undefined), "[브랜드1] 최고");
+  eq(
+    "C1-개수불일치",
+    o3("[브랜드1] 최고", "[가나]와 [다라]", [{ raw: "가나", category: "음료" }]),
+    "[브랜드1] 최고"
+  );
+  eq("C1-빈category", o3("[브랜드1] 최고", "[별빛핏] 출시", [{ raw: "별빛핏" }]), "[브랜드1] 최고");
+  {
+    const SM = "[별빛핏][달빛핏] 출시";
+    const TM: SubjectTag[] = [{ raw: "별빛핏" }, { raw: "달빛핏", category: "과자" }];
+    eq("C1-혼합빈category", o3("[브랜드1]와 [브랜드2] 최고", SM, TM), "[브랜드1]와 달빛핏 최고");
+  }
+
+  // 편집·저장 문자열 불변: 복원済み 텍스트에 apply 재실행해도 그대로.
+  eq("C1-재실행불변", o3("별빛핏 최고", S1, T1), "별빛핏 최고");
+  eq("C1-적용후재적용", o3(o3("[브랜드1] 최고", S1, T1), S1, T1), "별빛핏 최고");
+
+  // 이미지 프롬프트에 표식 지시 없음: 투영 출력에 표식이 생기지 않음.
+  {
+    const out = projectForModel("[별빛핏] 신메뉴 라떼 출시", S1, T1);
+    eq("C1-이미지표식없음", String(!out.includes("[브랜드")), "true");
+  }
+
+  // 받침 판정: 있음·없음·ㄹ 종성·비한글.
+  eq("C1-받침있음", batchimKindOf("별빛핏"), "yes");
+  eq("C1-받침없음", batchimKindOf("하루노트"), "no");
+  eq("C1-ㄹ종성", batchimKindOf("서울"), "yes");
+  eq("C1-비한글", batchimKindOf("Cafe24"), "non-hangul");
+
+  // 지시 문구: 순번별 줄·조사 줄.
+  {
+    const i1 = subjectTagInstruction(S1, T1);
+    eq("C1-지시-표식", String(i1.includes("[브랜드1]")), "true");
+    eq("C1-지시-글자그대로", String(i1.includes("글자 그대로")), "true");
+    eq("C1-지시-받침있음", String(i1.includes("받침 있는")), "true");
+    const iN = subjectTagInstruction("[하루노트] 기록", [{ raw: "하루노트", category: "메모 앱" }]);
+    eq("C1-지시-받침없음", String(iN.includes("받침 없는")), "true");
+    const iE = subjectTagInstruction("[Cafe24] 안내", [{ raw: "Cafe24", category: "쇼핑몰" }]);
+    eq("C1-지시-비한글", String(iE.includes("조사를 붙이지 않는")), "true");
+    eq("C1-지시-태그없음", subjectTagInstruction("그냥 이야기", []), "");
+  }
 }
 
 if (failed > 0) {
