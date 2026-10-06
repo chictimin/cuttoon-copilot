@@ -111,6 +111,7 @@
 | `server-only` | `lib/db/` | 서버 전용 모듈이 클라이언트 번들에 섞이면 빌드를 실패시킨다 |
 | `archiver` · `@types/archiver` | `lib/render/` | 완성 컷을 ZIP으로 묶어 Export |
 | `sharp` | `lib/render/` | 대사 텍스트 레이어를 컷 이미지에 합성 |
+| `opentype.js` · `@types/opentype.js` | `lib/render/` | 프로젝트 웹폰트를 읽어 대사를 글자 패스로 그리고 실제 글자 폭을 잰다(#209) |
 | `tsx` (dev) | 개발 스크립트 | `.ts` 스크립트를 빌드 없이 실행 |
 
 버전은 `package.json`이 정본이므로 여기 적지 않는다 — 두 곳에 적으면 갈라진다.

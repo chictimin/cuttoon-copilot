@@ -1,6 +1,7 @@
 import { exportCuts } from "@/lib/render/export";
 import type { BubbleType, Cut, Position } from "@/lib/render/types";
 import { getSession } from "@/lib/db/sessions";
+import { getPreset } from "@/lib/db/presets";
 
 /**
  * 완성 컷을 ZIP으로 내려준다. GET /api/session/export?id=<sessionId>
@@ -27,9 +28,18 @@ export async function GET(request: Request) {
 
   const { cuts, malformed } = toRenderCuts(session.storyboard.cuts);
 
+  // 프로젝트 웹폰트(#209). 프리셋을 못 읽거나 폰트가 없으면 시스템 폰트로 그린다 — 폰트 때문에
+  // Export 자체를 실패시키지 않는다(#209 완료 기준).
+  let font = null;
+  try {
+    font = (await getPreset(session.presetId))?.preset.assets.font ?? null;
+  } catch (e) {
+    console.warn("[GET /api/session/export] 프리셋 조회 실패 — 시스템 폰트로 그립니다:", e);
+  }
+
   let result;
   try {
-    result = await exportCuts(cuts);
+    result = await exportCuts(cuts, { font });
   } catch (e) {
     console.error("[GET /api/session/export] ZIP 생성 실패:", e);
     return Response.json({ error: "Export에 실패했습니다" }, { status: 500 });
