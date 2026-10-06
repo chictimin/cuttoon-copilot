@@ -55,8 +55,8 @@ flowchart TD
 | 1 | `handleFilesSelected` → `runAnalysis` | `OnboardingFlow.tsx` | `uploadReference`, `analyzeStyle` |
 | 2 | `uploadReference` | `style-analysis.ts` | `POST /api/upload` → `uploadAsset`(`lib/asset-store.ts`) |
 | 3 | `analyzeStyle` | `style-analysis.ts` | `POST /api/extract { assetUris }` — 추출·시트 경계, 3번 섹션 참고 |
-| 4 | `handleConfirmDetails` → `handleConfirmMascot` | `OnboardingFlow.tsx` | 마스코트 단계로 (화면 전환, 호출 없음) |
-| 5 | `createProject` → `fetch("/api/generate")` | `OnboardingFlow.tsx` | `POST /api/generate {kind:"character_sheet"}` → **`generateCharacterSheet`** ×1 |
+| 4 | `handleConfirmStyle` → `handleConfirmDetails` | `OnboardingFlow.tsx` | 스타일 확인·재추출과 상세 입력 확인을 거친 뒤 마스코트 단계로 |
+| 5 | `handleConfirmMascot` → `createProject` | `OnboardingFlow.tsx` | `POST /api/generate { kind:'character_sheet', preset }` — 라우트는 이미지 생성, 내부 `generateCharacterSheet`(`extract.ts`)는 추출·시트 영역. 이어서 `POST /api/preset` → `savePreset`(백엔드·저장) |
 | 6 | 프로젝트 이름 변경 (#161) | — (화면 호출자 없음) | `PATCH /api/preset`(`app/api/preset/route.ts`) → `renameProject`(`lib/db/presets.ts`) |
 | 7 | 프로젝트 비활성화 (#161) | — (화면 호출자 없음) | `DELETE /api/preset`(`app/api/preset/route.ts`) → `archiveProject`(`lib/db/presets.ts`). 하드 삭제가 아니라 `projects.archived_at` 소프트 삭제라 세션·컷 데이터는 남고 목록에서만 빠진다 |
 
@@ -254,8 +254,8 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 | 1 | `handleFilesSelected` → `runAnalysis` | `OnboardingFlow.tsx` | — |
 | 2 | `analyzeStyle` → `uploadReference` ×N | `style-analysis.ts` | `POST /api/upload` ×N |
 | 3 | `analyzeStyle` → `fetch("/api/extract")` | `style-analysis.ts` | `POST /api/extract` → **`extractStyle`** ×1 |
-| 4 | `handleConfirmStyle` | `OnboardingFlow.tsx` | (화면 전환, 호출 없음) |
-| 5 | `handleConfirmDetails` → `fetch("/api/generate")` | `OnboardingFlow.tsx` | `POST /api/generate {kind:"character_sheet"}` → **`generateCharacterSheet`** ×1 |
+| 4 | `handleConfirmDetails` → `handleConfirmMascot` | `OnboardingFlow.tsx` | 마스코트 단계로 (화면 전환, 호출 없음) |
+| 5 | `createProject` → `fetch("/api/generate")` | `OnboardingFlow.tsx` | `POST /api/generate {kind:"character_sheet"}` → **`generateCharacterSheet`** ×1 |
 
 **세션당 호출 횟수**
 
