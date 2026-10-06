@@ -29,6 +29,16 @@ export type LifeStage =
   | "business_owner"
   | "retired";
 
+/** 프로젝트 폰트 주소 종류 (issue #209). 정본 지점 — #236·화면은 이 타입을 import한다. */
+export type FontKind = "css" | "file";
+
+/** 프로젝트 폰트 에셋 (issue #209). 값의 출처는 확인 API 응답 그대로 저장한다 (가공 금지). */
+export interface PresetFont {
+  family: string;
+  url: string;
+  kind: FontKind;
+}
+
 export interface Preset {
   preset_version: "1.1";
   project_name: string;
@@ -36,6 +46,8 @@ export interface Preset {
     character_sheet: string;
     style_refs: string[];
     reference_asset_ids: string[];
+    /** 프로젝트 폰트 (issue #209). 없으면 현행(시스템 폰트). */
+    font?: PresetFont;
   };
   style: {
     keywords: string[];
@@ -160,6 +172,31 @@ export function assertValidPreset(data: unknown): asserts data is Preset {
   }
   if (!isStringArray(assets.reference_asset_ids)) {
     fail("assets.reference_asset_ids는 문자열 배열이어야 함");
+  }
+
+  // font (issue #209) — 선택 필드. 있으면 객체, 키 정확히 3개, 각 제약은 스키마와 동일.
+  if (assets.font !== undefined) {
+    if (typeof assets.font !== "object" || assets.font === null) fail("assets.font는 객체여야 함");
+    const font = assets.font as Record<string, unknown>;
+    const extraFont = Object.keys(font).filter(
+      (k) => k !== "family" && k !== "url" && k !== "kind"
+    );
+    if (extraFont.length) {
+      fail(`assets.font에 허용되지 않은 필드: ${extraFont.join(", ")}`);
+    }
+    if (typeof font.family !== "string" || font.family.length < 1 || font.family.length > 60) {
+      fail("assets.font.family는 1~60자 문자열이어야 함");
+    }
+    if (
+      typeof font.url !== "string" ||
+      font.url.length > 2048 ||
+      !font.url.startsWith("https://")
+    ) {
+      fail("assets.font.url은 https://로 시작하는 2048자 이하 문자열이어야 함");
+    }
+    if (font.kind !== "css" && font.kind !== "file") {
+      fail(`assets.font.kind는 "css"·"file" 중 하나여야 함 (받은 값: ${String(font.kind)})`);
+    }
   }
 
   // style

@@ -44,6 +44,16 @@
           "items": { "type": "string" },
           "uniqueItems": true,
           "description": "누적 메모리용. 지금은 항상 빈 배열 — 필드만 미리 박아 마이그레이션 회피"
+        },
+        "font": {
+          "type": "object",
+          "required": ["family", "url", "kind"],
+          "additionalProperties": false,
+          "properties": {
+            "family": { "type": "string", "minLength": 1, "maxLength": 60 },
+            "url": { "type": "string", "pattern": "^https://", "maxLength": 2048 },
+            "kind": { "type": "string", "enum": ["css", "file"] }
+          }
         }
       }
     },
