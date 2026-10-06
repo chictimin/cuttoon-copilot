@@ -55,12 +55,23 @@ interface LoadedFont {
  * 폰트가 없거나 아직 못 읽었으면 undefined(현행 스타일 그대로).
  *
  * 읽은 폰트는 읽은 presetId와 함께 보관하고, 지금 presetId와 같을 때만 쓴다. presetId가
- * 바뀌면 새 조회가 끝나기 전에도 이전 프로젝트 폰트가 쓰이지 않고, 새 조회가 실패하거나
- * 폰트가 없거나 모양이 어긋나면 그대로 폰트 없음(undefined)이 된다(#246 리뷰).
+ * 바뀌는 즉시 이전에 읽은 폰트를 비운다 — 다른 프로젝트로 갔다가 같은 프로젝트로 돌아와도
+ * 새 조회가 끝나기 전에는 폰트 없음(undefined)이다. 새 조회가 실패하거나 폰트가 없거나
+ * 모양이 어긋나도 폰트 없음이다(#246 리뷰).
  */
 export function useProjectFont(presetId: string | null): string | undefined {
   const [loaded, setLoaded] = useState<LoadedFont | null>(null);
-  const font = presetId !== null && loaded?.presetId === presetId ? loaded.font : null;
+  // presetId가 바뀐 렌더에서 곧바로 비운다(props 변화에 따른 상태 초기화 — effect 안에서 동기적으로
+  // setState하지 않는다). A→B→A, A→없음→A에서 이전에 읽은 A가 조회 전에 다시 쓰이는 것을 막는다.
+  const [trackedPresetId, setTrackedPresetId] = useState(presetId);
+  if (trackedPresetId !== presetId) {
+    setTrackedPresetId(presetId);
+    setLoaded(null);
+  }
+  const font =
+    presetId !== null && trackedPresetId === presetId && loaded?.presetId === presetId
+      ? loaded.font
+      : null;
 
   useEffect(() => {
     if (!presetId) return;
