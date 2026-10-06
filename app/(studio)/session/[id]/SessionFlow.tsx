@@ -34,6 +34,7 @@ import {
 } from "./storyboard-assembly";
 import { resolveImageUrl } from "../../asset-url";
 import { CTA_STRENGTHS } from "../../cta-strength-options";
+import { beatLabel } from "../../ui-labels";
 import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
 // 순수 헬퍼라 클라이언트에서 값으로 import해도 된다(서버 모듈·DB import 없음, #207).
 import {
@@ -830,10 +831,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setSaveError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
         // spec-a3 3-3: HTTP 400이고 error가 "subject_tags"로 시작할 때만 복구 버튼.
+        // #260: 이때 서버 메시지(영문 필드명 포함)는 화면에 보이지 않고 콘솔에만 남긴다.
         if (res.status === 400 && typeof body?.error === "string" && body.error.startsWith("subject_tags")) {
+          console.warn(body.error);
+          setSaveError("소재 태그를 저장하지 못했어요");
           setSaveRecovery(true);
+        } else {
+          setSaveError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
         }
         return;
       }
@@ -1245,11 +1250,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   >
                     <div className="flex items-center gap-2 text-xs text-zinc-500">
                       <span>
-                        {cut.cut_index}컷 · {cut.narrative_beat}
+                        {cut.cut_index}컷 · {beatLabel(cut.narrative_beat)}
                       </span>
                       {defaultCutIndexes.includes(cut.cut_index) && (
                         <span className="rounded bg-zinc-100 px-2 py-0.5 text-zinc-600">
-                          기본 대사
+                          생성 실패 — 기본 대사
                         </span>
                       )}
                     </div>
@@ -1321,6 +1326,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       {step === "cover" && coverVariants && storyboard && !genError && (
         <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
           <h1 className="text-xl font-semibold">마음에 드는 표지를 골라주세요</h1>
+          {/* #259 4번: 카드 자체가 버튼이고 확인 단계가 없다 — 누르면 바로 나머지 컷 생성이 시작되는 것을 미리 알린다. */}
+          <p className="text-sm text-zinc-500">표지를 누르면 바로 나머지 컷을 만들기 시작해요</p>
           {coverRequested != null && coverVariants.length < coverRequested && (
             <p className="w-full max-w-md rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-700">
               {coverRequested}안 중 {coverVariants.length}안만 만들어졌어요. 다시 뽑기를 눌러보세요
@@ -1401,7 +1408,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                     </div>
                   )}
                   <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
-                    {cut.cut_index}컷 · {cut.narrative_beat}
+                    {cut.cut_index}컷 · {beatLabel(cut.narrative_beat)}
                   </span>
                 </div>
                 {/* 복원 뷰에는 저장 수단(handleSave)이 없어 여기서 고치면 그냥

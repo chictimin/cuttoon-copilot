@@ -9,7 +9,9 @@ import type { Preset } from "@/lib/llm/preset-guard";
 
 export const MAX_SUBJECT_SUGGESTIONS = 3;
 
-export const EMPTY_CONTEXT_HINT = "프로젝트에 분야를 넣으면 추천돼요";
+// #259 3번: 추천이 안 되는 이유만 말하면 다음에 뭘 해야 하는지 모르므로 직접 적으라는 말을 더한다.
+// (서버가 400으로 돌려주는 문구는 그대로 두고, 화면은 이 상수만 쓴다.)
+export const EMPTY_CONTEXT_HINT = "프로젝트에 분야를 넣으면 추천돼요. 지금은 소재를 직접 적어주세요";
 
 // 세 문맥이 모두 비면 제안하지 않는다(#181 결정 2). 서버도 같은 경우 LLM을
 // 호출하지 않고 거부하므로, 화면이 먼저 버튼을 막아 불필요한 요청을 없앤다.
