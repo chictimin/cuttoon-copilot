@@ -198,6 +198,8 @@ export default function OnboardingFlow() {
         character_sheet: characterSheetAsset,
         style_refs: analysis?.styleRefAssets ?? [],
         reference_asset_ids: [],
+        // #209: 확인 API 응답을 그대로 저장한다(가공 금지). 비웠으면 키를 뺀다.
+        ...(details.font ? { font: details.font } : {}),
       },
       style: styleWithKeywords,
       rules,
