@@ -56,6 +56,8 @@ import { getCaptionToneById } from "./caption-tones";
 import { getCtaPresetById, getFallbackCtaId } from "./cta-presets";
 import type { CtaRequest, CtaStrength } from "./narrative-flow";
 import {
+  applyBrandMarkers,
+  batchimKindOf,
   displaySubject,
   parseSubjectTagDetails,
   projectForModel,
@@ -588,29 +590,47 @@ function strengthRetryNote(strength: CtaStrength): string {
 }
 
 /**
- * 소재 태그 지시 1줄 (issue #206 S3). 태그가 있으면 "3번 컷 대사에
- * {category}를 1회 쓴다" 1줄 — CTA 강도 none·soft·clear 모두 같은 문구.
+ * 소재 태그 표식 지시 (spec-c1 rev2 4-2, issue #206 후속). 태그가 있으면 순번별로
+ * "[브랜드n]을 글자 그대로 정확히 1회" 줄을 쓴다 — CTA 강도 none·soft·clear 모두
+ * 같은 문구. category가 같아도 순번별 줄을 유지한다(dedupe 없음).
  * 미확정 태그(category 없거나 빈 문자열)는 제외한다. 누출 방지용으로
- * sanitize를 통과시킨 값만 쓴다.
+ * sanitize를 통과시킨 값만 쓴다. 전체 생성·재시도·컷별 다시 뽑기 모두 같은 함수.
  */
-function subjectTagInstruction(subject: string, subjectTags?: SubjectTag[]): string {
+export function subjectTagInstruction(subject: string, subjectTags?: SubjectTag[]): string {
   if (!subjectTags || subjectTags.length === 0) return "";
   const details = parseSubjectTagDetails(subject);
+  if (details.length === 0) return "";
   const fullRaws = details.map((tag) => tag.fullRaw);
   const tagRaws = subjectTags.map((tag) =>
     typeof tag.raw === "string" ? tag.raw : ""
   );
   const allRaws = [...fullRaws, ...tagRaws];
-  const names: string[] = [];
-  for (const tag of subjectTags) {
-    const rawCategory = tag.category;
+  const lines: string[] = [];
+  const count = Math.min(details.length, subjectTags.length);
+  for (let i = 0; i < count; i++) {
+    const rawCategory = subjectTags[i]?.category;
     if (typeof rawCategory !== "string" || rawCategory.trim().length === 0) continue;
     const cleaned = sanitizeTagCategory(rawCategory, allRaws);
-    if (!cleaned || names.includes(cleaned)) continue;
-    names.push(cleaned);
+    if (!cleaned) continue;
+    const raw = details[i].raw;
+    const marker = `[브랜드${i + 1}]`;
+    const kind = batchimKindOf(raw);
+    const particle =
+      kind === "yes"
+        ? `${marker} 바로 뒤 조사는 받침 있는 말 기준(을·이·은·과)`
+        : kind === "no"
+          ? `${marker} 바로 뒤 조사는 받침 없는 말 기준(를·가·는·와)`
+          : `${marker} 바로 뒤에 조사를 붙이지 않는 표현으로 쓴다`;
+    lines.push(
+      `- 3번 컷 대사에 ${marker}을 글자 그대로 정확히 1회 쓴다. ${marker}은 '${cleaned}'가 들어갈 자리다.`
+    );
+    lines.push(
+      `- ${marker}을 다른 말로 바꾸거나, 브랜드 이름을 지어내거나, X·○○ 같은 다른 자리표시를 쓰지 않는다. 다른 컷에는 쓰지 않는다.`
+    );
+    lines.push(`- ${particle}`);
   }
-  if (names.length === 0) return "";
-  return `- 3번 컷 대사에 ${names.join(", ")}를 1회 쓴다.\n`;
+  if (lines.length === 0) return "";
+  return lines.join("\n") + "\n";
 }
 
 function buildPrompt(input: CaptionsRequest, wanted: number[]): string {
@@ -894,9 +914,19 @@ async function generateCaptionsForCuts(
   if (fallbackDirectionCuts.length > 0) {
     console.info(`[direction-fallback] cuts=${fallbackDirectionCuts.join(",")}`);
   }
-  // S3: 생성 직후 3번 컷 복원 1회. 전체 생성·컷별 다시 뽑기 모두 같은 경로를
+  // spec-c1 rev2 4-3 → 4-4 순. 전체 생성·컷별 다시 뽑기 모두 같은 경로를
   // 타므로 3번 컷일 때만 결과가 바뀐다. 재요청·조사 보정·삽입 없음.
-  const restored = restoreFirstMention(captions, input.subject, input.subject_tags, 3);
+  // "표식 0건" = 원본 3번 컷 텍스트에 4-3 문법 일치가 하나도 없음(범위 밖 순번
+  // 포함, 한 개라도 있으면 0건 아님). 0건일 때만 기존 category 폴백을 적용하고,
+  // 표식이 1건 이상이면 category 폴백을 하지 않는다.
+  const marked = applyBrandMarkers(captions, input.subject, input.subject_tags, 3);
+  const markerProbe = /\[[ \t]*브랜드[ \t]*([1-9])[ \t]*\]/;
+  const hasMarker = captions.some(
+    (c) => c.cut_index === 3 && markerProbe.test(c.text)
+  );
+  const restored = hasMarker
+    ? marked
+    : restoreFirstMention(marked, input.subject, input.subject_tags, 3);
   const finalCaptions: CutCaption[] = restored.map((c) => ({
     cut_index: c.cut_index as 1 | 2 | 3 | 4,
     text: c.text,
