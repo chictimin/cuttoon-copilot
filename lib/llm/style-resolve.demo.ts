@@ -55,5 +55,3 @@ if (failed > 0) {
   process.exit(1);
 }
 console.log(`\n${checks.length}건 통과`);
-// [임시] #219 CI 실패 전파 확인용 — 이 줄이 있는 커밋은 되돌린다
-process.exit(1);
