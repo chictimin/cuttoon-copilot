@@ -6,6 +6,7 @@ import {
 import { isValidToneId } from "@/lib/llm/caption-tones";
 import { isValidCtaId } from "@/lib/llm/cta-presets";
 import type { CtaRequest } from "@/lib/llm/narrative-flow";
+import type { SubjectTag } from "@/lib/llm/subject-tags";
 
 export const runtime = "nodejs";
 
@@ -56,11 +57,30 @@ function parseContext(value: unknown): CaptionContext | undefined {
 }
 
 /**
+ * 소재 태그 선택 필드 (issue #206 S3). 형태가 어긋나면 undefined 취급한다.
+ * lib는 받은 subject로 다시 파싱하고 category만 순서대로 쓴다.
+ */
+function parseSubjectTags(value: unknown): SubjectTag[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) return undefined;
+    const record = item as Record<string, unknown>;
+    if (typeof record.raw !== "string") return undefined;
+    if (record.category !== undefined && typeof record.category !== "string") {
+      return undefined;
+    }
+  }
+  return value as SubjectTag[];
+}
+
+/**
  * F2 컷 대사 + F4 컷 연출 생성. 이미지 호출 전에 화면이 부른다.
- * body: { subject, flow, beats(4개), cast(description 목록), tone_id, context, cut_index?, supporting_id?, cta? }
+ * body: { subject, flow, beats(4개), cast(description 목록), tone_id, context, cut_index?, supporting_id?, cta?, subject_tags? }
  * - cta: {strength:"none"}(purpose_id는 보내도 무시) 또는 {strength:"soft"|"clear", purpose_id: null|유효 id}.
  *   없으면 clear + 프로젝트 기본 목적(현행). 형식 오류는 400(보정 없음). 컷별 다시 뽑기도 같은 입력.
  * - supporting_id: 조연 character_id(마스코트 조연이면 mascot.label). 없으면 "supporting".
+ * - subject_tags: 소재 태그 선택 필드(issue #206 S3). 형태가 어긋나면 undefined 취급.
  * - cut_index(1~4)가 있으면 그 컷의 대사와 연출을 함께 다시 뽑아
  *   {captions:[1개], directions:[1개]}로 돌려준다.
  * - 없으면 4컷 전체를 {captions:[4개], directions:[4개]}로 돌려준다.
@@ -86,6 +106,7 @@ export async function POST(request: Request) {
     cut_index,
     supporting_id,
     cta,
+    subject_tags,
   } = (body ?? {}) as Record<string, unknown>;
 
   if (typeof subject !== "string" || subject.trim().length === 0) {
@@ -152,6 +173,9 @@ export async function POST(request: Request) {
     context: parsedContext,
     ...(resolvedSupportingId !== undefined ? { supporting_id: resolvedSupportingId } : {}),
     ...(parsedCta.cta !== undefined ? { cta: parsedCta.cta } : {}),
+    ...(parseSubjectTags(subject_tags) !== undefined
+      ? { subject_tags: parseSubjectTags(subject_tags) as SubjectTag[] }
+      : {}),
   };
 
   try {

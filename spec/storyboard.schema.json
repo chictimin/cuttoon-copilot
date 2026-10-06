@@ -37,6 +37,29 @@
       "type": "string",
       "enum": ["none", "soft", "clear"],
       "description": "이 컷툰 한 편의 CTA 강도 (issue #205). 없으면 clear로 해석해 기존 스토리보드(필드 없음)가 그대로 유효하다."
+    },
+    "subject_tags": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "소재 [태그]의 저장 매핑 (issue #206). 없으면 기존 세션 그대로 유효(cta_strength 없음과 같은 원칙). subject는 원문(괄호 포함) 그대로 둔다.",
+      "items": {
+        "type": "object",
+        "required": ["raw", "category"],
+        "additionalProperties": false,
+        "properties": {
+          "raw": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 30,
+            "description": "괄호 안 원문(30자 절단, 저장·표시용)."
+          },
+          "category": {
+            "type": "string",
+            "minLength": 1,
+            "description": "고유명사 없는 한국어 카테고리 명사구(예: 운동 앱). 없으면 제품으로 해석한다."
+          }
+        }
+      }
     }
   },
   "allOf": [

@@ -22,6 +22,7 @@ import {
 } from "@/lib/llm/cut-defaults";
 import storyboardSchema from "@/spec/storyboard.schema.json";
 import type { Cut, CutCharacter, NarrativeBeat, Storyboard } from "./storyboard-types";
+import type { SubjectTag } from "@/lib/llm/subject-tags";
 
 // issue #119-2 (갈래 3): 흐름 템플릿 3종(키·beats 시퀀스)은 spec/data/narrative-flow.json
 // 으로 옮겼다 — 값은 하나도 안 바뀌었다(lib/llm/narrative-flow.ts 참고).
@@ -57,8 +58,9 @@ export function assembleStoryboard(
   answers: BrainstormAnswers,
   palette: string[] = [],
   mascot?: MascotRef,
-  cta?: AssembleCta
-): Storyboard {
+  cta?: AssembleCta,
+  subjectTags?: SubjectTag[]
+): Storyboard & { subject_tags?: SubjectTag[] } {
   // none이면 cta 없는 시퀀스로 조립한다. 키가 어긋나면 DEFAULT 흐름의 같은 강도
   // 시퀀스로 폴백한다(위 F1 주석의 안전망과 같은 자리).
   const strength = cta?.strength ?? "clear";
@@ -133,6 +135,8 @@ export function assembleStoryboard(
     cuts,
     // cta 인자가 있을 때만 기록한다 — 없으면 지금과 diff 0이어야 한다.
     ...(cta !== undefined ? { cta_strength: cta.strength } : {}),
+    // subject_tags가 비었거나 없으면 필드를 생략한다 (issue #206 S4).
+    ...(subjectTags !== undefined && subjectTags.length > 0 ? { subject_tags: subjectTags } : {}),
   };
 }
 

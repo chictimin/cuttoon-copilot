@@ -217,6 +217,9 @@ export interface CaptionLine {
  * - subjectTags가 없거나 파싱 결과와 개수가 다르면 아무것도 바꾸지 않는다.
  *   개수가 어긋난 채로 "제품"을 raw로 바꾸면 대사의 일반 단어가 브랜드로
  *   바뀌는 오작동이 되기 때문이다.
+ * - category가 없거나(undefined) trim 후 빈 문자열인 태그는 복원하지 않고
+ *   건너뛴다. 투영(projectForModel)의 "제품" 폴백과 달리 복원은 미확정 태그를
+ *   건드리지 않는다.
  * - 같은 category가 둘(TYPE이 같은 두 태그)이면 등장 순서대로 대응한다 —
  *   category별로 다음 탐색 시작 위치를 기억해 첫 태그는 첫 등장, 두 번째
  *   태그는 그 다음 등장을 바꾼다.
@@ -233,7 +236,13 @@ export function restoreFirstMention(
   if (!subjectTags || details.length !== subjectTags.length) return captions;
 
   const fullRaws = details.map((tag) => tag.fullRaw);
-  const categories = details.map((_, index) => categoryAt(subjectTags, index, fullRaws));
+  const categories = details.map((_, index) => {
+    const rawCategory = subjectTags[index]?.category;
+    if (typeof rawCategory !== "string" || rawCategory.trim().length === 0) {
+      return undefined;
+    }
+    return categoryAt(subjectTags, index, fullRaws);
+  });
   const nextFrom = new Map<string, number>();
 
   return captions.map((caption) => {
@@ -241,6 +250,7 @@ export function restoreFirstMention(
     let text = caption.text;
     details.forEach((tag, i) => {
       const category = categories[i];
+      if (category === undefined) return;
       const from = nextFrom.get(category) ?? 0;
       const at = text.indexOf(category, from);
       if (at < 0) return;
