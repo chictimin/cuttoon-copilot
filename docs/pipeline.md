@@ -55,8 +55,8 @@ flowchart TD
 | 1 | `handleFilesSelected` → `runAnalysis` | `OnboardingFlow.tsx` | `uploadReference`, `analyzeStyle` |
 | 2 | `uploadReference` | `style-analysis.ts` | `POST /api/upload` → `uploadAsset`(`lib/asset-store.ts`) |
 | 3 | `analyzeStyle` | `style-analysis.ts` | `POST /api/extract { assetUris }` — 추출·시트 경계, 3번 섹션 참고 |
-| 4 | `handleConfirmStyle` → `handleConfirmDetails` | `OnboardingFlow.tsx` | 스타일 확인·재추출과 상세 입력 확인을 거친 뒤 마스코트 단계로 |
-| 5 | `handleConfirmMascot` → `createProject` | `OnboardingFlow.tsx` | `POST /api/generate { kind:'character_sheet', preset }` — 라우트는 이미지 생성, 내부 `generateCharacterSheet`(`extract.ts`)는 추출·시트 영역. 이어서 `POST /api/preset` → `savePreset`(백엔드·저장) |
+| 4 | `handleConfirmDetails` → `handleConfirmMascot` | `OnboardingFlow.tsx` | 마스코트 단계로 (화면 전환, 호출 없음) |
+| 5 | `createProject` → `fetch("/api/generate")` | `OnboardingFlow.tsx` | `POST /api/generate {kind:"character_sheet"}` → **`generateCharacterSheet`** ×1 |
 | 6 | 프로젝트 이름 변경 (#161) | — (화면 호출자 없음) | `PATCH /api/preset`(`app/api/preset/route.ts`) → `renameProject`(`lib/db/presets.ts`) |
 | 7 | 프로젝트 비활성화 (#161) | — (화면 호출자 없음) | `DELETE /api/preset`(`app/api/preset/route.ts`) → `archiveProject`(`lib/db/presets.ts`). 하드 삭제가 아니라 `projects.archived_at` 소프트 삭제라 세션·컷 데이터는 남고 목록에서만 빠진다 |
 
@@ -103,13 +103,13 @@ flowchart TD
 
 | export | 위치 | 용도 |
 |---|---|---|
-| `generateCut` | `generate.ts:548` | 컷 1장 생성 |
-| `generateCoverVariants` | `generate.ts:622` | 표지 3안 생성 |
-| `activeMascot` | `generate.ts:151` | 마스코트 참조 결정 (#150) |
-| `buildCutPrompt` | `generate.ts:219` | 표지·컷 공통 프롬프트 조립 |
-| `OUTPUT_SIZE` | `generate.ts:42` | `{width:1024,height:1024}`. `extract.ts` 가 시트 크기로 가져간다 |
-| `promptHint` | `generate.ts:187` | `prompt_hints` 조회. 없으면 `undefined` — 힌트 유무를 구분해야 하는 자리를 위해 `hint()`(`:192`)와 나눠 뒀다 |
-| `ratioClause` | `generate.ts:210` | `character_ratio` 절. **폴백 규칙까지** 한 곳에 둔다 — 아래 참고 |
+| `generateCut` | `generate.ts` | 컷 1장 생성 |
+| `generateCoverVariants` | `generate.ts` | 표지 3안 생성 |
+| `activeMascot` | `generate.ts` | 마스코트 참조 결정 (#150) |
+| `buildCutPrompt` | `generate.ts` | 표지·컷 공통 프롬프트 조립 |
+| `OUTPUT_SIZE` | `generate.ts` | `{width:1024,height:1024}`. `extract.ts` 가 시트 크기로 가져간다 |
+| `promptHint` | `generate.ts` | `prompt_hints` 조회. 없으면 `undefined` — 힌트 유무를 구분해야 하는 자리를 위해 `hint()`와 나눠 뒀다 |
+| `ratioClause` | `generate.ts` | `character_ratio` 절. **폴백 규칙까지** 한 곳에 둔다 — 아래 참고 |
 
 `ratioClause(value)` 가 규칙 자체를 담는다. `extract.ts`(추출·시트)도 이것을 가져다 써서 시트와 컷이 항상 같은 비율 지시를 받는다.
 
@@ -126,7 +126,7 @@ return promptHint('character_ratio', v) ?? `${v} body proportions`
 
 **모델·API — 추출·시트 쪽과 다르다**
 
-`client.responses.create`(`generate.ts:385`), 모델 `gpt-5`(`RESPONSES_MODEL`, `:19`), 이미지는 내장 도구 `tools: [{ type:'image_generation', size:'1024x1024' }]`(`:394`)로 만든다. 응답에서 `image_generation_call` 출력을 찾아 base64 를 꺼낸다(`:401`).
+`client.responses.create`(`generate.ts`), 모델 `gpt-5`(`RESPONSES_MODEL`), 이미지는 내장 도구 `tools: [{ type:'image_generation', size:'1024x1024' }]`로 만든다. 응답에서 `image_generation_call` 출력을 찾아 base64 를 꺼낸다.
 
 추출·시트 쪽의 `generateCharacterSheet` 는 `client.images.generate`(Images API)를 쓴다. **같은 이미지 모델을 부르는 두 경로가 공존한다** — 체이닝(`previous_response_id`)이 Responses API 에만 있어서 컷 쪽은 이 경로여야 한다. SDK(^7.5.0) 의 Responses 타입이 도구 옵션을 못 따라와 `as any` 로 우회하고 있다(`:383` 주석).
 
@@ -157,9 +157,9 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 `kind:'cover_variants'` 응답에는 `requested: 3` 이 함께 실린다(`route.ts`, #108). `allSettled` 라 배열이 1~3 개일 수 있어서, 화면이 `result.length < requested` 로 부족분을 판단한다(#117).
 
-**프롬프트 조립 — `buildCutPrompt`(`generate.ts:171`)**
+**프롬프트 조립 — `buildCutPrompt`**
 
-표지 3안과 4컷이 **같은 함수**를 쓴다. 표지는 `cuts[0]`, 컷은 `nextUngeneratedCut`(`:336`)이 고른 컷을 넘긴다.
+표지 3안과 4컷이 **같은 함수**를 쓴다. 표지는 `cuts[0]`, 컷은 `nextUngeneratedCut`이 고른 컷을 넘긴다.
 
 넣는 순서는 이렇다.
 
@@ -171,7 +171,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 | 4 | 소재 + **설명 장치 금지** | 차트·그래프·화살표·아이콘·라벨·해부 도해 금지, 숫자는 캡션 레이어 몫 (#146). 효과선은 허용 (#133 결정 6) |
 | 5 | 타깃 독자 (`Who this comic is made for — not who appears in the panel`) | 타깃과 등장 인물이 다를 수 있다 |
 | 6 | `narrative_beat` · `shot_type` · `camera_angle` · `time_of_day` | 전부 `hint()` 경유 — enum 토큰을 그대로 넣으면 모델이 못 알아듣는다 |
-| 7 | `Character:` — `cast[].description` + 표정·포즈 | 서술을 앞세운다. 없으면 나이·성별이 컷마다 바뀐다 |
+| 7 | `Character:` — `cast[].description` + 표정·포즈 | 서술을 앞세운다. 없으면 나이·성별이 컷마다 바뀐다. 체이닝 컷은 앞 컷과 같게 명시해 머리색·헤어스타일·얼굴·나이·복장을 유지한다(#258, 표지·첫 컷 제외) |
 | 8 | `reserved_zone` 지시 | 프레임 **안**을 비운다 — 흰 띠를 붙이는 것이 아니다 |
 | 9 | `rules.forbidden` → `Do not include:` | 사용자가 적은 금지 요소 |
 | 10 | 말풍선·글자 억제 | P0 게이트 2 |
@@ -184,13 +184,13 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 **`spec/vocabulary.json` 소비 방식 (컷 프롬프트)**
 
-`generate.ts` 가 모듈 로드 때 한 번 import 한다(`generate.ts:13`) — 요청마다 파일을 다시 읽지 않는다. 조회는 `prompt_hints` 만 쓰고, 최상위 enum 값 목록(`expression` 등)은 읽지 않는다. 표의 "조각"은 위 `buildCutPrompt` 표의 번호다.
+`generate.ts` 가 모듈 로드 때 한 번 import 한다 — 요청마다 파일을 다시 읽지 않는다. 조회는 `prompt_hints` 만 쓰고, 최상위 enum 값 목록(`expression` 등)은 읽지 않는다. 표의 "조각"은 위 `buildCutPrompt` 표의 번호다.
 
 | 카테고리 | 조회 경로 | 조각 | 들어가는 문장 | 힌트가 없을 때 |
 |---|---|---|---|---|
-| `character_ratio` | `ratioClause` → `promptHint` (`generate.ts:164`) | 2 | `Style:` 끝 | 기본값 `2.5head` 를 먼저 적용한 뒤 `` `${값} body proportions` `` |
+| `character_ratio` | `ratioClause` → `promptHint` | 2 | `Style:` 끝 | 기본값 `2.5head` 를 먼저 적용한 뒤 `` `${값} body proportions` `` |
 | `life_stage` | `HINTS.life_stage` 직접 조회 (`buildCutPrompt` 안) | 5 | `Who this comic is made for …` | 밑줄을 공백으로 (`job_seeker` → `job seeker`) |
-| `narrative_beat` | `hint()` (`generate.ts:146`) | 6 | `This panel's role in the story:` | 토큰 그대로 |
+| `narrative_beat` | `hint()` | 6 | `This panel's role in the story:` | 토큰 그대로 |
 | `shot_type` | `hint()` | 6 | `Framing:` | 토큰 그대로 |
 | `camera_angle` | `hint()` | 6 | `Camera:` | 토큰 그대로 |
 | `time_of_day` | `hint()` | 6 | `Lighting:` | 토큰 그대로 |
@@ -198,7 +198,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 **컷 프롬프트가 `vocabulary.json` 을 거치지 않는 값**
 
-- `reserved_zone` — enum 값은 `vocabulary.json` 에 있지만 문장은 `reservedZoneHint`(`generate.ts:117`)의 고정 영어 문장이다. `prompt_hints` 에 항목이 없다.
+- `reserved_zone` — enum 값은 `vocabulary.json` 에 있지만 문장은 `reservedZoneHint`의 고정 영어 문장이다. `prompt_hints` 에 항목이 없다.
 - `bubble_type` · `position` — 컷 프롬프트에 넣지 않는다. 말풍선은 합성 단계(5-2절) 몫이다.
 - `style.line_weight` · `saturation` · `background_density` — 토큰을 그대로 넣는다(`medium line weight` 식).
 - `context.industry` · `age_band` · `style.palette` · `keywords` · `rules.forbidden` — 사용자 입력 문자열을 그대로 잇는다.
@@ -241,9 +241,9 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 `lib/openai/extract.ts` 소유. 이 파일이 내보내는 건 아래 세 함수다.
 
-- **`extractStyle(refs: Buffer[])`**(`extract.ts:85`) — 모델 `gpt-4o`, `client.chat.completions.create`(`extract.ts:93`) 1회, `response_format: json_object`, `max_tokens: 300`. `refs` N장을 **한 번의 호출**에 `image_url` content part N개로 담아 보낸다 — 이미지 장수와 API 호출 수는 무관하다. 반환 직후 비공개 헬퍼 `normalizeStyle()`(`extract.ts:57`, export 없음)이 필드 존재·enum 값을 검증·보정한다(#140) — 모듈 밖에서는 재사용할 수 없다.
-- **`buildCharacterPrompt(preset: PresetInput)`**(`extract.ts:140`) — 시트 프롬프트 조립. 시트와 컷이 같은 스타일 지시를 받도록 export한다(#126·#129 회귀 방지).
-- **`generateCharacterSheet(preset: PresetInput)`**(`extract.ts:240`) — 모델 `gpt-image-1`, `client.images.generate`(`extract.ts:225`) 1회, `n: 1`, `size: "1024x1024"`(`OUTPUT_SIZE`, `generate.ts:42`). 내부에서 `buildCharacterPrompt(preset)`(`extract.ts:140`)를 1회 호출해 프롬프트를 조립한 뒤 그 문자열로 이미지 1장을 만든다.
+- **`extractStyle(refs: Buffer[])`** — 모델 `gpt-4o`, `client.chat.completions.create` 1회, `response_format: json_object`, `max_tokens: 300`. `refs` N장을 **한 번의 호출**에 `image_url` content part N개로 담아 보낸다 — 이미지 장수와 API 호출 수는 무관하다. 반환 직후 비공개 헬퍼 `normalizeStyle()`(export 없음)이 필드 존재·enum 값을 검증·보정한다(#140) — 모듈 밖에서는 재사용할 수 없다.
+- **`buildCharacterPrompt(preset: PresetInput)`** — 시트 프롬프트 조립. 시트와 컷이 같은 스타일 지시를 받도록 export한다(#126·#129 회귀 방지).
+- **`generateCharacterSheet(preset: PresetInput)`** — 모델 `gpt-image-1`, `client.images.generate` 1회, `n: 1`, `size: "1024x1024"`(`OUTPUT_SIZE`). 내부에서 `buildCharacterPrompt(preset)`를 1회 호출해 프롬프트를 조립한 뒤 그 문자열로 이미지 1장을 만든다.
 
 **호출 순서 (온보딩 1회, 재시도 없는 골든 패스)**
 
@@ -265,7 +265,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 **`spec/vocabulary.json` 소비 방식**
 
-`extract.ts`는 `vocabulary.json`을 직접 import하지 않는다. `./generate`에서 `ratioClause`만 가져와 쓴다(`extract.ts:4`). `ratioClause(value)`(`generate.ts:164-167`)는 내부에서 `promptHint('character_ratio', value)`(`generate.ts:141`)로 `vocabulary.json`의 `prompt_hints.character_ratio` 항목을 찾고, 없으면 `` `${value} body proportions` `` 문자열로 폴백한다. `buildCharacterPrompt`(`extract.ts:154`)가 이 결과를 시트 프롬프트에 그대로 넣는다 — `generate.ts`의 `buildCutPrompt`도 같은 헬퍼를 쓰기 때문에 시트와 컷이 항상 같은 비율 지시를 받는다(#126·#129 회귀 방지, PR #130).
+`extract.ts`는 `vocabulary.json`을 직접 import하지 않는다. `./generate`에서 `OUTPUT_SIZE`·`activeMascot`·`ratioClause` 세 개를 가져와 쓴다. `ratioClause(value)`는 내부에서 `promptHint('character_ratio', value)`로 `vocabulary.json`의 `prompt_hints.character_ratio` 항목을 찾고, 없으면 `` `${value} body proportions` `` 문자열로 폴백한다. `buildCharacterPrompt`가 이 결과를 시트 프롬프트에 그대로 넣는다 — `generate.ts`의 `buildCutPrompt`도 같은 헬퍼를 쓰기 때문에 시트와 컷이 항상 같은 비율 지시를 받는다(#126·#129 회귀 방지, PR #130).
 
 ### 5-2. 텍스트 레이어 합성·Export (렌더링 — B③)
 
@@ -321,13 +321,13 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 | 값 | 위치 | 내용 |
 |---|---|---|
-| `beat_expression_pose` | `cut-defaults.json:3-14` | narrative_beat별 표정·포즈 매핑 |
-| `beat_caption_templates` | `cut-defaults.json:15-26` | narrative_beat별 캡션 문구 템플릿 |
-| `cut_shot_plan` | `cut-defaults.json:27-32` | 컷별 shot_type·camera_angle 고정 시퀀스 |
-| `caption_positions` | `cut-defaults.json:33` | 컷별 캡션 위치 고정 시퀀스 |
-| `cta_fallback` | `cut-defaults.json:37-40` | cta beat 폴백 대사 강도별(soft·clear, #205) |
+| `beat_expression_pose` | `cut-defaults.json` | narrative_beat별 표정·포즈 매핑 |
+| `beat_caption_templates` | `cut-defaults.json` | narrative_beat별 캡션 문구 템플릿 |
+| `cut_shot_plan` | `cut-defaults.json` | 컷별 shot_type·camera_angle 고정 시퀀스 |
+| `caption_positions` | `cut-defaults.json` | 컷별 캡션 위치 고정 시퀀스 |
+| `cta_fallback` | `cut-defaults.json` | cta beat 폴백 대사 강도별(soft·clear, #205) |
 
-조연 기본값·등장 컷(`supporting_default`, `supporting_cut_index`)과 1컷 time_of_day(`first_cut_time_of_day`)도 같은 파일(:34-36)에 있다. `storyboard-assembly.ts`(조립)와 `captions.ts`(폴백)가 로더(`cut-defaults.ts`)로 같은 값을 읽는다.
+조연 기본값·등장 컷(`supporting_default`, `supporting_cut_index`)과 1컷 time_of_day(`first_cut_time_of_day`)도 같은 파일에 있다. `storyboard-assembly.ts`(조립)와 `captions.ts`(폴백)가 로더(`cut-defaults.ts`)로 같은 값을 읽는다.
 
 ## 7. 소유 경계
 
