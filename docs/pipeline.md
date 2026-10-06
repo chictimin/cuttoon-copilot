@@ -1,6 +1,10 @@
 # 컷툰 코파일럿 파이프라인 — 온보딩 → 세션 → 에디터
 
+마지막 전체 대조: 2026-10-06 · `cf9feb7`. 그보다 오래된 절에만 절 기준을 남긴다.
+
 머지된 코드만 기준으로 한다. 열려 있는 PR·이슈의 계획은 넣지 않는다. 함수명이 주 식별자이고 file:line은 보조다 — 라인은 커밋마다 밀린다.
+
+5줄 요약: 온보딩(레퍼런스→스타일→마스코트→시트→저장) → 세션(소재→3턴→말투·대사→표지 3안→3컷→저장) → 에디터(수정·되돌리기→Export). 유료 호출은 시트 1 + 표지 3 + 컷 3. 저장은 세션 `POST /api/session`과 에디터 버전 저장 2곳. 대사는 Export 때만 그림에 굽는다.
 
 **범위**: 화면(`app/(studio)/`), 스키마·LLM(`lib/llm/`, `spec/`, `app/api/brainstorm/`), 백엔드·저장(`lib/db/`, `app/api/preset/`, `app/api/session/`, `app/api/upload/`) 위주로 채웠다. 이미지 생성·추출 영역(`lib/openai/`, `app/api/generate/`, `app/api/extract/`)과 렌더링 영역(`lib/render/`)은 내부를 전부 적지 않고, 화면·백엔드 쪽이 그 경계를 어떻게 호출하는지(계약)까지만 적었다. 이미지 생성(5-1)·추출·시트(5-1b)·합성·Export(5-2) 절은 모두 작성됐다. 영역별 담당자는 `README.md` 소유권 표를 본다.
 
@@ -12,7 +16,8 @@ flowchart TD
     U1[레퍼런스 업로드] --> A1[uploadReference]
     A1 --> A2["POST /api/extract → extractStyle (추출·시트)"]
     A2 --> A3[handleConfirmDetails]
-    A3 --> A4["POST /api/generate kind=character_sheet (라우트: 이미지 생성 / 시트 함수: 추출·시트)"]
+    A3 --> A3m[마스코트 선택]
+    A3m --> A4["POST /api/generate kind=character_sheet (라우트: 이미지 생성 / 시트 함수: 추출·시트)"]
     A4 --> A5[savePreset]
   end
 
@@ -20,8 +25,10 @@ flowchart TD
     B1[소재 입력] --> B2[extractDraftFromSubject]
     B2 --> B3[generateBrainstormTurns]
     B3 --> B4[recordAnswer 반복]
-    B4 --> B5[assembleStoryboard]
-    B5 --> B6["POST /api/generate kind=cover_variants (이미지 생성)"]
+    B4 --> B4t[말투 선택]
+    B4t --> B5[assembleStoryboard]
+    B5 --> B5c["대사 생성 loadCaptions → POST /api/session/captions"]
+    B5c --> B6["POST /api/generate kind=cover_variants (이미지 생성)"]
     B6 --> B7[handleSelectCover]
     B7 --> B8["POST /api/generate kind=cut ×3 (이미지 생성)"]
     B8 --> B9[handleSave → POST /api/session]
@@ -42,29 +49,30 @@ flowchart TD
 
 | 순서 | 함수 | 위치 | 호출 대상 |
 |---|---|---|---|
-| 1 | `handleFilesSelected` → `runAnalysis` | `OnboardingFlow.tsx:64,51` | `uploadReference`, `analyzeStyle` |
-| 2 | `uploadReference` | `style-analysis.ts:8` | `POST /api/upload` → `uploadAsset`(`lib/asset-store.ts`) |
-| 3 | `analyzeStyle` | `style-analysis.ts:28` | `POST /api/extract { assetUris }` — 추출·시트 경계, 3번 섹션 참고 |
-| 4 | `handleConfirmStyle` → `handleConfirmDetails` | `OnboardingFlow.tsx:89,93` | 스타일 확인·재추출과 상세 입력 확인을 거친 뒤 `POST /api/generate { kind:'character_sheet', preset }` — 라우트는 이미지 생성, 내부 `generateCharacterSheet`(`extract.ts:207`)는 추출·시트 영역 |
-| 5 | 프리셋 저장 | `OnboardingFlow.tsx` | `POST /api/preset` → `savePreset`(`app/api/preset/route.ts:30`, 백엔드·저장) |
-| 6 | 프로젝트 이름 변경 (#161) | — (화면 호출자 없음) | `PATCH /api/preset`(`app/api/preset/route.ts:63`) → `renameProject`(`lib/db/presets.ts:78`) |
-| 7 | 프로젝트 비활성화 (#161) | — (화면 호출자 없음) | `DELETE /api/preset`(`app/api/preset/route.ts:94`) → `archiveProject`(`lib/db/presets.ts:96`). 하드 삭제가 아니라 `projects.archived_at` 소프트 삭제라 세션·컷 데이터는 남고 목록에서만 빠진다 |
+| 1 | `handleFilesSelected` → `runAnalysis` | `OnboardingFlow.tsx` | `uploadReference`, `analyzeStyle` |
+| 2 | `uploadReference` | `style-analysis.ts` | `POST /api/upload` → `uploadAsset`(`lib/asset-store.ts`) |
+| 3 | `analyzeStyle` | `style-analysis.ts` | `POST /api/extract { assetUris }` — 추출·시트 경계, 3번 섹션 참고 |
+| 4 | `handleConfirmStyle` → `handleConfirmDetails` | `OnboardingFlow.tsx` | 스타일 확인·재추출과 상세 입력 확인을 거친 뒤 마스코트 단계로 |
+| 5 | `handleConfirmMascot` → `createProject` | `OnboardingFlow.tsx` | `POST /api/generate { kind:'character_sheet', preset }` — 라우트는 이미지 생성, 내부 `generateCharacterSheet`(`extract.ts`)는 추출·시트 영역. 이어서 `POST /api/preset` → `savePreset`(백엔드·저장) |
+| 6 | 프로젝트 이름 변경 (#161) | — (화면 호출자 없음) | `PATCH /api/preset`(`app/api/preset/route.ts`) → `renameProject`(`lib/db/presets.ts`) |
+| 7 | 프로젝트 비활성화 (#161) | — (화면 호출자 없음) | `DELETE /api/preset`(`app/api/preset/route.ts`) → `archiveProject`(`lib/db/presets.ts`). 하드 삭제가 아니라 `projects.archived_at` 소프트 삭제라 세션·컷 데이터는 남고 목록에서만 빠진다 |
 
 ## 3. 세션 (화면)
 
 | 순서 | 함수 | 위치 | 호출 대상 |
 |---|---|---|---|
-| 1 | `startBrainstorm` → `loadTurns` | `SessionFlow.tsx:257,217` | `POST /api/brainstorm` |
-| 2 | (route, 스키마·LLM) | `app/api/brainstorm/route.ts` | `body.draft` 없으면 `extractDraftFromSubject`(`brainstorm.ts:259`) 먼저 호출 |
-| 3 | `generateBrainstormTurns` | `brainstorm.ts:78` | 내부 `isSlotFilled`(:28)·`areAllSlotsComplete`(:59)로 draft 기준 남은 턴만 생성. gpt-4o 텍스트 호출(스키마·LLM 소유, `brainstorm.ts:137`) |
+| 1 | `startBrainstorm` → `loadTurns` | `SessionFlow.tsx` | `POST /api/brainstorm` |
+| 2 | (route, 스키마·LLM) | `app/api/brainstorm/route.ts` | `body.draft` 없으면 `extractDraftFromSubject`(`brainstorm.ts`) 먼저 호출 |
+| 3 | `generateBrainstormTurns` | `brainstorm.ts` | 내부 `isSlotFilled`·`areAllSlotsComplete`로 draft 기준 남은 턴만 생성. gpt-4o 텍스트 호출(스키마·LLM 소유) |
 | 4 | 응답의 `resolved` | `SessionFlow.tsx` `loadTurns` | `setAnswers`로 선반영 (#154) |
-| 5 | `recordAnswer` 반복 | `SessionFlow.tsx:190` | 3턴(또는 축소된 턴) 완료 시 `assembling`으로 전이 |
-| 6 | assembling effect | `SessionFlow.tsx:262` | `assembleStoryboard`(`storyboard-assembly.ts:85`) |
-| 7 | `assembleStoryboard` 내부 | `storyboard-assembly.ts` | `buildSessionCast`(`session-cast.ts:75`, #150), `getBeatsForFlow`/`getFlowOptions`(`narrative-flow.ts`, #153) |
-| 8 | 대사 생성(F2) | `loadCaptions`(`SessionFlow.tsx:389`) | `POST /api/session/captions` — tone 단계 선택값 + subject·flow·beats·cast·context를 보내 4컷 대사와 연출(F4)을 받고 `applyCaptions`·`applyDirections`로 조립 컷에 반영. 컷별 다시 뽑기 `regenCutCaption`(:485)은 같은 경로에 `cut_index`를 함께 보냄 |
-| 9 | `loadCoverVariants` | `SessionFlow.tsx:291` | `POST /api/generate { kind:'cover_variants', storyboard, preset, referenceAssets }` — 이미지 생성 경계 |
-| 10 | `handleSelectCover` | `SessionFlow.tsx:306` | `generateChainedCuts`(`generate-client.ts`, 화면) → `POST /api/generate { kind:'cut', ... }` × 3 — 이미지 생성 경계 |
-| 11 | `handleSave` | `SessionFlow.tsx:366` | `POST /api/session` (백엔드·저장, `lib/db/sessions.ts`에 저장) + `selections` 동봉(#207 — 표지 표시 때 `recordRound`(:596)·선택 때 `markSelected`(:604), 저장 때 `toPayload`(:693), 기록 실패 시 `selectionsSaved:false` 토스트(:713)) |
+| 5 | `recordAnswer` 반복 | `SessionFlow.tsx` | 3턴(또는 축소된 턴) 완료 시 말투(`tone`) 단계로 |
+| 6 | `handleSelectTone` | `SessionFlow.tsx` | 말투 선택 → `assembling`으로 전이 |
+| 7 | assembling effect | `SessionFlow.tsx` | `assembleStoryboard`(`storyboard-assembly.ts`) |
+| 8 | `assembleStoryboard` 내부 | `storyboard-assembly.ts` | `buildSessionCast`(`session-cast.ts`, #150), `getBeatsForFlow`/`getFlowOptions`(`narrative-flow.ts`, #153) |
+| 9 | 대사 생성(F2) | `loadCaptions`(`SessionFlow.tsx`) | `POST /api/session/captions` — tone 단계 선택값 + subject·flow·beats·cast·context를 보내 4컷 대사와 연출(F4)을 받고 `applyCaptions`·`applyDirections`로 조립 컷에 반영. 컷별 다시 뽑기 `regenCutCaption`은 같은 경로에 `cut_index`를 함께 보냄 |
+| 10 | `loadCoverVariants` | `SessionFlow.tsx` | `POST /api/generate { kind:'cover_variants', storyboard, preset, referenceAssets }` — 이미지 생성 경계 |
+| 11 | `handleSelectCover` | `SessionFlow.tsx` | `generateChainedCuts`(`generate-client.ts`, 화면) → `POST /api/generate { kind:'cut', ... }` × 3 — 이미지 생성 경계 |
+| 12 | `handleSave` | `SessionFlow.tsx` | `POST /api/session` (백엔드·저장, `lib/db/sessions.ts`에 저장) + `selections` 동봉(#207 — 표지 표시 때 `recordRound`·선택 때 `markSelected`, 저장 때 `toPayload`, 기록 실패 시 `selectionsSaved:false` 토스트) |
 
 ### 표지 선택 기록 저장 계약 (#207)
 
@@ -74,11 +82,11 @@ flowchart TD
 
 | 순서 | 함수 | 위치 | 호출 대상 |
 |---|---|---|---|
-| 1 | mount effect | `EditorFlow.tsx:97` | `GET /api/session` → `resolveImages`(:46) |
+| 1 | mount effect | `EditorFlow.tsx` | `GET /api/session` → `resolveImages` |
 | 2 | 대사·말풍선 편집 | `EditorFlow.tsx` | 로컬 state만, 호출 없음 |
-| 3 | `handleSave` | `EditorFlow.tsx:193` | `POST /api/session/version` (백엔드·저장) |
-| 4 | `handleRevert` | `EditorFlow.tsx:228` | `POST /api/session/revert` (백엔드·저장) |
-| 5 | `handleExport` | `EditorFlow.tsx:260` | `GET /api/session/export` — 렌더링 경계, 5-2번 참고 |
+| 3 | `handleSave` | `EditorFlow.tsx` | `POST /api/session/version` (백엔드·저장) |
+| 4 | `handleRevert` | `EditorFlow.tsx` | `POST /api/session/revert` (백엔드·저장) |
+| 5 | `handleExport` | `EditorFlow.tsx` | `GET /api/session/export` — 렌더링 경계, 5-2번 참고 |
 
 ## 5. 이미지 생성·합성 파트
 
@@ -86,15 +94,17 @@ flowchart TD
 
 ### 5-1. 텍스트/이미지 생성 (이미지 생성)
 
-`app/api/generate/route.ts` · `lib/openai/generate.ts` · `lib/openai/provider.ts` 소유. `generate.ts` 가 내보내는 것은 아래 다섯 개다.
+`app/api/generate/route.ts` · `lib/openai/generate.ts` · `lib/openai/provider.ts` 소유. `generate.ts` 가 내보내는 것은 아래 일곱 개다.
 
 | export | 위치 | 용도 |
 |---|---|---|
-| `generateCut` | `generate.ts:452` | 컷 1장 생성 |
-| `generateCoverVariants` | `generate.ts:513` | 표지 3안 생성 |
-| `OUTPUT_SIZE` | `generate.ts:39` | `{width:1024,height:1024}`. `extract.ts` 가 시트 크기로 가져간다 |
-| `promptHint` | `generate.ts:141` | `prompt_hints` 조회. 없으면 `undefined` — 힌트 유무를 구분해야 하는 자리를 위해 `hint()`(`:146`)와 나눠 뒀다 |
-| `ratioClause` | `generate.ts:164` | `character_ratio` 절. **폴백 규칙까지** 한 곳에 둔다 — 아래 참고 |
+| `generateCut` | `generate.ts:548` | 컷 1장 생성 |
+| `generateCoverVariants` | `generate.ts:622` | 표지 3안 생성 |
+| `activeMascot` | `generate.ts:151` | 마스코트 참조 결정 (#150) |
+| `buildCutPrompt` | `generate.ts:219` | 표지·컷 공통 프롬프트 조립 |
+| `OUTPUT_SIZE` | `generate.ts:42` | `{width:1024,height:1024}`. `extract.ts` 가 시트 크기로 가져간다 |
+| `promptHint` | `generate.ts:187` | `prompt_hints` 조회. 없으면 `undefined` — 힌트 유무를 구분해야 하는 자리를 위해 `hint()`(`:192`)와 나눠 뒀다 |
+| `ratioClause` | `generate.ts:210` | `character_ratio` 절. **폴백 규칙까지** 한 곳에 둔다 — 아래 참고 |
 
 `ratioClause(value)` 가 규칙 자체를 담는다. `extract.ts`(추출·시트)도 이것을 가져다 써서 시트와 컷이 항상 같은 비율 지시를 받는다.
 
@@ -137,7 +147,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 | 순서 | 함수 | 위치 | 호출 대상 |
 |---|---|---|---|
-| 1 | `handleSelectCover` → `generateCoverVariants` | `generate-client.ts` | `POST /api/generate {kind:"cover_variants"}` → **`generateCoverVariants`** ×1 (내부 3회) |
+| 1 | `loadCoverVariants` | `SessionFlow.tsx` → `generateCoverVariants`(`generate-client.ts`) | `POST /api/generate {kind:"cover_variants"}` → **`generateCoverVariants`** ×1 (내부 3회) |
 | 2 | `handleSelectCover` → `generateChainedCuts` | `generate-client.ts` | `POST /api/generate {kind:"cut"}` ×3 → **`generateCut`** ×3 |
 
 `kind:'cover_variants'` 응답에는 `requested: 3` 이 함께 실린다(`route.ts`, #108). `allSettled` 라 배열이 1~3 개일 수 있어서, 화면이 `result.length < requested` 로 부족분을 판단한다(#117).
@@ -224,10 +234,11 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 ### 5-1b. 스타일 분석 · 캐릭터 시트 생성 (추출·시트)
 
-`lib/openai/extract.ts` 소유. 이 파일이 내보내는 건 아래 두 함수뿐이다.
+`lib/openai/extract.ts` 소유. 이 파일이 내보내는 건 아래 세 함수다.
 
-- **`extractStyle(refs: Buffer[])`**(`extract.ts:83`) — 모델 `gpt-4o`, `client.chat.completions.create`(`extract.ts:91`) 1회, `response_format: json_object`, `max_tokens: 300`. `refs` N장을 **한 번의 호출**에 `image_url` content part N개로 담아 보낸다(`extract.ts:84-89`) — 이미지 장수와 API 호출 수는 무관하다. 반환 직후 비공개 헬퍼 `normalizeStyle()`(`extract.ts:55`, export 없음)이 필드 존재·enum 값을 검증·보정한다(#140) — 모듈 밖에서는 재사용할 수 없다.
-- **`generateCharacterSheet(preset: PresetInput)`**(`extract.ts:207`) — 모델 `gpt-image-1`, `client.images.generate`(`extract.ts:212`) 1회, `n: 1`, `size: "1024x1024"`(`OUTPUT_SIZE`, `generate.ts:39`). 내부에서 `buildCharacterPrompt(preset)`(`extract.ts:134`)를 1회 호출해 프롬프트를 조립한 뒤 그 문자열로 이미지 1장을 만든다.
+- **`extractStyle(refs: Buffer[])`**(`extract.ts:85`) — 모델 `gpt-4o`, `client.chat.completions.create`(`extract.ts:93`) 1회, `response_format: json_object`, `max_tokens: 300`. `refs` N장을 **한 번의 호출**에 `image_url` content part N개로 담아 보낸다 — 이미지 장수와 API 호출 수는 무관하다. 반환 직후 비공개 헬퍼 `normalizeStyle()`(`extract.ts:57`, export 없음)이 필드 존재·enum 값을 검증·보정한다(#140) — 모듈 밖에서는 재사용할 수 없다.
+- **`buildCharacterPrompt(preset: PresetInput)`**(`extract.ts:140`) — 시트 프롬프트 조립. 시트와 컷이 같은 스타일 지시를 받도록 export한다(#126·#129 회귀 방지).
+- **`generateCharacterSheet(preset: PresetInput)`**(`extract.ts:240`) — 모델 `gpt-image-1`, `client.images.generate`(`extract.ts:225`) 1회, `n: 1`, `size: "1024x1024"`(`OUTPUT_SIZE`, `generate.ts:42`). 내부에서 `buildCharacterPrompt(preset)`(`extract.ts:140`)를 1회 호출해 프롬프트를 조립한 뒤 그 문자열로 이미지 1장을 만든다.
 
 **호출 순서 (온보딩 1회, 재시도 없는 골든 패스)**
 
@@ -259,10 +270,10 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 | 순서 | 함수 | 위치 | 하는 일 |
 |---|---|---|---|
-| 1 | `GET /api/session/export?id=` | `app/api/session/export/route.ts:15` | 세션 조회 → `toRenderCuts`(`:94`)로 `storyboard.cuts`를 `lib/render/`의 `Cut[]`로 좁힘(enum 밖 값은 `malformed`로 제외) |
-| 2 | `exportCuts(cuts)` | `lib/render/export.ts:17` | `cut_index` 순 정렬 → 컷마다 `readAsset(generated_image)` → `composeCut` → ZIP. 이미지 없는 컷은 건너뛰고 `skipped`에 남김 |
-| 3 | `composeCut(image, [caption], headTargets?)` | `lib/render/compose.ts:413` | 원본 이미지 위에 SVG 말풍선 오버레이를 sharp로 합성해 PNG 반환 |
-| 4 | `buildZip(entries)` | `lib/render/zip.ts:11` | archiver `ZipArchive`로 `cut_<n>.png`들을 묶음 |
+| 1 | `GET /api/session/export?id=` | `app/api/session/export/route.ts` | 세션 조회 → `toRenderCuts`로 `storyboard.cuts`를 `lib/render/`의 `Cut[]`로 좁힘(enum 밖 값은 `malformed`로 제외) |
+| 2 | `exportCuts(cuts)` | `lib/render/export.ts` | `cut_index` 순 정렬 → 컷마다 `readAsset(generated_image)` → `composeCut` → ZIP. 이미지 없는 컷은 건너뛰고 `skipped`에 남김 |
+| 3 | `composeCut(image, [caption], headTargets?)` | `lib/render/compose.ts` | 원본 이미지 위에 SVG 말풍선 오버레이를 sharp로 합성해 PNG 반환 |
+| 4 | `buildZip(entries)` | `lib/render/zip.ts` | archiver `ZipArchive`로 `cut_<n>.png`들을 묶음 |
 
 응답: `application/zip`, 헤더 `X-Export-Included` / `X-Export-Skipped`. 포함 컷이 0개면 빈 ZIP 대신 `409`.
 
@@ -317,12 +328,12 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 폴더·파일별 담당자는 `README.md` 소유권 표를 본다(2차 소유권 개편 반영). 이 문서의 영역 이름(화면 / 스키마·LLM / 백엔드·저장 / 이미지 생성 / 추출·시트 / 렌더링)은 그 표의 담당 구분과 같은 뜻이다.
 
-## 8. 구현은 있으나 호출자가 없는 함수 (전부 스키마·LLM 영역)
+## 8. 호출자가 하나뿐이거나 데모 전용인 함수 (전부 스키마·LLM 영역)
 
 | 함수 | 위치 | 실제 호출자 | 관련 이슈 |
 |---|---|---|---|
-| `buildSessionCast` | `lib/llm/session-cast.ts:75` | `assembleStoryboard`(`storyboard-assembly.ts:55`) | #150 |
-| `mergeStyleValues` | `lib/llm/style-merge.ts:77` | 없음 | #151 |
-| `checkUnmappedWordsPolicy` | `lib/llm/preset-guard.ts:333` | `preset-guard.demo.ts`(데모 스크립트)뿐 — 실제 파이프라인 경로 없음 | #125 |
+| `buildSessionCast` | `lib/llm/session-cast.ts` | `assembleStoryboard`(`storyboard-assembly.ts`) | #150 |
+| `mergeStyleValues` | `lib/llm/style-merge.ts` | `resolvePresetStyle`(`style-resolve.ts`) 경유 온보딩 | #151 |
+| `checkUnmappedWordsPolicy` | `lib/llm/preset-guard.ts` | `resolvePresetStyle`(`style-resolve.ts`) 경유 온보딩 + `preset-guard.demo.ts`(데모 스크립트) | #125 |
 
 `lib/llm/`의 나머지 export는 위 세 개를 제외하고 전부 실제 호출자가 있다(`DetailsStep.tsx`, `EditorFlow.tsx`, `SessionFlow.tsx`, `app/api/session/*`, `app/api/brainstorm/route.ts` 등에서 확인).
