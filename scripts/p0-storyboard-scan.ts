@@ -35,29 +35,13 @@
 // (합격 아님), --cutoff 없음 1.
 //
 // storyboardContractProblems는 개발자 A의 P1-a 결과물(lib/llm/storyboard-guard.ts)
-// 이다. A 머지 전에는 이 파일에 없어서 정적 import를 걸 수 없으므로(걸면 tsc 실패),
-// 동적 import로 읽고 없으면 전체 조사를 중단한다. A의 P1-a 커밋을 머지한 뒤에는
-// 아래 loadStoryboardJudge 부분을 정적 import로 바꾼다.
+// 정적 import. P1-a 커밋 1162102를 merge한 뒤 연결했다.
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { presetContractProbe, type PresetProbeProblem } from "../lib/llm/preset-guard";
-
-// A의 P1-a가 만드는 판정 함수와 같은 구조. 정적 import로 바꾸기 전까지의 자리 표시.
-interface ContractProblemLike {
-  rule: string;
-  locator: string;
-  kind: string;
-  cause: unknown;
-}
-type StoryboardJudge = (sb: unknown, ctx: { demoCacheValues?: ReadonlySet<string> }) => ContractProblemLike[];
-
-async function loadStoryboardJudge(): Promise<StoryboardJudge | null> {
-  const mod = (await import("../lib/llm/storyboard-guard")) as Record<string, unknown>;
-  const fn = mod["storyboardContractProblems"];
-  return typeof fn === "function" ? (fn as StoryboardJudge) : null;
-}
+import { storyboardContractProblems, type ContractProblem } from "../lib/llm/storyboard-guard";
 
 // ── 요청 로그 (키·본문·URL 쿼리 값 출력 금지: method·table·status·행 수만) ──
 
@@ -312,12 +296,6 @@ async function runSurvey(cutoff: string): Promise<void> {
   await runSelfTest();
   requestLog.length = 0;
 
-  const judge = await loadStoryboardJudge();
-  if (!judge) {
-    console.error("FAIL storyboardContractProblems를 찾지 못함(P1-a 미머지) — 미조사 범위: 전체");
-    process.exit(1);
-  }
-
   const client = createGuardedClient(url, key, fetch);
   const cutoffTime = new Date(cutoff).getTime();
   if (Number.isNaN(cutoffTime)) {
@@ -399,12 +377,7 @@ async function runSurvey(cutoff: string): Promise<void> {
     if (b.examples.length < 5) b.examples.push(ex);
   };
   for (const v of versions) {
-    let problems: ContractProblemLike[];
-    try {
-      problems = judge(v.storyboard, {});
-    } catch {
-      problems = [{ rule: "JUDGE-THROW", locator: "storyboard", kind: "type", cause: null }];
-    }
+    const problems: ContractProblem[] = storyboardContractProblems(v.storyboard, {});
     for (const p of problems) {
       const ex = { idHash: sha8(v.session_id), version: v.version, locator: p.locator, vtype: valueType(p.cause) };
       bump(buckets.all, p.rule, p.kind, ex);
