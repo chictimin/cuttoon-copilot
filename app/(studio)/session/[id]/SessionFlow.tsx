@@ -26,6 +26,7 @@ import {
   FLOW_OPTIONS,
   type BrainstormAnswers,
 } from "./storyboard-assembly";
+import { resolveImageUrl } from "../../asset-url";
 import { CTA_STRENGTHS } from "../../cta-strength-options";
 import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
 // 순수 헬퍼라 클라이언트에서 값으로 import해도 된다(서버 모듈·DB import 없음, #207).
@@ -128,21 +129,13 @@ function promptForCut(subject: string, cut: Cut): string {
 }
 
 // issue #143: 저장된 세션 URL로 재진입해도 완성된 4컷이 복원되지 않던 문제.
-// EditorFlow.resolveImageUrl과 같은 이유로 asset://를 공개 URL로 바꿔야
-// <img>에 그릴 수 있다 — 중복 구현은 #144에서 공용 유틸로 정리하기로 함.
-async function resolveSessionAssetUrl(uri: string): Promise<string> {
-  const res = await fetch(`/api/session/asset-url?uri=${encodeURIComponent(uri)}`);
-  if (!res.ok) throw new Error("이미지 URL을 가져오지 못했습니다");
-  const { url } = (await res.json()) as { url: string };
-  return url;
-}
-
+// asset://를 공개 URL로 바꿔야 <img>에 그릴 수 있다(공용 유틸: ../../asset-url.ts, #144).
 async function resolveCutImages(cuts: Cut[]): Promise<Record<number, string>> {
   const entries = await Promise.all(
     cuts.map(async (cut) => {
       if (!cut.generated_image) return null;
       try {
-        return [cut.cut_index, await resolveSessionAssetUrl(cut.generated_image)] as const;
+        return [cut.cut_index, await resolveImageUrl(cut.generated_image)] as const;
       } catch {
         return null;
       }
