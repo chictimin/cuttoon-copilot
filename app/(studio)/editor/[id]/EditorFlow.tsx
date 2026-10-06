@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { assertStoryboardRuntimeInvariants } from "@/lib/llm/storyboard-guard";
 import { resolveImageUrl } from "../../asset-url";
+import { useProjectFont } from "./useProjectFont";
 import type { CaptionPosition, Storyboard } from "../../session/[id]/storyboard-types";
 
 const POSITION_STYLE: Record<CaptionPosition, React.CSSProperties> = {
@@ -82,6 +83,9 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  // #209: 프로젝트 폰트. 프리셋을 못 읽거나 폰트가 없으면 null·undefined — 현행 그대로.
+  const [presetId, setPresetId] = useState<string | null>(null);
+  const captionFontFamily = useProjectFont(presetId);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +108,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         if (cancelled) return;
 
         setSaved({ version: data.version, storyboard: data.storyboard });
+        setPresetId(typeof data.presetId === "string" ? data.presetId : null);
         setDraft(clone(data.storyboard));
         setPhase("ready");
 
@@ -345,7 +350,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
                 draggable
                 onDragStart={(e) => e.dataTransfer.setData("text/plain", String(i))}
                 className="absolute max-w-[70%] cursor-move truncate rounded-full bg-white px-3 py-1 text-xs font-medium shadow"
-                style={POSITION_STYLE[cut.caption.position]}
+                style={{ ...POSITION_STYLE[cut.caption.position], fontFamily: captionFontFamily }}
                 title="끌어서 말풍선 위치를 옮길 수 있어요"
               >
                 {cut.caption.text}
