@@ -332,6 +332,34 @@ async function main(): Promise<void> {
     ]);
   }
 
+  // --- 6. #240 체이닝 컷 머리색 유지 · #243 시트 여백 ---
+  {
+    const sb = {
+      subject: "demo",
+      cast: [{ character_id: "protagonist", role: "protagonist", description: "30대 직장인" }],
+    } as CutStoryboard;
+    const withChar = {
+      cut_index: 2,
+      characters_in_frame: [{ character_id: "protagonist", expression: "smile", pose: "stand" }],
+    };
+    const KEEP = "Never change anyone's hair color between panels.";
+    checks.push(["체이닝 컷 → 머리색 유지 문장", buildCutPrompt(sb, {}, withChar, { continuesChain: true }).includes(KEEP)]);
+    checks.push(["체이닝 아님(표지·첫 컷) → 문장 없음", !buildCutPrompt(sb, {}, withChar).includes(KEEP)]);
+    checks.push([
+      "체이닝이어도 인물 없는 컷 → 문장 없음",
+      !buildCutPrompt(sb, {}, { cut_index: 3, characters_in_frame: [] }, { continuesChain: true }).includes(KEEP),
+    ]);
+    checks.push(["cut 없음 → 문장 없음", !buildCutPrompt(sb, {}, undefined, { continuesChain: true }).includes(KEEP)]);
+  }
+  {
+    const LAYOUT = "No part of any figure (hair, hands, feet) may touch or be cut off by the canvas edge.";
+    checks.push(["일반 시트 → 여백 문장", buildCharacterPrompt(basePreset()).includes(LAYOUT)]);
+    checks.push([
+      "마스코트 시트 → 여백 문장",
+      buildCharacterPrompt({ ...basePreset(), mascot: { label: "m", description: "a brave fox" } }).includes(LAYOUT),
+    ]);
+  }
+
   let failed = 0;
   for (const [name, pass] of checks) {
     if (pass) {
