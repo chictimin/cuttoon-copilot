@@ -15,7 +15,8 @@ import type { PresetInput } from "./extract";
 async function main(): Promise<void> {
   const { imageSetting, imageQuality } = await import("./image-setting");
   const { activeMascot, ratioClause, buildCutPrompt } = await import("./generate");
-  const { buildCharacterPrompt } = await import("./extract");
+  const { buildCharacterPrompt, fitSheetToOutput, SHEET_REQUEST_SIZE } = await import("./extract");
+  const sharp = (await import("sharp")).default;
 
   const checks: [string, boolean][] = [];
 
@@ -358,6 +359,44 @@ async function main(): Promise<void> {
       "마스코트 시트 → 여백 문장",
       buildCharacterPrompt({ ...basePreset(), mascot: { label: "m", description: "a brave fox" } }).includes(LAYOUT),
     ]);
+  }
+
+  // --- 7. #243 시트 가로 생성 + contain 저장 (로컬 합성 이미지, 유료 0) ---
+  {
+    checks.push(["시트 요청 크기 1536x1024", SHEET_REQUEST_SIZE.width === 1536 && SHEET_REQUEST_SIZE.height === 1024]);
+    checks.push([
+      "Layout 문장: 가로 한 줄 배치",
+      buildCharacterPrompt(basePreset()).includes("side by side in one horizontal row"),
+    ]);
+
+    // 가로 1536×1024 더미: 빨강 바탕 + 왼쪽·오른쪽 끝 8px 초록 띠. contain 이면 띠가 살아 있어야 한다.
+    const { width: W, height: H } = SHEET_REQUEST_SIZE;
+    const stripe = await sharp({ create: { width: 8, height: H, channels: 3, background: "#00ff00" } }).png().toBuffer();
+    const wide = await sharp({ create: { width: W, height: H, channels: 3, background: "#ff0000" } })
+      .composite([
+        { input: stripe, left: 0, top: 0 },
+        { input: stripe, left: W - 8, top: 0 },
+      ])
+      .png()
+      .toBuffer();
+    const fitted = await fitSheetToOutput(wide.toString("base64"));
+    const { data, info } = await sharp(fitted.buffer).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    const px = (x: number, y: number) => {
+      const i = (y * info.width + x) * info.channels;
+      return [data[i], data[i + 1], data[i + 2]];
+    };
+    const isWhite = ([r, g, b]: number[]) => r > 245 && g > 245 && b > 245;
+    const isGreen = ([r, g, b]: number[]) => g > 200 && r < 80 && b < 80;
+    checks.push(["contain → 1024×1024", info.width === 1024 && info.height === 1024 && fitted.width === 1024]);
+    checks.push(["contain → 위·아래 흰 띠", isWhite(px(512, 20)) && isWhite(px(512, 1003))]);
+    checks.push(["contain → 가운데는 원본", !isWhite(px(512, 512))]);
+    checks.push(["contain → 왼쪽·오른쪽 끝 원본 픽셀 보존(잘림 없음)", isGreen(px(1, 512)) && isGreen(px(1022, 512))]);
+
+    // 정사각형 원본(ComfyUI 경로)은 그대로 1024×1024 — 띠 없음
+    const square = await sharp({ create: { width: 1024, height: 1024, channels: 3, background: "#ff0000" } }).png().toBuffer();
+    const sq = await fitSheetToOutput(square.toString("base64"));
+    const sqPx = await sharp(sq.buffer).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    checks.push(["정사각형 원본 → 띠 없음", sq.width === 1024 && sqPx.data[0] > 200 && sqPx.data[1] < 50]);
   }
 
   let failed = 0;

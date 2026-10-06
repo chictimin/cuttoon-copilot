@@ -172,8 +172,10 @@ export function buildCharacterPrompt(preset: PresetInput): string {
 
   // #243: 세 포즈를 정사각형에 나란히 그리다 인물을 너무 크게 잡아, 정면은 왼쪽·옆모습은
   // 오른쪽 가장자리에서 잘렸다(1024×1024 요청·리사이즈라 후처리 크롭은 없음 — 모델 구도).
-  // 시트는 매 컷 reference 라 옆모습이 잘리면 그 정보가 빠진다. Layout 문장으로 여백을
-  // 요구한다. 마스코트 시트·일반 시트가 같은 템플릿이라 둘 다 적용된다.
+  // 시트는 매 컷 reference 라 옆모습이 잘리면 그 정보가 빠진다. Layout 문장으로 가로 한 줄
+  // 배치와 여백을 요구한다(여백 문장만으로는 정사각형에서 3/3 잘림 — TASK-003b 실측이라
+  // 캔버스도 가로로 바꿨다, SHEET_REQUEST_SIZE). 캔버스 크기는 문장에 적지 않는다 —
+  // ComfyUI 경로는 정사각형으로 그대로 생성한다. 마스코트·일반 시트 공통 템플릿이다.
   return `Character reference sheet for a webtoon/comic series.
 
 Style: ${s.line_weight ?? "medium"} line weight, ${s.saturation ?? "vivid"} colors, ${ratio}.
@@ -187,7 +189,7 @@ Draw the character in THREE poses on a single white-background sheet:
 2. 3/4 view, smiling
 3. Side view, walking
 
-Layout: all three full-body figures must fit completely inside the canvas. Scale them down so every figure has clear white margin on all sides — at the left and right edges of the canvas and between figures. No part of any figure (hair, hands, feet) may touch or be cut off by the canvas edge.
+Layout: place the three full-body figures side by side in one horizontal row, evenly spaced. Each figure must fit completely inside the canvas with clear white margin on all sides — above the head, below the feet, at the left and right edges of the canvas, and between figures. No part of any figure (hair, hands, feet) may touch or be cut off by the canvas edge.
 
 No speech bubbles. No text. Clean reference sheet layout with clear separation between poses.`;
 }
@@ -204,18 +206,28 @@ No speech bubbles. No text. Clean reference sheet layout with clear separation b
 // #104: 리사이즈가 실패해도(원본 버퍼로 대체하는 경우) width/height를 OUTPUT_SIZE로
 // 그대로 고정하면 메타가 실제 픽셀과 어긋난다 — generate.ts와 동일하게 실패 시
 // 실제 메타데이터를 다시 읽어 반환한다.
-async function resizeToOutput(
+//
+// #243: 시트는 가로(SHEET_REQUEST_SIZE)로 생성해 저장은 OUTPUT_SIZE 정사각형으로
+// 맞춘다. cover 로 맞추면 양쪽 인물이 다시 잘리므로 contain + 흰 배경(시트 배경색과
+// 같음)으로 위아래에 띠를 둔다 — 원본 픽셀은 줄어들 뿐 잘리지 않는다. 저장 크기가
+// 그대로라 시트를 reference 로 읽는 컷 쪽과 저장 코드는 영향이 없다. 컷용 리사이즈
+// (generate.ts resizeToOutput, cover·reserved_zone)와는 규칙이 달라 이름도 다르게 둔다.
+// export 하는 이유: prompt.demo.ts 가 로컬 합성 이미지로 contain 결과를 확인한다.
+const SHEET_BACKGROUND = { r: 255, g: 255, b: 255, alpha: 1 } as const;
+
+export async function fitSheetToOutput(
   base64: string
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
   const original = Buffer.from(base64, "base64");
   try {
     const buffer = await sharp(original)
-      .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: "cover" })
+      .resize(OUTPUT_SIZE.width, OUTPUT_SIZE.height, { fit: "contain", background: SHEET_BACKGROUND })
+      .flatten({ background: SHEET_BACKGROUND })
       .png()
       .toBuffer();
     return { buffer, width: OUTPUT_SIZE.width, height: OUTPUT_SIZE.height };
   } catch (err) {
-    console.error("[extract] resizeToOutput 실패 — 원본 버퍼로 폴백 (#104)", err);
+    console.error("[extract] fitSheetToOutput 실패 — 원본 버퍼로 폴백 (#104)", err);
     const meta = await sharp(original)
       .metadata()
       .catch(() => undefined);
@@ -227,12 +239,17 @@ async function resizeToOutput(
   }
 }
 
+// #243: 시트만 가로로 생성한다(gpt-image-1 지원 크기 중 가로). 정사각형에 전신 세 명을
+// 나란히 그리면 여백을 요구해도 양쪽 끝이 잘렸다(TASK-003b, 3/3). 저장은
+// fitSheetToOutput 이 OUTPUT_SIZE 로 맞춘다. 컷·표지 크기(OUTPUT_SIZE)와는 별개 값이다.
+export const SHEET_REQUEST_SIZE = { width: 1536, height: 1024 } as const;
+
 async function generateSheetWithOpenAI(prompt: string, quality: "low" | undefined): Promise<string> {
   const response = await client.images.generate({
     model: "gpt-image-1",
     prompt,
     n: 1,
-    size: `${OUTPUT_SIZE.width}x${OUTPUT_SIZE.height}` as const,
+    size: `${SHEET_REQUEST_SIZE.width}x${SHEET_REQUEST_SIZE.height}` as const,
     ...(quality && { quality }),
   });
 
@@ -259,9 +276,9 @@ export async function generateCharacterSheet(
       : await generateSheetWithOpenAI(prompt, quality);
 
   // #104: 여기까지 오면 유료 호출은 이미 성공한 뒤다 — 리사이즈가 실패해도
-  // 결과를 버리지 않는다. resizeToOutput이 실패 시 원본 버퍼 + 실제 메타데이터를
+  // 결과를 버리지 않는다. fitSheetToOutput이 실패 시 원본 버퍼 + 실제 메타데이터를
   // 반환하므로 width/height도 실제 값과 어긋나지 않는다.
-  const { buffer, width, height } = await resizeToOutput(b64);
+  const { buffer, width, height } = await fitSheetToOutput(b64);
   const { assetUri } = await uploadAsset(buffer, "image/png", "character-sheet.png");
 
   return {
