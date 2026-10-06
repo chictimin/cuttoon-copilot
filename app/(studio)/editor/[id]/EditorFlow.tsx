@@ -1,10 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { assertStoryboardRuntimeInvariants } from "@/lib/llm/storyboard-guard";
+import {
+  displaySubject,
+  normalizeStoredSubjectTags,
+  type StoredSubjectTag,
+} from "@/lib/llm/subject-tags";
 import { resolveImageUrl } from "../../asset-url";
 import type { CaptionPosition, Storyboard } from "../../session/[id]/storyboard-types";
+
+// spec-a3 3-2(e): 에디터도 로드 시 저장본을 정규화한다. 화면 타입은 A① 소유라
+// 손대지 않고 이 화면에서만 쓰는 별칭으로 subject_tags를 단다.
+type Board = Storyboard & { subject_tags?: StoredSubjectTag[] };
+
+function stripSubjectTags(board: Board): Board {
+  const copy = { ...board };
+  delete copy.subject_tags;
+  return copy;
+}
 
 const POSITION_STYLE: Record<CaptionPosition, React.CSSProperties> = {
   top_left: { top: 8, left: 8 },
@@ -66,13 +81,13 @@ type Phase = "loading" | "not_found" | "load_error" | "ready";
 
 interface SavedState {
   version: number;
-  storyboard: Storyboard;
+  storyboard: Board;
 }
 
 export default function EditorFlow({ sessionId }: { sessionId: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [saved, setSaved] = useState<SavedState | null>(null);
-  const [draft, setDraft] = useState<Storyboard | null>(null);
+  const [draft, setDraft] = useState<Board | null>(null);
   const [imageUrls, setImageUrls] = useState<Record<number, string>>({});
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [draftCaption, setDraftCaption] = useState("");
@@ -82,6 +97,12 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  // spec-a3 3-3: 400(subject_tags) 복구. saveRecovery가 true면 복구 버튼+안내를
+  // 기존 에러 아래에 보여준다. saveLockRef는 원래 저장과 복구를 같은 플래그로 막는다.
+  const [recovering, setRecovering] = useState(false);
+  const [saveRecovery, setSaveRecovery] = useState(false);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const saveLockRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,8 +124,16 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         const data = await res.json();
         if (cancelled) return;
 
-        setSaved({ version: data.version, storyboard: data.storyboard });
-        setDraft(clone(data.storyboard));
+        // spec-a3 3-2(e): 로드 시 저장본을 정규화해 draft와 다음 저장본을 같은
+        // 값으로 둔다. 태그가 깨졌으면 subject_tags 키 없이 둔다.
+        const restored = data.storyboard as Board;
+        const loaded = normalizeStoredSubjectTags(restored.subject_tags, restored.subject);
+        const normalized: Board =
+          loaded.tags.length > 0
+            ? { ...restored, subject_tags: loaded.tags }
+            : stripSubjectTags(restored);
+        setSaved({ version: data.version, storyboard: normalized });
+        setDraft(clone(normalized));
         setPhase("ready");
 
         const urls = await resolveImages(data.storyboard);
@@ -190,7 +219,11 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
       return;
     }
 
+    // spec-a3 3-3: 동기 잠금 — 복구 버튼과 같은 플래그를 쓴다.
+    if (saveLockRef.current) return;
+    saveLockRef.current = true;
     setActionError(null);
+    setSaveRecovery(false);
     setSaving(true);
     try {
       const res = await fetch("/api/session/version", {
@@ -202,16 +235,58 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setActionError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+        // spec-a3 3-3: HTTP 400이고 error가 "subject_tags"로 시작할 때만 복구 버튼.
+        if (res.status === 400 && typeof body?.error === "string" && body.error.startsWith("subject_tags")) {
+          setSaveRecovery(true);
+        }
         return;
       }
 
       const data = await res.json();
       setSaved({ version: data.version, storyboard: draft });
+      setSaveNotice(null);
       setSavedAt(new Date().toLocaleTimeString());
     } catch {
       setActionError("저장에 실패했어요. 다시 시도해주세요");
     } finally {
       setSaving(false);
+      saveLockRef.current = false;
+    }
+  }
+
+  // spec-a3 3-3: "소재 태그 없이 저장" 복구. 요청 본문은 현재 draft에서
+  // subject_tags 키를 뺀 사본이고 화면 상태는 아직 바꾸지 않는다. 실패하면 원본
+  // 유지·에러 표시·버튼 재사용, 성공할 때만 사본으로 교체한다.
+  async function handleRecoverSave() {
+    if (!draft || saveLockRef.current) return;
+    saveLockRef.current = true;
+    setRecovering(true);
+    setActionError(null);
+    try {
+      const stripped = stripSubjectTags(draft);
+      const res = await fetch("/api/session/version", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, storyboard: stripped }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setActionError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+        return;
+      }
+
+      const data = await res.json();
+      setSaved({ version: data.version, storyboard: stripped });
+      setDraft(clone(stripped));
+      setSaveRecovery(false);
+      setSaveNotice("소재 태그 매핑 없이 저장했어요");
+      setSavedAt(new Date().toLocaleTimeString());
+    } catch {
+      setActionError("저장에 실패했어요. 다시 시도해주세요");
+    } finally {
+      setRecovering(false);
+      saveLockRef.current = false;
     }
   }
 
@@ -297,7 +372,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         >
           ← 목록으로
         </Link>
-        <h1 className="text-xl font-semibold">&ldquo;{draft.subject}&rdquo; 수정하기</h1>
+        <h1 className="text-xl font-semibold">&ldquo;{displaySubject(draft.subject)}&rdquo; 수정하기</h1>
         <p className="text-sm text-zinc-500">
           대사를 고치거나, 말풍선을 원하는 자리로 끌어다 놓으세요
         </p>
@@ -306,6 +381,27 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
       {actionError && (
         <p className="w-full max-w-md rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">
           {actionError}
+        </p>
+      )}
+      {/* spec-a3 3-3: 기존 에러 아래 복구 버튼 + 안내 1줄. 다른 400·5xx에는 안 보인다. */}
+      {saveRecovery && (
+        <div className="flex w-full max-w-md flex-col items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleRecoverSave()}
+            disabled={saving || reverting || recovering}
+            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
+          >
+            {recovering ? "저장 중…" : "소재 태그 없이 저장"}
+          </button>
+          <p className="text-sm text-zinc-500">
+            저장된 대사·그림은 그대로이고, 이후 컷을 다시 뽑으면 브랜드 대신 &lsquo;제품&rsquo;으로 나올 수 있어요
+          </p>
+        </div>
+      )}
+      {saveNotice && (
+        <p className="w-full max-w-md rounded-md bg-zinc-100 px-4 py-2 text-sm text-zinc-700">
+          {saveNotice}
         </p>
       )}
       {exportNotice && (
@@ -399,7 +495,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         <button
           type="button"
           onClick={handleSave}
-          disabled={!isDirty || saving || reverting}
+          disabled={!isDirty || saving || reverting || recovering}
           className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-40"
         >
           {saving ? "저장 중…" : "저장"}

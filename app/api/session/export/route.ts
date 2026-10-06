@@ -2,6 +2,7 @@ import { exportCuts } from "@/lib/render/export";
 import type { BubbleType, Cut, Position } from "@/lib/render/types";
 import { getSession } from "@/lib/db/sessions";
 import { getPreset } from "@/lib/db/presets";
+import { displaySubject } from "@/lib/llm/subject-tags";
 
 /**
  * 완성 컷을 ZIP으로 내려준다. GET /api/session/export?id=<sessionId>
@@ -55,7 +56,7 @@ export async function GET(request: Request) {
 
   const headers = new Headers({
     "Content-Type": "application/zip",
-    "Content-Disposition": contentDisposition(session.sessionId, session.storyboard.subject),
+    "Content-Disposition": contentDisposition(session.sessionId, displaySubject(session.storyboard.subject)),
     "Content-Length": String(result.zip.byteLength),
   });
   // 빈 배열은 헤더 자체를 붙이지 않는다. 빈 문자열 헤더는 "없음"과 구분이 애매하다.
