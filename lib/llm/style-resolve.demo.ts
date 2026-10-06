@@ -40,6 +40,35 @@ const checks: [string, boolean][] = [
   ["어휘 미등재 단어 몽환적인우주감성 → 원본 유지 + unmapped 1건", vocab.keywordHints.includes("몽환적인우주감성") && find(vocab, "style.keywords", "몽환적인우주감성")?.status === "unmapped"],
 ];
 
+// spec-b2 경계 케이스: enum으로 적용된 키워드는 findings에 enum_applied로 남는다.
+const enumApplied = resolvePresetStyle({ extracted: null, userKeywords: ["thin", "pastel"], forbidden: [] });
+const secondEnum = resolvePresetStyle({ extracted: null, userKeywords: ["thin", "thick"], forbidden: [] });
+const spacedEnum = resolvePresetStyle({ extracted: null, userKeywords: [" thin"], forbidden: [] });
+const casedEnum = resolvePresetStyle({ extracted: null, userKeywords: ["Thin"], forbidden: [] });
+const forbiddenEnum = resolvePresetStyle({ extracted: null, userKeywords: ["thin"], forbidden: ["thin"] });
+
+checks.push(
+  ["enum 적용 단어 thin·pastel → findings enum_applied 2건(개수 유지)", enumApplied.findings.length === 2 && find(enumApplied, "style.keywords", "thin")?.status === "enum_applied" && find(enumApplied, "style.keywords", "pastel")?.status === "enum_applied"],
+  ["같은 필드 두 번째 enum thick → unmapped 유지", find(secondEnum, "style.keywords", "thin")?.status === "enum_applied" && find(secondEnum, "style.keywords", "thick")?.status === "unmapped"],
+  ["앞 공백·대소문자 enum → unmapped 유지", spacedEnum.findings[0]?.status === "unmapped" && casedEnum.findings[0]?.status === "unmapped"],
+  ["forbidden thin → rules.forbidden unmapped 유지", find(forbiddenEnum, "rules.forbidden", "thin")?.status === "unmapped"],
+);
+
+// B2 재작업 회귀: trim된 finding 문자열이 같아도 실제로 소비된 입력 위치의 finding만 바뀐다.
+const kwFindings = (result: typeof vocab) =>
+  result.findings.filter((f) => f.field === "style.keywords");
+const spacedFirst = resolvePresetStyle({ extracted: null, userKeywords: [" thin", "thin"], forbidden: [] });
+const spacedSecond = resolvePresetStyle({ extracted: null, userKeywords: ["thin", " thin"], forbidden: [] });
+const withBlanks = resolvePresetStyle({ extracted: null, userKeywords: ["thin", "", "  ", "pastel"], forbidden: [] });
+const dupThin = resolvePresetStyle({ extracted: null, userKeywords: ["thin", "thin"], forbidden: [] });
+
+checks.push(
+  ["[\" thin\",\"thin\"] → 두 번째만 enum_applied", kwFindings(spacedFirst).length === 2 && kwFindings(spacedFirst)[0]?.status === "unmapped" && kwFindings(spacedFirst)[1]?.status === "enum_applied"],
+  ["[\"thin\",\" thin\"] → 첫 번째만 enum_applied", kwFindings(spacedSecond).length === 2 && kwFindings(spacedSecond)[0]?.status === "enum_applied" && kwFindings(spacedSecond)[1]?.status === "unmapped"],
+  ["빈 입력 섞임 → thin·pastel finding만 enum_applied", kwFindings(withBlanks).length === 2 && kwFindings(withBlanks).every((f) => f.status === "enum_applied")],
+  ["[\"thin\",\"thin\"] → 첫 번째만 enum_applied", kwFindings(dupThin).length === 2 && kwFindings(dupThin)[0]?.status === "enum_applied" && kwFindings(dupThin)[1]?.status === "unmapped"],
+);
+
 let failed = 0;
 for (const [name, pass] of checks) {
   if (pass) {

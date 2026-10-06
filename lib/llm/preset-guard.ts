@@ -302,7 +302,7 @@ export function isValidPreset(data: unknown): data is Preset {
   }
 }
 
-export type UnmappedWordStatus = "mapped" | "substituted" | "unmapped";
+export type UnmappedWordStatus = "mapped" | "substituted" | "unmapped" | "enum_applied";
 export type VocabField = "style.keywords" | "rules.forbidden";
 
 export interface UnmappedWordFinding {
