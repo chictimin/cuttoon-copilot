@@ -797,7 +797,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       // #205: 강도를 함께 넘겨야 none(CTA 컷 0개)이 기존 규칙(CTA 1개)에 막히지 않는다.
       assertStoryboardRuntimeInvariants(storyboard.cuts, storyboard.cta_strength);
     } catch {
-      setSaveError("스토리보드에 문제가 있어요. 처음부터 다시 시도해주세요");
+      setSaveError("컷 구성에 문제가 있어요. 처음부터 다시 시도해주세요");
       return;
     }
 

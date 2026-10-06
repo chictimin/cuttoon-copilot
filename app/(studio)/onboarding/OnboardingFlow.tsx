@@ -367,7 +367,7 @@ function UploadStep({
         컷툰 그림체를 알려주세요
       </h1>
       <p className="text-sm text-zinc-500">
-        인스타에 올릴 컷툰 스타일이 될 거예요
+        인스타에 올릴 컷툰의 그림체가 될 거예요
       </p>
 
       {error && (
