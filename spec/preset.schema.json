@@ -44,6 +44,16 @@
           "items": { "type": "string" },
           "uniqueItems": true,
           "description": "누적 메모리용. 지금은 항상 빈 배열 — 필드만 미리 박아 마이그레이션 회피"
+        },
+        "font": {
+          "type": "object",
+          "required": ["family", "url", "kind"],
+          "additionalProperties": false,
+          "properties": {
+            "family": { "type": "string", "minLength": 1, "maxLength": 60 },
+            "url": { "type": "string", "pattern": "^https://", "maxLength": 2048 },
+            "kind": { "type": "string", "enum": ["css", "file"] }
+          }
         }
       }
     },
@@ -67,6 +77,11 @@
           "uniqueItems": true,
           "description": "사용자가 직접 입력하는 그림체 키워드. 단어 단위 태그 — enum 아님. 레퍼런스 업로드를 건너뛴 경우의 주 입력 경로이고, 업로드와 병행도 가능. 빈 배열이면 레퍼런스 추출값만 사용. forbidden·main_subjects와 동일하게 프롬프트 조립 시 미매핑 단어 위험 있음",
           "examples": [["수채화", "따뜻한", "손그림"]]
+        },
+        "keyword_hints": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "resolvePresetStyle이 만든 프롬프트용 영문 힌트. style.keywords 원본은 그대로 보존하고 여기에 저장한다 (#151·#125). 선택 필드 — 없으면 keywords 원본을 읽는다"
         },
         "line_weight": { "type": "string", "enum": ["thin", "medium", "thick"] },
         "palette": {
@@ -104,6 +119,11 @@
           "items": { "type": "string" },
           "uniqueItems": true,
           "description": "네거티브 요소. 단어 단위 태그 — enum 아님. 프롬프트 조립 시 미매핑 단어 위험 있음(정책 #15 확정, 프롬프트 경로 연결은 #125 OPEN)"
+        },
+        "forbidden_hints": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "resolvePresetStyle이 만든 프롬프트용 영문 힌트. rules.forbidden 원본은 그대로 보존하고 여기에 저장한다 (#151·#125). 선택 필드 — 없으면 forbidden 원본을 읽는다"
         },
         "cta_format": {
           "type": "string",

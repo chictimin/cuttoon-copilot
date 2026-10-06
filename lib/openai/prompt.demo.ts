@@ -14,7 +14,7 @@ import type { PresetInput } from "./extract";
 
 async function main(): Promise<void> {
   const { imageSetting, imageQuality } = await import("./image-setting");
-  const { activeMascot, ratioClause } = await import("./generate");
+  const { activeMascot, ratioClause, buildCutPrompt } = await import("./generate");
   const { buildCharacterPrompt } = await import("./extract");
 
   const checks: [string, boolean][] = [];
@@ -172,6 +172,163 @@ async function main(): Promise<void> {
     checks.push([
       "ratioClause(undefined) 문자열이 그대로 포함(값 없음)",
       prompt.includes(ratioClause(undefined)),
+    ]);
+  }
+
+  // --- 4. #151 영문 힌트 폴백 (keyword_hints ?? keywords, forbidden_hints ?? forbidden) ---
+  // 힌트가 있으면 힌트, 없으면 원본. 컷(buildCutPrompt)과 시트(buildCharacterPrompt)가
+  // 같은 규칙으로 읽는지 4경우로 본다.
+  const storyboard = { subject: "demo" };
+  const cutPrompt = (style: object, rules: object) =>
+    buildCutPrompt(storyboard, { style, rules } as Parameters<typeof buildCutPrompt>[1]);
+  const sheetPrompt = (style: Partial<PresetInput["style"]>) =>
+    buildCharacterPrompt({ ...basePreset(), style: { ...basePreset().style, ...style } });
+
+  {
+    // 둘 다 없음 — 컷은 문장 생략, 시트는 기본값.
+    const cut = cutPrompt({}, {});
+    checks.push(["힌트·원본 없음 → 컷에 'Style keywords' 없음", !cut.includes("Style keywords")]);
+    checks.push(["힌트·원본 없음 → 컷에 'Do not include' 없음", !cut.includes("Do not include")]);
+    checks.push([
+      "힌트·원본 없음 → 시트 'default comic style'",
+      sheetPrompt({ keywords: [] }).includes("Style keywords: default comic style."),
+    ]);
+  }
+  {
+    // 원본만 — 기존 동작 그대로.
+    const cut = cutPrompt({ keywords: ["귀여운", "수채화"] }, { forbidden: ["피", "흡연"] });
+    checks.push(["원본만 → 컷 원본 키워드", cut.includes("Style keywords: 귀여운, 수채화.")]);
+    checks.push(["원본만 → 컷 원본 금지어", cut.includes("Do not include: 피, 흡연.")]);
+    checks.push([
+      "원본만 → 시트 원본 키워드",
+      sheetPrompt({ keywords: ["귀여운", "수채화"] }).includes("Style keywords: 귀여운, 수채화."),
+    ]);
+  }
+  {
+    // 힌트만 — 원본이 빠진 프리셋도 힌트를 쓴다.
+    const cut = cutPrompt({ keyword_hints: ["cute", "watercolor"] }, { forbidden_hints: ["blood"] });
+    checks.push(["힌트만 → 컷 힌트 키워드", cut.includes("Style keywords: cute, watercolor.")]);
+    checks.push(["힌트만 → 컷 힌트 금지어", cut.includes("Do not include: blood.")]);
+    checks.push([
+      "힌트만 → 시트 힌트 키워드",
+      sheetPrompt({ keywords: [], keyword_hints: ["cute", "watercolor"] }).includes(
+        "Style keywords: cute, watercolor."
+      ),
+    ]);
+  }
+  {
+    // 둘 다 — 힌트가 이기고 원본 한국어는 프롬프트에 안 나간다.
+    const cut = cutPrompt(
+      { keywords: ["귀여운", "수채화"], keyword_hints: ["cute", "watercolor"] },
+      { forbidden: ["피", "흡연"], forbidden_hints: ["blood", "smoking"] }
+    );
+    checks.push(["둘 다 → 컷 힌트 키워드", cut.includes("Style keywords: cute, watercolor.")]);
+    checks.push(["둘 다 → 컷 힌트 금지어", cut.includes("Do not include: blood, smoking.")]);
+    checks.push(["둘 다 → 컷에 원본 한국어 없음", !cut.includes("귀여운") && !cut.includes("흡연")]);
+    const sheet = sheetPrompt({ keywords: ["귀여운", "수채화"], keyword_hints: ["cute", "watercolor"] });
+    checks.push(["둘 다 → 시트 힌트 키워드", sheet.includes("Style keywords: cute, watercolor.")]);
+    checks.push(["둘 다 → 시트에 원본 한국어 없음", !sheet.includes("귀여운")]);
+  }
+  {
+    // 경계: 힌트가 빈 배열이면 `??` 는 원본으로 넘어가지 않는다(계약 그대로). 컷은
+    // 문장이 빠지고 시트는 기본값이 된다 — 원본이 있어도 마찬가지.
+    const cut = cutPrompt({ keywords: ["귀여운"], keyword_hints: [] }, { forbidden: ["피"], forbidden_hints: [] });
+    checks.push(["힌트 [] + 원본 있음 → 컷 키워드 문장 생략", !cut.includes("Style keywords")]);
+    checks.push(["힌트 [] + 원본 있음 → 컷 금지어 문장 생략", !cut.includes("Do not include")]);
+    checks.push([
+      "힌트 [] + 원본 있음 → 시트 'default comic style'",
+      sheetPrompt({ keywords: ["귀여운"], keyword_hints: [] }).includes("Style keywords: default comic style."),
+    ]);
+  }
+  {
+    // 경계: 금지어 힌트의 빈·공백 원소는 원본과 같이 걸러진다.
+    const cut = cutPrompt({}, { forbidden_hints: ["blood", "  ", ""] });
+    checks.push(["금지어 힌트 공백 원소 제거", cut.includes("Do not include: blood.")]);
+  }
+
+  // --- 5. #206 소재 [브랜드] 투영 (buildCutPrompt) ---
+  // 그림 프롬프트에 대괄호 원문(브랜드)이 0회 나가야 한다. 매칭 기준은 투영 함수와 같이
+  // 대소문자·공백 무시라, 검사도 같은 정규화로 본다. 브랜드는 예시 이름이다.
+  type CutStoryboard = Parameters<typeof buildCutPrompt>[0];
+  const norm = (t: string) => t.toLowerCase().replace(/\s+/g, "");
+  const leaks = (prompt: string, raw: string) => norm(prompt).includes(norm(raw));
+  const cut1 = {
+    cut_index: 1,
+    narrative_beat: "problem",
+    characters_in_frame: [{ character_id: "protagonist", expression: "worried", pose: "stand" }],
+  };
+  const tagged = (subject: string | undefined, desc: string, subject_tags?: unknown): string =>
+    buildCutPrompt(
+      {
+        subject,
+        cast: [{ character_id: "protagonist", role: "protagonist", description: desc }],
+        cuts: [cut1],
+        subject_tags,
+      } as CutStoryboard,
+      {},
+      cut1
+    );
+
+  {
+    // 대괄호 소재 + 태그 → category
+    const p = tagged("[블루핏 앱]으로 무릎 관리", "블루핏 앱을 매일 켜는 50대 여성", [
+      { raw: "블루핏 앱", category: "운동 앱" },
+    ]);
+    checks.push(["태그 있음 → 소재 문장 category", p.includes("The story is about 운동 앱으로 무릎 관리. ")]);
+    checks.push(["태그 있음 → cast 서술 category", p.includes("Character: 운동 앱을 매일 켜는 50대 여성. ")]);
+    checks.push(["태그 있음 → 원문 0회", !leaks(p, "블루핏 앱") && !leaks(p, "블루핏")]);
+  }
+  {
+    // 대괄호 소재 + 태그 없음(옛 세션·화면 미배선) → "제품"
+    const p = tagged("[블루핏 앱]으로 무릎 관리", "블루핏 앱을 매일 켜는 50대 여성");
+    checks.push(["태그 없음 → 소재 문장 '제품'", p.includes("The story is about 제품으로 무릎 관리. ")]);
+    checks.push(["태그 없음 → cast 서술 '제품'", p.includes("Character: 제품을 매일 켜는 50대 여성. ")]);
+    checks.push(["태그 없음 → 원문 0회", !leaks(p, "블루핏")]);
+  }
+  {
+    // 대괄호 없는 소재 → 소재·서술이 원문 그대로(기존과 같은 문장)
+    const p = tagged("무릎 연골 나감", "짧은 회색 머리의 60대 어머니");
+    checks.push(["대괄호 없음 → 소재 그대로", p.includes("The story is about 무릎 연골 나감. ")]);
+    checks.push(["대괄호 없음 → 서술 그대로", p.includes("Character: 짧은 회색 머리의 60대 어머니. ")]);
+  }
+  {
+    // cast 서술의 공백·대소문자 변형도 투영된다("New Balance" ↔ "newbalance"·"NEW  BALANCE")
+    const p = tagged(
+      "[New Balance] 운동화로 출근",
+      "newbalance 운동화를 신은 30대 남성, NEW  BALANCE 로고 모자",
+      [{ raw: "New Balance", category: "운동화 브랜드" }]
+    );
+    checks.push(["변형 → 원문 0회", !leaks(p, "New Balance")]);
+    checks.push([
+      "변형 → 서술 두 곳 모두 category",
+      p.includes("Character: 운동화 브랜드 운동화를 신은 30대 남성, 운동화 브랜드 로고 모자. "),
+    ]);
+  }
+  {
+    // 태그 개수 초과(4번째)·category에 원문을 담은 경우도 "제품"으로 막힌다
+    const p = tagged("[A사] [B사] [C사] [D사] 비교", "D사 점퍼를 입은 사람", [
+      { raw: "A사", category: "A사 앱" },
+      { raw: "B사", category: "은행" },
+      { raw: "C사", category: "카드" },
+    ]);
+    checks.push(["4번째 태그·원문 category → 원문 0회", ["A사", "D사"].every((r) => !leaks(p, r))]);
+  }
+  {
+    // 형태가 어긋난 subject_tags(category 숫자) → 죽지 않고 "제품"
+    let p = "";
+    try {
+      p = tagged("[블루핏 앱] 후기", "평범한 직장인", [{ raw: "블루핏 앱", category: 3 }]);
+    } catch {
+      p = "";
+    }
+    checks.push(["잘못된 subject_tags → '제품'", p.includes("The story is about 제품 후기. ")]);
+  }
+  {
+    // 소재가 비면 기존 기본 문장
+    const p = tagged(undefined, "평범한 직장인");
+    checks.push([
+      "소재 없음 → 기본 문장",
+      p.includes("The story is about a person dealing with an everyday situation. "),
     ]);
   }
 

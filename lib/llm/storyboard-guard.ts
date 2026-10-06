@@ -17,6 +17,7 @@
 
 import { isValidCtaId } from "./cta-presets";
 import type { CtaStrength } from "./narrative-flow";
+import type { SubjectTag } from "./subject-tags";
 
 export interface CastMember {
   character_id: string;
@@ -46,6 +47,8 @@ export interface Storyboard {
   cuts: StoryboardCut[];
   /** 이 컷툰 한 편의 CTA 강도 (issue #205). 없으면 clear로 해석. */
   cta_strength?: CtaStrength;
+  /** 소재 [태그] 저장 매핑 (issue #206 S1). 없으면 기존 세션 그대로 유효. */
+  subject_tags?: SubjectTag[];
 }
 
 export class StoryboardValidationError extends Error {}

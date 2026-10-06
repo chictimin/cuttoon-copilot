@@ -10,20 +10,29 @@
     - [3.3.1. Preset > assets > style_refs > style_refs items](#assets_style_refs_items)
   - [3.4. Property `Preset > assets > reference_asset_ids`](#assets_reference_asset_ids)
     - [3.4.1. Preset > assets > reference_asset_ids > reference_asset_ids items](#assets_reference_asset_ids_items)
+  - [3.5. Property `Preset > assets > font`](#assets_font)
+    - [3.5.1. Property `Preset > assets > font > family`](#assets_font_family)
+    - [3.5.2. Property `Preset > assets > font > url`](#assets_font_url)
+    - [3.5.3. Property `Preset > assets > font > kind`](#assets_font_kind)
 - [4. Property `Preset > style`](#style)
   - [4.1. Property `Preset > style > keywords`](#style_keywords)
     - [4.1.1. Preset > style > keywords > keywords items](#style_keywords_items)
-  - [4.2. Property `Preset > style > line_weight`](#style_line_weight)
-  - [4.3. Property `Preset > style > palette`](#style_palette)
-    - [4.3.1. Preset > style > palette > palette items](#style_palette_items)
-  - [4.4. Property `Preset > style > saturation`](#style_saturation)
-  - [4.5. Property `Preset > style > character_ratio`](#style_character_ratio)
-  - [4.6. Property `Preset > style > background_density`](#style_background_density)
-  - [4.7. Property `Preset > style > bubble_style`](#style_bubble_style)
+  - [4.2. Property `Preset > style > keyword_hints`](#style_keyword_hints)
+    - [4.2.1. Preset > style > keyword_hints > keyword_hints items](#style_keyword_hints_items)
+  - [4.3. Property `Preset > style > line_weight`](#style_line_weight)
+  - [4.4. Property `Preset > style > palette`](#style_palette)
+    - [4.4.1. Preset > style > palette > palette items](#style_palette_items)
+  - [4.5. Property `Preset > style > saturation`](#style_saturation)
+  - [4.6. Property `Preset > style > character_ratio`](#style_character_ratio)
+  - [4.7. Property `Preset > style > background_density`](#style_background_density)
+  - [4.8. Property `Preset > style > bubble_style`](#style_bubble_style)
 - [5. Property `Preset > rules`](#rules)
   - [5.1. Property `Preset > rules > forbidden`](#rules_forbidden)
     - [5.1.1. Preset > rules > forbidden > forbidden items](#rules_forbidden_items)
-  - [5.2. Property `Preset > rules > cta_format`](#rules_cta_format)
+  - [5.2. Property `Preset > rules > forbidden_hints`](#rules_forbidden_hints)
+    - [5.2.1. Preset > rules > forbidden_hints > forbidden_hints items](#rules_forbidden_hints_items)
+  - [5.3. Property `Preset > rules > cta_format`](#rules_cta_format)
+  - [5.4. Property `Preset > rules > cta_strength`](#rules_cta_strength)
 - [6. Property `Preset > context`](#context)
   - [6.1. Property `Preset > context > industry`](#context_industry)
     - [6.1.1. Preset > context > industry > industry items](#context_industry_items)
@@ -98,6 +107,7 @@ Must be one of:
 | - [character_pool](#assets_character_pool )           | No      | array of string | No         | -          | 캐릭터 풀 확장용(issue #113 결정, #123). 지금은 항상 빈 배열 — 필드만 미리 박아 마이그레이션 회피(reference_asset_ids 와 같은 패턴). 프로젝트 설정 페이지에서 마스코트 외 인물을 추가할 수 있게 되면 여기가 채워진다. required 에 넣지 않는다 — 이미 저장된 프리셋이 깨진다                                                                                       |
 | + [style_refs](#assets_style_refs )                   | No      | array of string | No         | -          | 그림체 레퍼런스 업로드 애셋. 온보딩에서 스킵 가능 — 빈 배열이면 기본 스타일 적용                                                                                                                                                                                                                          |
 | + [reference_asset_ids](#assets_reference_asset_ids ) | No      | array of string | No         | -          | 누적 메모리용. 지금은 항상 빈 배열 — 필드만 미리 박아 마이그레이션 회피                                                                                                                                                                                                                               |
+| - [font](#assets_font )                               | No      | object          | No         | -          | -                                                                                                                                                                                                                                                                        |
 
 ### <a name="assets_character_sheet"></a>3.1. Property `Preset > assets > character_sheet`
 
@@ -204,6 +214,55 @@ Must be one of:
 | **Type**     | `string` |
 | **Required** | No       |
 
+### <a name="assets_font"></a>3.5. Property `Preset > assets > font`
+
+|                           |             |
+| ------------------------- | ----------- |
+| **Type**                  | `object`    |
+| **Required**              | No          |
+| **Additional properties** | Not allowed |
+
+| Property                         | Pattern | Type             | Deprecated | Definition | Title/Description |
+| -------------------------------- | ------- | ---------------- | ---------- | ---------- | ----------------- |
+| + [family](#assets_font_family ) | No      | string           | No         | -          | -                 |
+| + [url](#assets_font_url )       | No      | string           | No         | -          | -                 |
+| + [kind](#assets_font_kind )     | No      | enum (of string) | No         | -          | -                 |
+
+#### <a name="assets_font_family"></a>3.5.1. Property `Preset > assets > font > family`
+
+|              |          |
+| ------------ | -------- |
+| **Type**     | `string` |
+| **Required** | Yes      |
+
+| Restrictions   |    |
+| -------------- | -- |
+| **Min length** | 1  |
+| **Max length** | 60 |
+
+#### <a name="assets_font_url"></a>3.5.2. Property `Preset > assets > font > url`
+
+|              |          |
+| ------------ | -------- |
+| **Type**     | `string` |
+| **Required** | Yes      |
+
+| Restrictions                      |                                                                       |
+| --------------------------------- | --------------------------------------------------------------------- |
+| **Max length**                    | 2048                                                                  |
+| **Must match regular expression** | ```^https://``` [Test](https://regex101.com/?regex=%5Ehttps%3A%2F%2F) |
+
+#### <a name="assets_font_kind"></a>3.5.3. Property `Preset > assets > font > kind`
+
+|              |                    |
+| ------------ | ------------------ |
+| **Type**     | `enum (of string)` |
+| **Required** | Yes                |
+
+Must be one of:
+* "css"
+* "file"
+
 ## <a name="style"></a>4. Property `Preset > style`
 
 |                           |             |
@@ -217,6 +276,7 @@ Must be one of:
 | Property                                           | Pattern | Type             | Deprecated | Definition | Title/Description                                                                                                                                             |
 | -------------------------------------------------- | ------- | ---------------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | + [keywords](#style_keywords )                     | No      | array of string  | No         | -          | 사용자가 직접 입력하는 그림체 키워드. 단어 단위 태그 — enum 아님. 레퍼런스 업로드를 건너뛴 경우의 주 입력 경로이고, 업로드와 병행도 가능. 빈 배열이면 레퍼런스 추출값만 사용. forbidden·main_subjects와 동일하게 프롬프트 조립 시 미매핑 단어 위험 있음 |
+| - [keyword_hints](#style_keyword_hints )           | No      | array of string  | No         | -          | resolvePresetStyle이 만든 프롬프트용 영문 힌트. style.keywords 원본은 그대로 보존하고 여기에 저장한다 (#151·#125). 선택 필드 — 없으면 keywords 원본을 읽는다                                            |
 | + [line_weight](#style_line_weight )               | No      | enum (of string) | No         | -          | -                                                                                                                                                             |
 | + [palette](#style_palette )                       | No      | array of string  | No         | -          | -                                                                                                                                                             |
 | + [saturation](#style_saturation )                 | No      | enum (of string) | No         | -          | -                                                                                                                                                             |
@@ -262,7 +322,35 @@ Must be one of:
 | **Type**     | `string` |
 | **Required** | No       |
 
-### <a name="style_line_weight"></a>4.2. Property `Preset > style > line_weight`
+### <a name="style_keyword_hints"></a>4.2. Property `Preset > style > keyword_hints`
+
+|              |                   |
+| ------------ | ----------------- |
+| **Type**     | `array of string` |
+| **Required** | No                |
+
+**Description:** resolvePresetStyle이 만든 프롬프트용 영문 힌트. style.keywords 원본은 그대로 보존하고 여기에 저장한다 (#151·#125). 선택 필드 — 없으면 keywords 원본을 읽는다
+
+|                      | Array restrictions |
+| -------------------- | ------------------ |
+| **Min items**        | N/A                |
+| **Max items**        | N/A                |
+| **Items unicity**    | False              |
+| **Additional items** | False              |
+| **Tuple validation** | See below          |
+
+| Each item of this array must be                   | Description |
+| ------------------------------------------------- | ----------- |
+| [keyword_hints items](#style_keyword_hints_items) | -           |
+
+#### <a name="style_keyword_hints_items"></a>4.2.1. Preset > style > keyword_hints > keyword_hints items
+
+|              |          |
+| ------------ | -------- |
+| **Type**     | `string` |
+| **Required** | No       |
+
+### <a name="style_line_weight"></a>4.3. Property `Preset > style > line_weight`
 
 |              |                    |
 | ------------ | ------------------ |
@@ -274,7 +362,7 @@ Must be one of:
 * "medium"
 * "thick"
 
-### <a name="style_palette"></a>4.3. Property `Preset > style > palette`
+### <a name="style_palette"></a>4.4. Property `Preset > style > palette`
 
 |              |                   |
 | ------------ | ----------------- |
@@ -293,7 +381,7 @@ Must be one of:
 | ------------------------------------- | ----------- |
 | [palette items](#style_palette_items) | -           |
 
-#### <a name="style_palette_items"></a>4.3.1. Preset > style > palette > palette items
+#### <a name="style_palette_items"></a>4.4.1. Preset > style > palette > palette items
 
 |              |          |
 | ------------ | -------- |
@@ -304,7 +392,7 @@ Must be one of:
 | --------------------------------- | ------------------------------------------------------------------------------------------- |
 | **Must match regular expression** | ```^#[0-9A-Fa-f]{6}$``` [Test](https://regex101.com/?regex=%5E%23%5B0-9A-Fa-f%5D%7B6%7D%24) |
 
-### <a name="style_saturation"></a>4.4. Property `Preset > style > saturation`
+### <a name="style_saturation"></a>4.5. Property `Preset > style > saturation`
 
 |              |                    |
 | ------------ | ------------------ |
@@ -316,7 +404,7 @@ Must be one of:
 * "vivid"
 * "muted"
 
-### <a name="style_character_ratio"></a>4.5. Property `Preset > style > character_ratio`
+### <a name="style_character_ratio"></a>4.6. Property `Preset > style > character_ratio`
 
 |              |                    |
 | ------------ | ------------------ |
@@ -331,7 +419,7 @@ Must be one of:
 * "3head"
 * "realistic"
 
-### <a name="style_background_density"></a>4.6. Property `Preset > style > background_density`
+### <a name="style_background_density"></a>4.7. Property `Preset > style > background_density`
 
 |              |                    |
 | ------------ | ------------------ |
@@ -346,7 +434,7 @@ Must be one of:
 * "medium"
 * "high"
 
-### <a name="style_bubble_style"></a>4.7. Property `Preset > style > bubble_style`
+### <a name="style_bubble_style"></a>4.8. Property `Preset > style > bubble_style`
 
 |              |                    |
 | ------------ | ------------------ |
@@ -370,10 +458,12 @@ Must be one of:
 
 **Description:** 프로젝트 전체에 적용되는 정책. 컷툰마다 달라지는 값은 여기 두지 않는다 — 등장 캐릭터 명단·역할은 세션에서 정하므로 storyboard 소유
 
-| Property                           | Pattern | Type            | Deprecated | Definition | Title/Description                                                                                                                                                                                                                                                                                |
-| ---------------------------------- | ------- | --------------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| + [forbidden](#rules_forbidden )   | No      | array of string | No         | -          | 네거티브 요소. 단어 단위 태그 — enum 아님. 프롬프트 조립 시 미매핑 단어 위험 있음(정책 #15 확정, 프롬프트 경로 연결은 #125 OPEN)                                                                                                                                                                                                            |
-| + [cta_format](#rules_cta_format ) | No      | string          | No         | -          | 마지막 컷 CTA의 프로젝트 기본값. 세션에서 다른 값으로 덮어쓸 수 있고, 덮어쓰지 않으면 이 값이 주입된다. spec/data/cta_presets.json에 정의된 preset 중 하나의 id를 저장한다 (예: 'consult_request'). 자유 문자열 타입은 유지하되(스키마 레벨 enum 아님), 값은 항상 cta_presets.json의 presets[].id 중 하나와 일치해야 한다 — presets 목록이 계속 늘어날 수 있어 JSON Schema enum으로 고정하지 않음 (issue #4) |
+| Property                                     | Pattern | Type             | Deprecated | Definition | Title/Description                                                                                                                                                                                                                                                                                |
+| -------------------------------------------- | ------- | ---------------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| + [forbidden](#rules_forbidden )             | No      | array of string  | No         | -          | 네거티브 요소. 단어 단위 태그 — enum 아님. 프롬프트 조립 시 미매핑 단어 위험 있음(정책 #15 확정, 프롬프트 경로 연결은 #125 OPEN)                                                                                                                                                                                                            |
+| - [forbidden_hints](#rules_forbidden_hints ) | No      | array of string  | No         | -          | resolvePresetStyle이 만든 프롬프트용 영문 힌트. rules.forbidden 원본은 그대로 보존하고 여기에 저장한다 (#151·#125). 선택 필드 — 없으면 forbidden 원본을 읽는다                                                                                                                                                                             |
+| + [cta_format](#rules_cta_format )           | No      | string           | No         | -          | 마지막 컷 CTA의 프로젝트 기본값. 세션에서 다른 값으로 덮어쓸 수 있고, 덮어쓰지 않으면 이 값이 주입된다. spec/data/cta_presets.json에 정의된 preset 중 하나의 id를 저장한다 (예: 'consult_request'). 자유 문자열 타입은 유지하되(스키마 레벨 enum 아님), 값은 항상 cta_presets.json의 presets[].id 중 하나와 일치해야 한다 — presets 목록이 계속 늘어날 수 있어 JSON Schema enum으로 고정하지 않음 (issue #4) |
+| - [cta_strength](#rules_cta_strength )       | No      | enum (of string) | No         | -          | 프로젝트의 CTA 강도 기본값 (issue #205). none(이야기만)·soft(은근하게)·clear(확실하게). required에 넣지 않는다 — 없으면 clear로 해석해 기존 프리셋이 그대로 유효하다                                                                                                                                                                             |
 
 ### <a name="rules_forbidden"></a>5.1. Property `Preset > rules > forbidden`
 
@@ -403,7 +493,35 @@ Must be one of:
 | **Type**     | `string` |
 | **Required** | No       |
 
-### <a name="rules_cta_format"></a>5.2. Property `Preset > rules > cta_format`
+### <a name="rules_forbidden_hints"></a>5.2. Property `Preset > rules > forbidden_hints`
+
+|              |                   |
+| ------------ | ----------------- |
+| **Type**     | `array of string` |
+| **Required** | No                |
+
+**Description:** resolvePresetStyle이 만든 프롬프트용 영문 힌트. rules.forbidden 원본은 그대로 보존하고 여기에 저장한다 (#151·#125). 선택 필드 — 없으면 forbidden 원본을 읽는다
+
+|                      | Array restrictions |
+| -------------------- | ------------------ |
+| **Min items**        | N/A                |
+| **Max items**        | N/A                |
+| **Items unicity**    | False              |
+| **Additional items** | False              |
+| **Tuple validation** | See below          |
+
+| Each item of this array must be                       | Description |
+| ----------------------------------------------------- | ----------- |
+| [forbidden_hints items](#rules_forbidden_hints_items) | -           |
+
+#### <a name="rules_forbidden_hints_items"></a>5.2.1. Preset > rules > forbidden_hints > forbidden_hints items
+
+|              |          |
+| ------------ | -------- |
+| **Type**     | `string` |
+| **Required** | No       |
+
+### <a name="rules_cta_format"></a>5.3. Property `Preset > rules > cta_format`
 
 |              |          |
 | ------------ | -------- |
@@ -415,6 +533,20 @@ Must be one of:
 | Restrictions   |   |
 | -------------- | - |
 | **Min length** | 1 |
+
+### <a name="rules_cta_strength"></a>5.4. Property `Preset > rules > cta_strength`
+
+|              |                    |
+| ------------ | ------------------ |
+| **Type**     | `enum (of string)` |
+| **Required** | No                 |
+
+**Description:** 프로젝트의 CTA 강도 기본값 (issue #205). none(이야기만)·soft(은근하게)·clear(확실하게). required에 넣지 않는다 — 없으면 clear로 해석해 기존 프리셋이 그대로 유효하다
+
+Must be one of:
+* "none"
+* "soft"
+* "clear"
 
 ## <a name="context"></a>6. Property `Preset > context`
 
@@ -657,4 +789,4 @@ Must be one of:
 | **Min length** | 1 |
 
 ----------------------------------------------------------------------------------------------------------------------------
-Generated using [json-schema-for-humans](https://github.com/coveooss/json-schema-for-humans) on 2026-10-01 at 12:29:45 +0900
+Generated using [json-schema-for-humans](https://github.com/coveooss/json-schema-for-humans) on 2026-10-06 at 11:19:20 +0900

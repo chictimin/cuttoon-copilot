@@ -15,6 +15,7 @@ import type { ImageProvider, GeneratedImageResult, ReservedZone } from './provid
 import { readAsset, uploadAsset } from '../asset-store'
 import { imageQuality, imageSetting, logImageSetting, type ImageSetting } from './image-setting'
 import { generateWithComfyui } from './comfyui'
+import { projectForModel, type SubjectTag } from '../llm/subject-tags'
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -71,6 +72,23 @@ interface MinimalStoryboard {
   subject?: string
   cast?: MinimalCastMember[]
   cuts?: MinimalCut[]
+  // #206: 소재 [태그]의 category 매핑. 순서가 태그 식별자다. 없으면(옛 세션·화면 미배선)
+  // projectForModel 이 태그를 전부 "제품"으로 바꾼다 — 원문은 어느 쪽이든 안 나간다.
+  subject_tags?: SubjectTag[]
+}
+
+// #206: subject_tags 형태 검사. 대사 쪽(app/api/session/captions/route.ts parseSubjectTags)과
+// 같은 규칙이다 — 하나라도 어긋나면 통째로 undefined(= 전부 "제품"). category 가 문자열이
+// 아닌 값이 projectForModel 까지 가면 정리 단계에서 죽으므로 여기서 거른다.
+function subjectTagsOf(value: unknown): SubjectTag[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) return undefined
+    const record = item as Record<string, unknown>
+    if (typeof record.raw !== 'string') return undefined
+    if (record.category !== undefined && typeof record.category !== 'string') return undefined
+  }
+  return value as SubjectTag[]
 }
 interface MinimalPreset {
   style?: {
@@ -83,6 +101,9 @@ interface MinimalPreset {
     // 쓰고 있었다 — 시트와 컷이 서로 다른 스타일 지시를 받는 상태였다.
     palette?: string[]
     keywords?: string[]
+    // #151: keywords 를 어휘 사전으로 바꾼 영문 힌트(resolvePresetStyle 결과). 있으면
+    // 프롬프트에는 이쪽을 쓴다. 원본 keywords 는 그대로 저장돼 있다.
+    keyword_hints?: string[]
     // bubble_style 은 읽지 않는다. 말풍선은 생성 이미지에 넣지 않고 나중에
     // 합성하므로(PRD 6절) B③ 쪽 값이다.
   }
@@ -90,6 +111,8 @@ interface MinimalPreset {
   // 버려지고 있었다. 프롬프트 조립은 B① 몫이라(PRD 5절) 여기서 넣는다.
   rules?: {
     forbidden?: string[]
+    // #151: forbidden 의 영문 힌트. keyword_hints 와 같은 규칙으로 읽는다.
+    forbidden_hints?: string[]
   }
   // 온보딩에서 사용자가 직접 고른 값이다(골든 패스 2·3단계). 장면 연출에 쓴다 —
   // 50대 부모가 등장하는 헬스케어 장면과 20대 취준생 IT 장면은 배경·소품이 다르다.
@@ -191,7 +214,9 @@ export function ratioClause(value?: string): string {
 
 // 대사는 텍스트 레이어로 나중에 얹는다(PRD 6절) — 프롬프트에 caption 텍스트를
 // 절대 포함하지 않는다. reserved_zone만 전달해 자리를 비워두게 한다.
-function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cut?: MinimalCut): string {
+// export 하는 이유: prompt.demo.ts 가 키워드·금지어 힌트 폴백(#151)과 소재 [브랜드]
+// 투영(#206)을 실제 조립 문자열로 확인한다. 유료 호출 없이 순수하게 문자열만 만든다.
+export function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cut?: MinimalCut): string {
   const s = preset.style
   // character_ratio 만 라벨이 뒤에 붙는 형태였다 — `${값} body proportions`. 힌트
   // 서술문은 그 자체로 완결된 구라서 뒤에 라벨을 또 붙이면 문장이 깨진다.
@@ -214,6 +239,14 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   const styleStr = s
     ? `${s.line_weight ?? 'medium'} line weight, ${s.saturation ?? 'vivid'} colors, ${s.background_density ?? 'low'} background detail, ${ratio}`
     : 'default webtoon/comic style'
+
+  // #206: 소재 [브랜드] 원문이 그림 프롬프트에 새지 않게, 사람이 쓴 텍스트(소재 문장·
+  // cast 서술)는 대사 쪽과 같은 category 버전으로 바꿔 넣는다. 서버가 subject 를 스스로
+  // 다시 파싱하므로 subject_tags 가 없거나 어긋나도 원문은 "제품"으로 바뀐다. 대괄호가
+  // 없는 소재면 텍스트가 그대로다(남은 괄호 기호만 지운다).
+  const subject = typeof storyboard.subject === 'string' ? storyboard.subject : ''
+  const subjectTags = subjectTagsOf(storyboard.subject_tags)
+  const project = (text: unknown) => projectForModel(String(text), subject, subjectTags)
 
   const castById = new Map(
     (storyboard.cast ?? []).filter((m) => m.character_id).map((m) => [m.character_id!, m])
@@ -255,14 +288,17 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   // 값이 없으면 문장을 넣지 않는다. 시트 쪽은 비었을 때 "designer's choice" 를
   // 넣는데, 컷에서는 그 채움말이 오히려 지시로 읽혀 시트에서 정해진 색을 흔든다.
   if (preset.style?.palette?.length) parts.push(`Color palette: ${preset.style.palette.join(', ')}.`)
-  if (preset.style?.keywords?.length) parts.push(`Style keywords: ${preset.style.keywords.join(', ')}.`)
+  // #151: 영문 힌트가 있으면 힌트, 없으면 원본. 힌트 필드가 없는 기존 프로젝트는
+  // 지금과 같은 문장이 나간다. extract.ts 시트 쪽도 같은 규칙이다.
+  const keywords = preset.style?.keyword_hints ?? preset.style?.keywords
+  if (keywords?.length) parts.push(`Style keywords: ${keywords.join(', ')}.`)
 
   parts.push(
     // "Subject: 무릎 연골 나감." 처럼 명사구만 넣으면 모델이 소재를 표정으로만
     // 처리한다 — codex 검증에서 4/4 가 "걱정하는 얼굴" 이고 무릎은 어디에도 없었다.
     // 소재를 몸·행동·주변으로 보이게 하라고 지시한다. 다만 프레이밍과 싸우면
     // 안 된다(closeup 은 어깨 위라 무릎이 물리적으로 프레임 밖이다).
-    `The story is about ${storyboard.subject ?? 'a person dealing with an everyday situation'}. ` +
+    `The story is about ${storyboard.subject == null ? 'a person dealing with an everyday situation' : project(subject)}. ` +
       `Make that situation visible in the character's body, gesture and surroundings ` +
       `as far as the framing allows — not just as a mood on the face. ` +
       // "구체적으로 보이게 하라" 가 다른 제약과 부딪칠 때마다 새 형태로 터졌다. 세 번
@@ -344,7 +380,7 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
       const desc = c.character_id ? castById.get(c.character_id)?.description : undefined
       const traits = [hint('expression', c.expression), hint('pose', c.pose)].filter(Boolean).join(', ')
       // 서술을 앞세운다 — 나이·성별 같은 정체성이 표정·포즈보다 먼저 고정돼야 한다.
-      parts.push(desc ? `Character: ${desc}. ${traits}.` : `Character: ${traits || 'neutral expression, standing'}.`)
+      parts.push(desc ? `Character: ${project(desc)}. ${traits}.` : `Character: ${traits || 'neutral expression, standing'}.`)
     }
 
     if (cut.reserved_zone) parts.push(reservedZoneHint(cut.reserved_zone))
@@ -352,7 +388,7 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
 
   // 금지 요소는 마지막 제약 구간에 넣는다. 사용자가 적은 자유 단어라(enum 아님)
   // 장면 서술 사이에 끼우면 소재나 cast 서술과 다투기 쉽다.
-  const forbidden = preset.rules?.forbidden?.filter((w) => w.trim())
+  const forbidden = (preset.rules?.forbidden_hints ?? preset.rules?.forbidden)?.filter((w) => w.trim())
   if (forbidden?.length) parts.push(`Do not include: ${forbidden.join(', ')}.`)
 
   parts.push('No speech bubbles. No text or lettering anywhere in the image — captions are composited separately afterward.')

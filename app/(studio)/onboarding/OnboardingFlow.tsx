@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { assertValidPreset, type Preset } from "@/lib/llm/preset-guard";
 import { analyzeStyle, type StyleAnalysisResult } from "./style-analysis";
 import DetailsStep, { type DetailsFormValue } from "./DetailsStep";
+import MascotStep, { type MascotValue } from "./MascotStep";
 
-type Step = "upload" | "analyzing" | "result" | "details" | "confirmed";
+type Step = "upload" | "analyzing" | "result" | "details" | "mascot" | "confirmed";
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png"];
 const MAX_FILES = 5;
@@ -46,6 +47,8 @@ export default function OnboardingFlow() {
   const [isDragging, setIsDragging] = useState(false);
   const [confirmedName, setConfirmedName] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // #150: 상세 정보를 확정한 뒤 마스코트 단계를 거쳐 시트를 만든다 — 그 사이 값을 든다.
+  const [pendingDetails, setPendingDetails] = useState<DetailsFormValue | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function runAnalysis(files: File[]) {
@@ -90,7 +93,20 @@ export default function OnboardingFlow() {
     setStep("details");
   }
 
-  async function handleConfirmDetails(details: DetailsFormValue) {
+  function handleConfirmDetails(details: DetailsFormValue) {
+    setError(null);
+    setPendingDetails(details);
+    setStep("mascot");
+  }
+
+  // #150 C6-ui: 마스코트를 확정(또는 건너뜀)하면 시트 생성·프리셋 저장으로 간다.
+  // 건너뛰면 mascot 필드를 아예 빼고 보낸다(빈 문자열 금지, #200 계약 2절).
+  async function handleConfirmMascot(mascot: MascotValue | null) {
+    if (!pendingDetails) return;
+    await createProject(pendingDetails, mascot);
+  }
+
+  async function createProject(details: DetailsFormValue, mascot: MascotValue | null) {
     if (!analysis) return;
 
     setError(null);
@@ -116,6 +132,7 @@ export default function OnboardingFlow() {
               life_stage: details.lifeStage,
               main_subjects: details.mainSubjects,
             },
+            ...(mascot ? { mascot } : {}),
           },
         }),
       });
@@ -154,6 +171,7 @@ export default function OnboardingFlow() {
         life_stage: details.lifeStage,
         main_subjects: details.mainSubjects,
       },
+      ...(mascot ? { mascot } : {}),
     };
 
     // 스키마와 실제로 맞는지 마지막에 한 번 더 확인 (조립 실수 방지)
@@ -213,6 +231,16 @@ export default function OnboardingFlow() {
       )}
       {step === "details" && (
         <DetailsStep onConfirm={handleConfirmDetails} error={error} saving={saving} />
+      )}
+      {step === "mascot" && pendingDetails && (
+        <MascotStep
+          industry={pendingDetails.industry}
+          interests={pendingDetails.interests}
+          keywords={parseTags(keywordsText)}
+          saving={saving}
+          error={error}
+          onConfirm={(mascot) => void handleConfirmMascot(mascot)}
+        />
       )}
       {step === "confirmed" && (
         <div className="flex flex-col items-center gap-4 text-center">

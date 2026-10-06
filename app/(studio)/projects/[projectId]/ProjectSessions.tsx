@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { resolveImageUrl } from "../../asset-url";
 
 // issue #136: 만든 컷툰(세션)을 다시 볼 경로가 DB·API·화면 어디에도 없었다.
 // DB·API는 PR #137에서 채워졌다 — 이 화면은 GET /api/session?projectId=를 쓴다.
@@ -68,18 +69,13 @@ export default function ProjectSessions({ projectId }: { projectId: string }) {
         setPhase("ready");
 
         // 썸네일은 asset:// 참조라 리졸브해야 <img>로 그릴 수 있다(#82와 같은 이유).
-        // #82 이전 mock 시절 세션은 thumbnail이 이미 data: URI일 수 있어(레거시
-        // 호환, EditorFlow.resolveImageUrl과 같은 분기) 그 경우 리졸버를 거치지
-        // 않고 그대로 쓴다 — asset:// 형식이 아닌 값을 보내면 리졸버가 400을 준다.
+        // 레거시 data: URI 분기는 공용 유틸이 처리한다. 목록이라 한 장이 실패해도
+        // 나머지는 그려야 하므로 실패는 null로 버린다.
         const entries = await Promise.all(
           loadedSessions.map(async (s) => {
             if (!s.thumbnail) return null;
-            if (!s.thumbnail.startsWith("asset://")) return [s.sessionId, s.thumbnail] as const;
             try {
-              const res = await fetch(`/api/session/asset-url?uri=${encodeURIComponent(s.thumbnail)}`);
-              if (!res.ok) return null;
-              const { url } = (await res.json()) as { url: string };
-              return [s.sessionId, url] as const;
+              return [s.sessionId, await resolveImageUrl(s.thumbnail)] as const;
             } catch {
               return null;
             }

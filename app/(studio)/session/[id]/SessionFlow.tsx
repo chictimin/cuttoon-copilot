@@ -26,6 +26,7 @@ import {
   FLOW_OPTIONS,
   type BrainstormAnswers,
 } from "./storyboard-assembly";
+import { resolveImageUrl } from "../../asset-url";
 import { CTA_STRENGTHS } from "../../cta-strength-options";
 import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
 // 순수 헬퍼라 클라이언트에서 값으로 import해도 된다(서버 모듈·DB import 없음, #207).
@@ -84,6 +85,13 @@ function normalizeTurns(turns: BrainstormTurn[]): BrainstormTurn[] {
   });
 }
 
+// #150: 대사 요청의 supporting_id — 조립된 cast의 조연 character_id(마스코트면
+// mascot.label). 조연이 없으면 키를 빼 서버가 "supporting"으로 처리하게 둔다.
+function supportingIdField(storyboard: Storyboard): { supporting_id?: string } {
+  const supporting = storyboard.cast.find((member) => member.role === "supporting");
+  return supporting ? { supporting_id: supporting.character_id } : {};
+}
+
 const FALLBACK_QUESTION: Record<"protagonist" | "supporting", string> = {
   protagonist: PROTAGONIST_QUESTION,
   supporting: SUPPORTING_QUESTION,
@@ -128,21 +136,13 @@ function promptForCut(subject: string, cut: Cut): string {
 }
 
 // issue #143: 저장된 세션 URL로 재진입해도 완성된 4컷이 복원되지 않던 문제.
-// EditorFlow.resolveImageUrl과 같은 이유로 asset://를 공개 URL로 바꿔야
-// <img>에 그릴 수 있다 — 중복 구현은 #144에서 공용 유틸로 정리하기로 함.
-async function resolveSessionAssetUrl(uri: string): Promise<string> {
-  const res = await fetch(`/api/session/asset-url?uri=${encodeURIComponent(uri)}`);
-  if (!res.ok) throw new Error("이미지 URL을 가져오지 못했습니다");
-  const { url } = (await res.json()) as { url: string };
-  return url;
-}
-
+// asset://를 공개 URL로 바꿔야 <img>에 그릴 수 있다(공용 유틸: ../../asset-url.ts, #144).
 async function resolveCutImages(cuts: Cut[]): Promise<Record<number, string>> {
   const entries = await Promise.all(
     cuts.map(async (cut) => {
       if (!cut.generated_image) return null;
       try {
-        return [cut.cut_index, await resolveSessionAssetUrl(cut.generated_image)] as const;
+        return [cut.cut_index, await resolveImageUrl(cut.generated_image)] as const;
       } catch {
         return null;
       }
@@ -345,7 +345,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subject: trimmed,
-          context: { industry: preset?.context.industry ?? [] },
+          // #150: 마스코트가 있으면 서버가 조연 첫 후보로 넣는다(없으면 키 생략).
+          context: {
+            industry: preset?.context.industry ?? [],
+            ...(preset?.mascot ? { mascot: preset.mascot } : {}),
+          },
         }),
       });
       if (!res.ok) {
@@ -417,7 +421,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     };
 
     const timer = setTimeout(() => {
-      setStoryboard(assembleStoryboard(subject, full, preset.style.palette, undefined, sessionCta));
+      // #150: 마스코트는 4번째 인자로만 넘긴다 — 조연 답변이 마스코트 후보면
+      // cast의 조연 character_id가 mascot.label이 된다. 5번째는 #205 CTA.
+      setStoryboard(
+        assembleStoryboard(subject, full, preset.style.palette, preset.mascot, sessionCta)
+      );
       // F2: 조립된 기본 대사를 먼저 보여주고 이미지 호출 전에 생성 대사로 바꾼다.
       setStep("captions");
     }, 600);
@@ -454,6 +462,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             interests: preset.context.interests,
             cta_format: preset.rules.cta_format,
           },
+          ...supportingIdField(storyboard),
           // #205: 조립에 쓴 것과 같은 cta. 빠지면 서버가 clear로 보고 none 4컷에 400을 낸다.
           cta: sessionCta,
         }),
@@ -550,6 +559,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             interests: preset.context.interests,
             cta_format: preset.rules.cta_format,
           },
+          ...supportingIdField(storyboard),
           cta: sessionCta,
           cut_index: cutIndex,
         }),
