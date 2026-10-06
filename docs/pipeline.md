@@ -163,6 +163,8 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 `spec/vocabulary.json` 의 `prompt_hints` 를 쓰는 자리가 2·5·6·7번이다. 힌트가 없는 값은 토큰이 그대로 나가므로, 새 enum 값이 생기면 힌트도 같이 넣어야 한다 — `npm run spec:sync-check` 가 커버리지를 검사한다.
 
+빈 힌트 배열(`[]`)은 원본으로 폴백하지 않는다 — `keyword_hints ?? keywords`라서 빈 배열이면 해당 문장이 생략된다(#234).
+
 **`spec/vocabulary.json` 소비 방식 (컷 프롬프트)**
 
 `generate.ts` 가 모듈 로드 때 한 번 import 한다(`generate.ts:13`) — 요청마다 파일을 다시 읽지 않는다. 조회는 `prompt_hints` 만 쓰고, 최상위 enum 값 목록(`expression` 등)은 읽지 않는다. 표의 "조각"은 위 `buildCutPrompt` 표의 번호다.
