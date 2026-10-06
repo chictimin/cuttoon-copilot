@@ -201,5 +201,5 @@ if (hasError || hintError) {
   }
   process.exit(1);
 } else {
-  console.log("\n모든 값 목록이 vocabulary.json과 일치하고, prompt_hints 커버리지도 채워져 있습니다.");
+  console.log("\n어휘·힌트 동기화 — 저장값 검증 아님");
 }
