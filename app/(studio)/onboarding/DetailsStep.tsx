@@ -298,7 +298,7 @@ export default function DetailsStep({
       </div>
 
       <div className="flex flex-col gap-2">
-        <p className="text-sm font-medium text-zinc-700">마지막 컷 CTA 기본값</p>
+        <p className="text-sm font-medium text-zinc-700">마지막 컷 안내 기본값</p>
         <div className="flex flex-wrap gap-2">
           {ctaCandidates.map((preset) => (
             <button
@@ -396,7 +396,7 @@ export default function DetailsStep({
         disabled={saving || fontChecking}
         className="self-start rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
       >
-        {saving ? "저장 중…" : "프리셋 확정"}
+        {saving ? "저장 중…" : "프로젝트 설정 완료"}
       </button>
     </div>
   );
