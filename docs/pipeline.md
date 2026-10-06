@@ -161,7 +161,11 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 | 9 | `rules.forbidden` → `Do not include:` | 사용자가 적은 금지 요소 |
 | 10 | 말풍선·글자 억제 | P0 게이트 2 |
 
+4번 소재 문장과 7번 `cast[].description`은 `projectForModel(text, subject, subject_tags)`로 투영해 넣는다 — 소재의 `[브랜드]` 원문 대신 category가 들어가고, `subject_tags`가 없거나 형태가 어긋나면 "제품"이다. 대괄호가 없는 소재는 그대로다(#206·#237). 캐릭터 시트는 소재를 받지 않아 해당되지 않는다.
+
 `spec/vocabulary.json` 의 `prompt_hints` 를 쓰는 자리가 2·5·6·7번이다. 힌트가 없는 값은 토큰이 그대로 나가므로, 새 enum 값이 생기면 힌트도 같이 넣어야 한다 — `npm run spec:sync-check` 가 커버리지를 검사한다.
+
+빈 힌트 배열(`[]`)은 원본으로 폴백하지 않는다 — `keyword_hints ?? keywords`라서 빈 배열이면 컷은 해당 문장이 생략되고, 캐릭터 시트는 `default comic style`이 들어간다(#234).
 
 **`spec/vocabulary.json` 소비 방식 (컷 프롬프트)**
 
@@ -281,6 +285,8 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 - 폰트가 `Malgun Gothic`/`Apple SD Gothic Neo` 시스템 폰트에 의존한다(`:13`). 한글 폰트가 없는 리눅스 서버에 배포하면 글자가 깨질 수 있어, 배포 전 폰트 포함이 필요하다.
 - 글자 폭은 실제 폰트 측정이 아니라 추정치(한글 = 폰트 크기, 영문·숫자 = 0.55배)다.
 - 아주 긴 대사 경계·`center` 덮음은 #192로 해결. `center` 꼬리 방향(화자 쪽)은 #199 후속.
+
+**프로젝트 폰트 (#209)** — 확인 API(`POST /api/preset/font/validate` → `validateFontUrl`(`lib/llm/font-probe.ts`))와 Export(`loadFont`(`lib/render/font.ts`))는 같은 공용 함수 `resolveFontSource`로 폰트를 고르고 읽는다. 정책은 호출하는 층이 정하고(둘 다 `httpsOnly`), 성공 응답의 `url`은 입력값 trim 그대로 둔다. 성공 보장은 검증 시점 기준이다 — 등록 뒤 원격 응답이 바뀌면 Export는 `loadFont`의 시스템 폰트 폴백으로 그린다.
 
 ## 6. 데이터 파일 vs 코드 (화면·스키마·LLM·백엔드 영역분)
 

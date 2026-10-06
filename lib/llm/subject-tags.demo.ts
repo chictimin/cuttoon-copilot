@@ -5,6 +5,7 @@
 // 실행: npx tsx lib/llm/subject-tags.demo.ts
 
 import {
+  normalizeStoredSubjectTags,
   normalizeTagText,
   projectForModel,
   restoreFirstMention,
@@ -116,6 +117,61 @@ function assertNoLeak(name: string, output: string, subject: string, categories:
     failed++;
     console.error("FAIL restore 개수 불일치 → 바뀌었음");
   }
+}
+
+// 5. normalizeStoredSubjectTags — 현재 소재와 저장본 대조(spec-a3 T1).
+{
+  function eqNorm(name: string, actual: unknown, expected: unknown) {
+    const a = JSON.stringify(actual);
+    const e = JSON.stringify(expected);
+    if (a === e) {
+      console.log(`ok   ${name}`);
+    } else {
+      failed++;
+      console.error(`FAIL ${name} — 기대 ${e}, 실제 ${a}`);
+    }
+  }
+  const f = normalizeStoredSubjectTags;
+  eqNorm("태그 없음+undefined", f(undefined, "그냥 이야기"), { tags: [], dropped: null });
+  eqNorm("태그 없음+빈 배열", f([], "그냥 이야기"), { tags: [], dropped: null });
+  eqNorm(
+    "2태그 순서 일치 유지",
+    f(
+      [
+        { raw: "가나", category: " 음료 " },
+        { raw: "다라", category: "과자" },
+      ],
+      "[가나][다라] 이야기"
+    ),
+    { tags: [{ raw: "가나", category: "음료" }, { raw: "다라", category: "과자" }], dropped: null }
+  );
+  eqNorm(
+    "category 없음·공백 → 제품",
+    f([{ raw: "가나" }, { raw: "다라", category: "   " }], "[가나][다라] x"),
+    { tags: [{ raw: "가나", category: "제품" }, { raw: "다라", category: "제품" }], dropped: null }
+  );
+  eqNorm(
+    "category가 raw 포함 → 제품",
+    f([{ raw: "별빛핏", category: "별빛핏 앱" }], "[별빛핏]으로 운동 시작"),
+    { tags: [{ raw: "별빛핏", category: "제품" }], dropped: null }
+  );
+  eqNorm("비배열 → not_array", f("x", "[가나] y"), { tags: [], dropped: "not_array" });
+  const one = { raw: "가나", category: "음료" };
+  eqNorm("4개 → count_mismatch", f([one, one, one, one], "[가나] y"), {
+    tags: [],
+    dropped: "count_mismatch",
+  });
+  eqNorm(
+    "순서 뒤바뀜 → raw_mismatch",
+    f(
+      [
+        { raw: "다라", category: "과자" },
+        { raw: "가나", category: "음료" },
+      ],
+      "[가나][다라] z"
+    ),
+    { tags: [], dropped: "raw_mismatch" }
+  );
 }
 
 if (failed > 0) {

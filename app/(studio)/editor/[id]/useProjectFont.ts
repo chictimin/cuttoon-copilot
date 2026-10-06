@@ -44,27 +44,43 @@ function createFontElement(font: PresetFont): HTMLLinkElement | HTMLStyleElement
   return style;
 }
 
+/** 어느 프리셋에서 읽은 폰트인지 함께 들고 있는다 — 프로젝트가 바뀌면 이전 폰트를 쓰지 않으려고. */
+interface LoadedFont {
+  presetId: string;
+  font: PresetFont;
+}
+
 /**
  * presetId의 프로젝트 폰트를 문서에 주입하고, 말풍선에 쓸 font-family 값을 돌려준다.
  * 폰트가 없거나 아직 못 읽었으면 undefined(현행 스타일 그대로).
+ *
+ * 읽은 폰트는 읽은 presetId와 함께 보관하고, 지금 presetId와 같을 때만 쓴다. presetId가
+ * 바뀌면 새 조회가 끝나기 전에도 이전 프로젝트 폰트가 쓰이지 않고, 새 조회가 실패하거나
+ * 폰트가 없거나 모양이 어긋나면 그대로 폰트 없음(undefined)이 된다(#246 리뷰).
  */
 export function useProjectFont(presetId: string | null): string | undefined {
-  const [font, setFont] = useState<PresetFont | null>(null);
+  const [loaded, setLoaded] = useState<LoadedFont | null>(null);
+  const font = presetId !== null && loaded?.presetId === presetId ? loaded.font : null;
 
   useEffect(() => {
     if (!presetId) return;
     let cancelled = false;
 
     (async () => {
+      let found: PresetFont | null = null;
       try {
         const res = await fetch(`/api/preset?id=${encodeURIComponent(presetId)}`);
-        if (!res.ok) return;
-        const data = (await res.json()) as { preset?: { assets?: { font?: unknown } } };
-        const found = data.preset?.assets?.font;
-        if (!cancelled && isPresetFont(found)) setFont(found);
+        if (res.ok) {
+          const data = (await res.json()) as { preset?: { assets?: { font?: unknown } } };
+          const candidate = data.preset?.assets?.font;
+          if (isPresetFont(candidate)) found = candidate;
+        }
       } catch {
-        // 폰트 때문에 에디터가 막히지 않는다 — 현행 폰트로 계속한다.
+        // 폰트 때문에 에디터가 막히지 않는다 — 폰트 없음으로 계속한다.
       }
+      // 이 요청이 아직 현재 프로젝트의 것일 때만 반영한다. 실패·폰트 없음도 null로 덮어써서
+      // 같은 프로젝트로 돌아왔을 때 오래된 값이 남지 않게 한다.
+      if (!cancelled) setLoaded(found ? { presetId, font: found } : null);
     })();
 
     return () => {

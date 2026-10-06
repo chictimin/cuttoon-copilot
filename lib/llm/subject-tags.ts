@@ -170,6 +170,60 @@ export function parseSubjectTags(subject: string): SubjectTag[] {
   return parseSubjectTagDetails(subject).map(({ raw, category }) =>
     category === undefined ? { raw } : { raw, category }
   );
+};
+
+/**
+ * 저장본 subject_tags를 현재 소재와 대조해 정규화한다 (issue #206 S6, spec-a3 3-1).
+ *
+ * - 태그 식별자는 순서다. 개수·순서·정규화 raw가 현재 소재 파싱과 어긋나면
+ *   전체를 버린다(부분 살리기를 하면 위치 대응이 어긋나 다른 태그의
+ *   category가 붙는다).
+ * - 출력 raw는 서버 파서의 정규값(parsed[i].raw), category는
+ *   sanitizeTagCategory(비어 있거나 raw를 포함하면 "제품")다.
+ * - 폐기(dropped !== null)하면 진단 1줄을 남긴다. 사용자 표시는 호출부가
+ *   하지 않는다(읽는 쪽 폴백으로 동작은 계속된다).
+ */
+export type SubjectTagDropReason = "not_array" | "count_mismatch" | "raw_mismatch" | "invalid";
+
+export function normalizeStoredSubjectTags(
+  value: unknown,
+  subject: string
+): { tags: StoredSubjectTag[]; dropped: SubjectTagDropReason | null } {
+  const parsed = parseSubjectTagDetails(subject);
+  if (value === undefined || value === null) return { tags: [], dropped: null };
+  if (!Array.isArray(value)) {
+    console.warn("[subject_tags] 폐기", "not_array" satisfies SubjectTagDropReason, 0);
+    return { tags: [], dropped: "not_array" };
+  }
+  if (value.length !== parsed.length) {
+    console.warn("[subject_tags] 폐기", "count_mismatch" satisfies SubjectTagDropReason, value.length);
+    return { tags: [], dropped: "count_mismatch" };
+  }
+  const fullRaws = parsed.map((tag) => tag.fullRaw);
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      console.warn("[subject_tags] 폐기", "raw_mismatch" satisfies SubjectTagDropReason, value.length);
+      return { tags: [], dropped: "raw_mismatch" };
+    }
+    const raw = (item as Record<string, unknown>).raw;
+    if (normalizeTagText(String(raw)) !== normalizeTagText(parsed[i].raw)) {
+      console.warn("[subject_tags] 폐기", "raw_mismatch" satisfies SubjectTagDropReason, value.length);
+      return { tags: [], dropped: "raw_mismatch" };
+    }
+  }
+  const tags: StoredSubjectTag[] = parsed.map((tag, i) => {
+    const category = (value[i] as Record<string, unknown>).category;
+    return {
+      raw: tag.raw,
+      category: sanitizeTagCategory(typeof category === "string" ? category : undefined, fullRaws),
+    };
+  });
+  if (subjectTagsProblem(tags) !== null) {
+    console.warn("[subject_tags] 폐기", "invalid" satisfies SubjectTagDropReason, value.length);
+    return { tags: [], dropped: "invalid" };
+  }
+  return { tags, dropped: null };
 }
 
 /** 화면 표시용. 괄호 기호만 지우고 글자는 유지한다(짝 없는 괄호 기호도 제거). */

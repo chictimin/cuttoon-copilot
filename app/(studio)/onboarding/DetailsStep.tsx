@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type { AgeBand, Interest, LifeStage } from "@/lib/llm/preset-guard";
+import { useMemo, useRef, useState } from "react";
+import type { AgeBand, Interest, LifeStage, PresetFont } from "@/lib/llm/preset-guard";
 import {
   getCtaPresetById,
   getFallbackCtaId,
@@ -41,6 +41,32 @@ const LIFE_STAGES: [LifeStage, string][] = [
   ["retired", "은퇴"],
 ];
 
+// issue #209: 프로젝트 폰트 확인. 확인 API는 실패도 HTTP 200이라 응답의 ok로 가른다.
+// 성공 응답({ family, url, kind })을 가공 없이 그대로 assets.font로 저장한다.
+const FONT_ERROR = "폰트 경로가 잘못되었습니다";
+
+async function validateFont(url: string): Promise<PresetFont | null> {
+  try {
+    const res = await fetch("/api/preset/font/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    if (
+      data.ok === true &&
+      typeof data.family === "string" &&
+      typeof data.url === "string" &&
+      (data.kind === "css" || data.kind === "file")
+    ) {
+      return { family: data.family, url: data.url, kind: data.kind };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export interface DetailsFormValue {
   projectName: string;
   industry: string[];
@@ -51,6 +77,8 @@ export interface DetailsFormValue {
   lifeStage: LifeStage[];
   ctaId: string;
   ctaStrength: CtaStrength;
+  /** 확인을 통과한 프로젝트 폰트. 비웠으면 null(시스템 폰트). */
+  font: PresetFont | null;
 }
 
 function parseTags(text: string): string[] {
@@ -111,13 +139,63 @@ export default function DetailsStep({
   const [lifeStage, setLifeStage] = useState<Set<LifeStage>>(new Set());
   const [ctaId, setCtaId] = useState<string | null>(null);
   const [ctaStrength, setCtaStrength] = useState<CtaStrength>("soft");
+  const [fontText, setFontText] = useState("");
+  // 확인을 통과한 폰트와 그때의 입력 주소. 확정할 때 현재 입력과 같을 때만 다시 쓴다.
+  const [checkedFont, setCheckedFont] = useState<{ url: string; font: PresetFont } | null>(null);
+  // 확인 요청 번호. 입력을 고치거나 새 확인을 시작하면 올려서, 늦게 도착한 이전 응답이
+  // 현재 입력의 결과를 덮어쓰지 못하게 한다(#250 리뷰).
+  const fontRequestId = useRef(0);
+  const [fontChecking, setFontChecking] = useState(false);
+  const [fontInvalid, setFontInvalid] = useState(false);
 
   const ctaCandidates = useMemo(
     () => resolveCandidates(Array.from(interests)),
     [interests]
   );
 
-  function handleSubmit() {
+  function handleFontChange(text: string) {
+    fontRequestId.current += 1; // 진행 중이던 확인의 응답은 버린다
+    setFontText(text);
+    setCheckedFont(null);
+    setFontInvalid(false);
+    setFontChecking(false);
+  }
+
+  async function handleCheckFont() {
+    const url = fontText.trim();
+    if (!url || fontChecking) return;
+    const requestId = ++fontRequestId.current;
+    setFontChecking(true);
+    setFontInvalid(false);
+    const font = await validateFont(url);
+    if (requestId !== fontRequestId.current) return; // 그 사이 입력이 바뀜 — 늦은 응답은 버린다
+    setCheckedFont(font ? { url, font } : null);
+    setFontInvalid(font === null);
+    setFontChecking(false);
+  }
+
+  async function handleSubmit() {
+    // 주소를 적었지만 아직 확인하지 않았으면 여기서 확인한다. 통과해야 다음으로 간다.
+    let font: PresetFont | null = null;
+    const fontUrl = fontText.trim();
+    if (fontUrl) {
+      // 확인한 주소가 지금 입력과 같을 때만 그 결과를 쓴다.
+      font = checkedFont && checkedFont.url === fontUrl ? checkedFont.font : null;
+      if (!font) {
+        const requestId = ++fontRequestId.current;
+        setFontChecking(true);
+        font = await validateFont(fontUrl);
+        // 확인하는 사이 입력을 고쳤으면 이 결과로 확정하지 않는다(다시 확정하면 새 입력을 확인한다).
+        if (requestId !== fontRequestId.current) return;
+        setFontChecking(false);
+        setCheckedFont(font ? { url: fontUrl, font } : null);
+        if (!font) {
+          setFontInvalid(true);
+          return;
+        }
+      }
+    }
+
     onConfirm({
       projectName: projectName.trim() || "이름 없는 프로젝트",
       industry: parseTags(industryText),
@@ -128,6 +206,7 @@ export default function DetailsStep({
       lifeStage: Array.from(lifeStage),
       ctaId: ctaId ?? getFallbackCtaId(),
       ctaStrength,
+      font,
     });
   }
 
@@ -276,12 +355,42 @@ export default function DetailsStep({
         </div>
       </div>
 
+      <div className="flex flex-col gap-2">
+        <label htmlFor="project_font" className="text-sm font-medium text-zinc-700">
+          프로젝트 폰트 <span className="font-normal text-zinc-400">(웹폰트 주소, 건너뛰기 가능)</span>
+        </label>
+        <div className="flex gap-2">
+          <input
+            id="project_font"
+            value={fontText}
+            onChange={(e) => handleFontChange(e.target.value)}
+            placeholder="https://fonts.googleapis.com/css2?family=..."
+            className="flex-1 rounded-md border border-zinc-300 px-3 py-2 text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => void handleCheckFont()}
+            disabled={fontChecking || fontText.trim().length === 0}
+            className="shrink-0 rounded-md border border-zinc-300 px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            {fontChecking ? "확인 중…" : "확인"}
+          </button>
+        </div>
+        {checkedFont && (
+          <p className="text-xs text-zinc-500">
+            사용할 폰트: {checkedFont.font.family} ({checkedFont.font.kind === "css" ? "웹폰트 CSS" : "폰트 파일"})
+          </p>
+        )}
+        {fontInvalid && <p className="text-sm text-red-600">{FONT_ERROR}</p>}
+        <p className="text-xs text-zinc-400">비워두면 기본 폰트로 그려요</p>
+      </div>
+
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <button
         type="button"
-        onClick={handleSubmit}
-        disabled={saving}
+        onClick={() => void handleSubmit()}
+        disabled={saving || fontChecking}
         className="self-start rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
       >
         {saving ? "저장 중…" : "프리셋 확정"}
