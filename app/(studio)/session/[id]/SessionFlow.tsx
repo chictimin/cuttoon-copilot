@@ -1254,7 +1254,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                       </span>
                       {defaultCutIndexes.includes(cut.cut_index) && (
                         <span className="rounded bg-zinc-100 px-2 py-0.5 text-zinc-600">
-                          자동 채운 대사
+                          생성 실패 — 기본 대사
                         </span>
                       )}
                     </div>

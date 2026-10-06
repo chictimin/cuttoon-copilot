@@ -514,14 +514,14 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         ))}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-center gap-3">
         <button
           type="button"
           onClick={handleRevert}
           disabled={!canRevert || saving || reverting}
           className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
         >
-          {reverting ? "되돌리는 중…" : "저장본으로 되돌리기"}
+          {reverting ? "되돌리는 중…" : "이전 저장본으로 되돌리기"}
         </button>
         <button
           type="button"
