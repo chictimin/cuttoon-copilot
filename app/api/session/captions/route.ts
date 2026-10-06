@@ -7,6 +7,10 @@ import { isValidToneId } from "@/lib/llm/caption-tones";
 import { isValidCtaId } from "@/lib/llm/cta-presets";
 import type { CtaRequest } from "@/lib/llm/narrative-flow";
 import type { SubjectTag } from "@/lib/llm/subject-tags";
+import {
+  SUBJECT_TAG_MAX_COUNT,
+  SUBJECT_TAG_MAX_LENGTH,
+} from "@/lib/llm/subject-tags";
 
 export const runtime = "nodejs";
 
@@ -58,17 +62,25 @@ function parseContext(value: unknown): CaptionContext | undefined {
 
 /**
  * 소재 태그 선택 필드 (issue #206 S3). 형태가 어긋나면 undefined 취급한다.
+ * 개수 ≤3·raw 코드포인트 1~30·well-formed를 본다. category 없음은 허용한다.
  * lib는 받은 subject로 다시 파싱하고 category만 순서대로 쓴다.
  */
 function parseSubjectTags(value: unknown): SubjectTag[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) return undefined;
+  if (value.length > SUBJECT_TAG_MAX_COUNT) return undefined;
   for (const item of value) {
-    if (typeof item !== "object" || item === null) return undefined;
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return undefined;
+    }
     const record = item as Record<string, unknown>;
     if (typeof record.raw !== "string") return undefined;
-    if (record.category !== undefined && typeof record.category !== "string") {
-      return undefined;
+    if (!record.raw.isWellFormed()) return undefined;
+    const rawLength = Array.from(record.raw).length;
+    if (rawLength < 1 || rawLength > SUBJECT_TAG_MAX_LENGTH) return undefined;
+    if (record.category !== undefined) {
+      if (typeof record.category !== "string") return undefined;
+      if (!record.category.isWellFormed()) return undefined;
     }
   }
   return value as SubjectTag[];

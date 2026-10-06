@@ -3,6 +3,7 @@ import {
   StoryboardValidationError,
   assertStoryboardRuntimeInvariants,
 } from "@/lib/llm/storyboard-guard";
+import { subjectTagsProblem } from "@/lib/llm/subject-tags";
 import type { CtaStrength } from "@/lib/llm/narrative-flow";
 
 /**
@@ -51,4 +52,9 @@ export function assertStoryboardShape(body: unknown): asserts body is Storyboard
     sb.cuts as Parameters<typeof assertStoryboardRuntimeInvariants>[0],
     strength as CtaStrength | undefined
   );
+
+  if (sb.subject_tags !== undefined) {
+    const problem = subjectTagsProblem(sb.subject_tags);
+    if (problem !== null) throw new StoryboardValidationError(problem);
+  }
 }
