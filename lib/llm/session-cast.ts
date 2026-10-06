@@ -74,10 +74,18 @@ const COLOR_TOKEN_SRC = `(?:${COLOR_DEPTH_PREFIX_SRC})?(?:${KOREAN_COLOR_BASE}|$
 
 const HAIR_NOUN_SRC = "머리카락|모발|머리|헤어";
 
+// 상의 단어(한 글자인 티·옷 제외 — 수식 포함 검사용).
+const TOP_WORD_LONG_SRC =
+  "와이셔츠|티셔츠|맨투맨|앞치마|블라우스|스웨터|유니폼|카디건|가디건|셔츠|남방|상의|재킷|자켓|코트|원피스|니트|후드|후디|조끼|정장|양복|점퍼|가운";
+// 하의·잡화 단어 — 수식 포함 검사용.
+const BOTTOM_WORD_SRC = "바지|치마|스커트|청바지|신발|구두|모자|가방";
+
 // H2 머리색: 색 단어 (+색/색의/공백/붙여쓰기) + 머리 명사
 // (색과 머리 사이 스타일 수식 1어절 허용 — "검정색의 긴 머리", "짙은 갈색 곱슬머리").
+// 수식 어절에 상의 단어가 들어 있으면 통과시키지 않는다
+// (옷 어절을 넘어 색이 머리에 붙는 오판 방지).
 const HAIR_COLOR_FORWARD_RE = new RegExp(
-  `${COLOR_TOKEN_SRC}\\s*(?:[가-힣A-Za-z0-9]+\\s*)?(?:${HAIR_NOUN_SRC})`,
+  `${COLOR_TOKEN_SRC}\\s*(?:(?![가-힣A-Za-z0-9]*(?:${TOP_WORD_LONG_SRC}))[가-힣A-Za-z0-9]+\\s*)?(?:${HAIR_NOUN_SRC})`,
 );
 // H2 역순: 머리 명사 + 조사 + 색 단어/서술어 ("머리는 갈색", "머리카락이 검다").
 const HAIR_COLOR_REVERSE_RE = new RegExp(
@@ -92,7 +100,8 @@ const HAIR_COLOR_SINGLE_RE = /금발|은발|백발|흑발|적발|흰\s*머리|�
 const EN_HAIR_COLOR_SRC =
   "black|brown|blond|blonde|red|white|gray|grey|silver|pink|blue|auburn|ginger";
 const HAIR_COLOR_EN_RE = new RegExp(`\\b(?:${EN_HAIR_COLOR_SRC})\\s+hair\\b`, "i");
-const HAIR_COLORED_EN_RE = /\b[a-z]+-haired\b/i;
+// H2 색-하이픈형 ("brown-haired" — 색 목록으로 한정).
+const HAIR_COLORED_EN_RE = new RegExp(`\\b(?:${EN_HAIR_COLOR_SRC})-haired\\b`, "i");
 const HAIR_IS_EN_RE = new RegExp(`\\bhair\\s+is\\s+(?:${EN_HAIR_COLOR_SRC})\\b`, "i");
 
 // H1 무모.
@@ -103,6 +112,8 @@ const HAIRLESS_EN_RE = /\b(?:bald|shaved head)\b/i;
 const HAIR_STYLE_RE =
   /긴\s*머리|장발|단발|숏컷|커트\s*머리|짧은\s*머리|포니테일|묶은\s*머리|머리를\s*묶|올림머리|똥머리|땋은|곱슬|파마|펌\s*머리|웨이브|생머리|투블럭|앞머리|염색한\s*머리|머리가\s*(?:긴|짧은|길고|짧고)/;
 const HAIR_STYLE_EN_RE = /\b(?:long hair|short hair|ponytail|braids?|braided|curly|bob cut|bun)\b/i;
+// H3 스타일 하이픈형 ("long-haired", "curly-haired" — 길이·모양은 색이 아니다).
+const HAIR_STYLE_HAIRED_EN_RE = /\b(?:long|short|curly|wavy|straight)-haired\b/i;
 
 type HairMention = "hairless" | "colored" | "style-only" | "none";
 
@@ -126,7 +137,11 @@ function classifyHairMention(protagonist: string): HairMention {
   ) {
     return "colored";
   }
-  if (HAIR_STYLE_RE.test(protagonist) || HAIR_STYLE_EN_RE.test(protagonist)) {
+  if (
+    HAIR_STYLE_RE.test(protagonist) ||
+    HAIR_STYLE_EN_RE.test(protagonist) ||
+    HAIR_STYLE_HAIRED_EN_RE.test(protagonist)
+  ) {
     return "style-only";
   }
   return "none";
@@ -140,8 +155,10 @@ const TOP_TAIL_SRC =
 const CLOTHING_HEX_SRC = "#[0-9A-Fa-f]{6}";
 
 // 옷 색: 색 단어/HEX + (색/색의) + 수식 1어절까지 + 상의 단어 ("빨간 체크 셔츠", "#ff0000재킷").
+// 수식 어절에 하의·잡화 단어가 들어 있으면 통과시키지 않는다
+// ("검은 바지에 셔츠"의 "바지에"가 셔츠 색으로 넘어가는 오판 방지).
 const CLOTHING_FORWARD_RE = new RegExp(
-  `(?:${COLOR_DEPTH_PREFIX_SRC})?(?:${CLOTHING_HEX_SRC}|${KOREAN_COLOR_BASE}|${COLOR_GENERIC_SRC})(?:\\s*색(?:\\s*의)?)?\\s*(?:[가-힣A-Za-z0-9]+\\s*)?(?:${TOP_WORD_SRC})${TOP_TAIL_SRC}`,
+  `(?:${COLOR_DEPTH_PREFIX_SRC})?(?:${CLOTHING_HEX_SRC}|${KOREAN_COLOR_BASE}|${COLOR_GENERIC_SRC})(?:\\s*색(?:\\s*의)?)?\\s*(?:(?![가-힣A-Za-z0-9]*(?:${BOTTOM_WORD_SRC}))[가-힣A-Za-z0-9]+\\s*)?(?:${TOP_WORD_SRC})${TOP_TAIL_SRC}`,
 );
 // 옷 색 역순: 상의 단어 + 조사 + 색 단어 ("셔츠는 빨간색").
 const CLOTHING_REVERSE_RE = new RegExp(

@@ -170,6 +170,59 @@ check(
 check("t-compat-pick", pickShirtColor(["#AA", "#BB"], () => 0.99) === "#BB");
 check("t-compat-pick-empty", pickShirtColor([], () => 0) === null);
 
+// 교차 반례 회귀: 수식 1어절이 하의·잡화나 상의 단어를 넘지 못한다. 수식 지원 자체는 유지.
+function built(protagonist: string) {
+  return buildSessionCast({ protagonist, supporting: null, palette: ["#112233"] });
+}
+const xb = built("검은 바지에 셔츠를 입은 학생");
+check(
+  "x-bottom-in-modifier",
+  xb.cast[0].description === "검은 바지에 셔츠를 입은 학생, 짧은 검은 머리, 상의 #112233" &&
+    xb.shirtColor === "#112233",
+  xb.cast[0].description,
+);
+for (const p of ["long-haired woman", "curly-haired man"]) {
+  const o = built(p);
+  check(
+    `x-style-haired:${p}`,
+    o.cast[0].description === `${p}, 검은 머리, 상의 #112233` && o.shirtColor === "#112233",
+    o.cast[0].description,
+  );
+}
+for (const p of ["brown-haired student", "black-haired designer"]) {
+  const o = built(p);
+  check(
+    `x-color-haired:${p}`,
+    o.cast[0].description === `${p}, 상의 #112233` && o.shirtColor === "#112233",
+    o.cast[0].description,
+  );
+}
+const xt = built("검은 정장에 긴 머리 여성");
+check(
+  "x-top-in-modifier",
+  xt.cast[0].description === "검은 정장에 긴 머리 여성, 검은 머리" && xt.shirtColor === null,
+  xt.cast[0].description,
+);
+const xh = built("검은 모자에 셔츠를 입은 학생");
+check(
+  "x-hat-in-modifier",
+  xh.cast[0].description === "검은 모자에 셔츠를 입은 학생, 짧은 검은 머리, 상의 #112233" &&
+    xh.shirtColor === "#112233",
+  xh.cast[0].description,
+);
+const xs = built("빨간 셔츠에 긴 머리 여성");
+check(
+  "x-shirt-style",
+  xs.cast[0].description === "빨간 셔츠에 긴 머리 여성, 검은 머리" && xs.shirtColor === null,
+  xs.cast[0].description,
+);
+const xg = built("검은 정장에 갈색 머리 여성");
+check(
+  "x-top-and-hair-color",
+  xg.cast[0].description === "검은 정장에 갈색 머리 여성" && xg.shirtColor === null,
+  xg.cast[0].description,
+);
+
 if (failed > 0) {
   console.error(`\n${failed}건 실패`);
   process.exit(1);
