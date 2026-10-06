@@ -5,6 +5,7 @@
 
 import { readAsset } from "../asset-store";
 import { composeCut } from "./compose";
+import { loadFont, type FontAsset } from "./font";
 import { buildZip } from "./zip";
 import type { Cut } from "./types";
 
@@ -14,7 +15,9 @@ export interface ExportResult {
   skipped: number[];
 }
 
-export async function exportCuts(cuts: Cut[]): Promise<ExportResult> {
+// font: 프리셋의 프로젝트 웹폰트(#209). 없거나 받지 못하면 시스템 폰트로 그리고 Export는 계속된다.
+export async function exportCuts(cuts: Cut[], opts: { font?: FontAsset | null } = {}): Promise<ExportResult> {
+  const font = await loadFont(opts.font);
   const sorted = [...cuts].sort((a, b) => a.cut_index - b.cut_index);
   const entries: { name: string; data: Buffer }[] = [];
   const included: number[] = [];
@@ -30,7 +33,7 @@ export async function exportCuts(cuts: Cut[]): Promise<ExportResult> {
       skipped.push(cut.cut_index);
       continue;
     }
-    const composed = await composeCut(imageBuffer, [cut.caption]);
+    const composed = await composeCut(imageBuffer, [cut.caption], undefined, font);
     entries.push({ name: `cut_${cut.cut_index}.png`, data: composed });
     included.push(cut.cut_index);
   }

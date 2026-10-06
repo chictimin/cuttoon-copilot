@@ -8,6 +8,7 @@
 // 폰트를 프로젝트에 직접 포함시키거나 서버에 한글 폰트를 설치해야 한다.
 
 import sharp from "sharp";
+import { coversText, type LoadedFont } from "./font";
 import type { BubbleType, Caption, Position } from "./types";
 
 const FONT_FAMILY = "'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif";
@@ -60,14 +61,17 @@ function textWidth(text: string, fontSize: number): number {
   return w;
 }
 
-function wrapText(text: string, fontSize: number, maxWidth: number): string[] {
+// 글자 폭 재는 함수 — 프로젝트 웹폰트가 있으면 그 폰트의 실제 폭(#209), 없으면 위 추정값.
+type Measure = (text: string, fontSize: number) => number;
+
+function wrapText(text: string, fontSize: number, maxWidth: number, measure: Measure = textWidth): string[] {
   const words = text.split(" ");
   const lines: string[] = [];
   let line = "";
 
   for (const word of words) {
     const trial = line ? `${line} ${word}` : word;
-    if (textWidth(trial, fontSize) <= maxWidth) {
+    if (measure(trial, fontSize) <= maxWidth) {
       line = trial;
       continue;
     }
@@ -75,14 +79,14 @@ function wrapText(text: string, fontSize: number, maxWidth: number): string[] {
       lines.push(line);
       line = "";
     }
-    if (textWidth(word, fontSize) <= maxWidth) {
+    if (measure(word, fontSize) <= maxWidth) {
       line = word;
       continue;
     }
     // 단어 하나가 통째로 넘치면(주로 공백 없는 한글 문장) 글자 단위로 쪼갠다
     let chunk = "";
     for (const ch of word) {
-      if (textWidth(chunk + ch, fontSize) <= maxWidth || !chunk) {
+      if (measure(chunk + ch, fontSize) <= maxWidth || !chunk) {
         chunk += ch;
       } else {
         lines.push(chunk);
@@ -95,14 +99,14 @@ function wrapText(text: string, fontSize: number, maxWidth: number): string[] {
   return lines.length > 0 ? lines : [""];
 }
 
-function fitText(text: string, maxWidth: number, maxHeight: number, fontMax: number = FONT_MAX) {
+function fitText(text: string, maxWidth: number, maxHeight: number, fontMax: number = FONT_MAX, measure: Measure = textWidth) {
   for (let fontSize = fontMax; fontSize >= FONT_MIN; fontSize -= 2) {
-    const lines = wrapText(text, fontSize, maxWidth - PADDING * 2);
+    const lines = wrapText(text, fontSize, maxWidth - PADDING * 2, measure);
     if (lines.length * fontSize * LINE_HEIGHT <= maxHeight) {
       return { fontSize, lines };
     }
   }
-  return { fontSize: FONT_MIN, lines: wrapText(text, FONT_MIN, maxWidth - PADDING * 2) };
+  return { fontSize: FONT_MIN, lines: wrapText(text, FONT_MIN, maxWidth - PADDING * 2, measure) };
 }
 
 const FILL = `fill="white" fill-opacity="${BUBBLE_OPACITY}"`;
@@ -313,7 +317,7 @@ const STROKE_MARGIN = 2;
 
 const VALID_BUBBLE_TYPES: BubbleType[] = ["rounded", "rect", "cloud"];
 
-function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarget: HeadTarget): string {
+function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarget: HeadTarget, font: LoadedFont | null = null): string {
   // storyboard.schema.json의 enum 밖의 값이 저장 시점 검증을 뚫고 들어올 수 있다
   // (app/api/session/validate.ts는 아직 필드별 enum까지는 안 봄, #70). lib/render/는
   // 라이브러리 계층이라 호출자가 무엇을 넘기든 예외로 죽지 않는 편이 맞다고 보고
@@ -333,6 +337,11 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
     console.warn(`[compose] 알 수 없는 caption.bubble_type "${caption.bubble_type}" — rounded로 폴백`);
   }
 
+  // 프로젝트 웹폰트(#209): 대사의 모든 글자가 그 폰트에 있을 때만 쓴다 — 한 글자라도 없으면
+  // 그 글자가 빈 칸으로 그려지므로, 이 대사는 지금처럼 시스템 폰트로 그린다.
+  const useFont = font && coversText(font, caption.text) ? font : null;
+  const measure: Measure = useFont ? (t, size) => useFont.getAdvanceWidth(t, size) : textWidth;
+
   const box = POSITION_BOX[position];
   let x = box.x * canvasW;
   let maxWidth = box.w * canvasW;
@@ -342,7 +351,7 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   // ellipseRadii()가 세로를 덜 키워도 된다(#170).
   const wrapWidth = (w: number) => (bubbleType === "rounded" ? w * ROUNDED_WRAP_RATIO : w);
 
-  let { fontSize, lines } = fitText(caption.text, wrapWidth(maxWidth), maxHeight);
+  let { fontSize, lines } = fitText(caption.text, wrapWidth(maxWidth), maxHeight, FONT_MAX, measure);
 
   if (position === "center") {
     // 줄이 OVERHANG_MAX_LINES를 넘으면 가운데를 기준으로 폭을 넓혀 줄 수를 줄인다(#170).
@@ -352,7 +361,7 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
     let w = box.w;
     while (lines.length > OVERHANG_MAX_LINES && w + CENTER_WIDEN_STEP <= CENTER_MAX_W + 1e-9) {
       w += CENTER_WIDEN_STEP;
-      ({ fontSize, lines } = fitText(caption.text, wrapWidth(w * canvasW), maxHeight, baseFont));
+      ({ fontSize, lines } = fitText(caption.text, wrapWidth(w * canvasW), maxHeight, baseFont, measure));
     }
     maxWidth = w * canvasW;
     x = ((1 - w) / 2) * canvasW;
@@ -360,7 +369,7 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
 
   const textH = lines.length * fontSize * LINE_HEIGHT;
   const bubbleH = textH + PADDING * 2;
-  const widestLine = Math.max(...lines.map((l) => textWidth(l, fontSize)));
+  const widestLine = Math.max(...lines.map((l) => measure(l, fontSize)));
   const radii = ellipseRadii(maxWidth, bubbleH, widestLine, textH);
   let y = box.y * canvasH;
 
@@ -397,10 +406,23 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
 
   const cx = x + maxWidth / 2;
   const firstLineY = y + PADDING + fontSize * 0.85;
-  const tspans = lines
-    .map((line, i) => `<tspan x="${cx}" y="${firstLineY + i * fontSize * LINE_HEIGHT}">${escapeXml(line)}</tspan>`)
-    .join("");
-  const text = `<text text-anchor="middle" font-family="${FONT_FAMILY}" font-size="${fontSize}" font-weight="bold" fill="black">${tspans}</text>`;
+  let text: string;
+  if (useFont) {
+    // 글자를 패스로 바꿔 넣는다 — 시스템 폰트와 무관하게 OS마다 같은 모양(#209 (가)안).
+    // 굵기는 폰트 파일의 굵기를 따른다(굵게 쓰려면 웹폰트 주소에 굵은 굵기를 지정).
+    text = lines
+      .map((line, i) => {
+        const x0 = cx - measure(line, fontSize) / 2;
+        const d = useFont.getPath(line, x0, firstLineY + i * fontSize * LINE_HEIGHT, fontSize).toPathData(2);
+        return d ? `<path d="${d}" fill="black"/>` : "";
+      })
+      .join("");
+  } else {
+    const tspans = lines
+      .map((line, i) => `<tspan x="${cx}" y="${firstLineY + i * fontSize * LINE_HEIGHT}">${escapeXml(line)}</tspan>`)
+      .join("");
+    text = `<text text-anchor="middle" font-family="${FONT_FAMILY}" font-size="${fontSize}" font-weight="bold" fill="black">${tspans}</text>`;
+  }
 
   return `${shape}${text}`;
 }
@@ -410,8 +432,9 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
 // 호출자(예: 수동 보정, 향후 얼굴 검출 결과)가 캡션별로 꼬리 목표점을 옮길 수
 // 있게 하기 위한 것 — storyboard.schema.json의 Caption 자체는 바꾸지 않는다
 // (additionalProperties: false와 충돌하지 않도록).
+// font: 프로젝트 웹폰트(#209, lib/render/font.ts의 loadFont 결과). null이면 지금처럼 시스템 폰트.
 export async function composeCut(
-  imageBuffer: Buffer, captions: Caption[], headTargets?: (HeadTarget | undefined)[],
+  imageBuffer: Buffer, captions: Caption[], headTargets?: (HeadTarget | undefined)[], font: LoadedFont | null = null,
 ): Promise<Buffer> {
   const image = sharp(imageBuffer);
   const meta = await image.metadata();
@@ -420,7 +443,7 @@ export async function composeCut(
 
   const overlaySvg = `
     <svg width="${canvasW}" height="${canvasH}" xmlns="http://www.w3.org/2000/svg">
-      ${captions.map((c, i) => captionSvg(c, canvasW, canvasH, headTargets?.[i] ?? DEFAULT_HEAD_TARGET)).join("\n")}
+      ${captions.map((c, i) => captionSvg(c, canvasW, canvasH, headTargets?.[i] ?? DEFAULT_HEAD_TARGET, font)).join("\n")}
     </svg>
   `;
 
