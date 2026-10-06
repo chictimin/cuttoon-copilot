@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { AgeBand, Interest, LifeStage, PresetFont } from "@/lib/llm/preset-guard";
 import {
   getCtaPresetById,
@@ -140,8 +140,11 @@ export default function DetailsStep({
   const [ctaId, setCtaId] = useState<string | null>(null);
   const [ctaStrength, setCtaStrength] = useState<CtaStrength>("soft");
   const [fontText, setFontText] = useState("");
-  // 현재 입력값에 대해 확인을 통과한 폰트. 입력이 바뀌면 비운다.
-  const [checkedFont, setCheckedFont] = useState<PresetFont | null>(null);
+  // 확인을 통과한 폰트와 그때의 입력 주소. 확정할 때 현재 입력과 같을 때만 다시 쓴다.
+  const [checkedFont, setCheckedFont] = useState<{ url: string; font: PresetFont } | null>(null);
+  // 확인 요청 번호. 입력을 고치거나 새 확인을 시작하면 올려서, 늦게 도착한 이전 응답이
+  // 현재 입력의 결과를 덮어쓰지 못하게 한다(#250 리뷰).
+  const fontRequestId = useRef(0);
   const [fontChecking, setFontChecking] = useState(false);
   const [fontInvalid, setFontInvalid] = useState(false);
 
@@ -151,18 +154,22 @@ export default function DetailsStep({
   );
 
   function handleFontChange(text: string) {
+    fontRequestId.current += 1; // 진행 중이던 확인의 응답은 버린다
     setFontText(text);
     setCheckedFont(null);
     setFontInvalid(false);
+    setFontChecking(false);
   }
 
   async function handleCheckFont() {
     const url = fontText.trim();
     if (!url || fontChecking) return;
+    const requestId = ++fontRequestId.current;
     setFontChecking(true);
     setFontInvalid(false);
     const font = await validateFont(url);
-    setCheckedFont(font);
+    if (requestId !== fontRequestId.current) return; // 그 사이 입력이 바뀜 — 늦은 응답은 버린다
+    setCheckedFont(font ? { url, font } : null);
     setFontInvalid(font === null);
     setFontChecking(false);
   }
@@ -172,12 +179,16 @@ export default function DetailsStep({
     let font: PresetFont | null = null;
     const fontUrl = fontText.trim();
     if (fontUrl) {
-      font = checkedFont;
+      // 확인한 주소가 지금 입력과 같을 때만 그 결과를 쓴다.
+      font = checkedFont && checkedFont.url === fontUrl ? checkedFont.font : null;
       if (!font) {
+        const requestId = ++fontRequestId.current;
         setFontChecking(true);
         font = await validateFont(fontUrl);
+        // 확인하는 사이 입력을 고쳤으면 이 결과로 확정하지 않는다(다시 확정하면 새 입력을 확인한다).
+        if (requestId !== fontRequestId.current) return;
         setFontChecking(false);
-        setCheckedFont(font);
+        setCheckedFont(font ? { url: fontUrl, font } : null);
         if (!font) {
           setFontInvalid(true);
           return;
@@ -367,7 +378,7 @@ export default function DetailsStep({
         </div>
         {checkedFont && (
           <p className="text-xs text-zinc-500">
-            사용할 폰트: {checkedFont.family} ({checkedFont.kind === "css" ? "웹폰트 CSS" : "폰트 파일"})
+            사용할 폰트: {checkedFont.font.family} ({checkedFont.font.kind === "css" ? "웹폰트 CSS" : "폰트 파일"})
           </p>
         )}
         {fontInvalid && <p className="text-sm text-red-600">{FONT_ERROR}</p>}
