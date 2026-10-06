@@ -205,6 +205,49 @@ const judge = buildStoryboardJudge() as unknown as Judge;
   check("보호거부 고친뒤재유입", findNewViolations(fixed, baseline).length > 0);
 }
 
+// frame 인물 이동 보호 회귀(spec-263 rev5 3-1 "frame" 줄)
+// (a) frame id만 a→b 변경(위반 유지) → 새 위반
+{
+  const baseline = validBoard();
+  baseline.cast = [
+    { character_id: "a", role: "protagonist", description: "주인공" },
+    { character_id: "b", role: "supporting", description: "조연" },
+  ];
+  (((cutsOf(baseline)[0] as Cut).characters_in_frame as Cut[])[0] as Cut).expression = "smil";
+  const moved = clone(baseline);
+  (((cutsOf(moved)[0] as Cut).characters_in_frame as Cut[])[0] as Cut).character_id = "b";
+  const nv = findNewViolations(moved, baseline);
+  check("보호거부 frame인물이동", nv.length > 0, nv);
+}
+// (b) 두 인물 frame 교환(위반이 다른 인물로) → 새 위반
+{
+  const baseline = validBoard();
+  baseline.cast = [
+    { character_id: "a", role: "protagonist", description: "주인공" },
+    { character_id: "b", role: "supporting", description: "조연" },
+  ];
+  (cutsOf(baseline)[0] as Cut).characters_in_frame = [
+    { character_id: "a", expression: "smil", pose: "stand" },
+    { character_id: "b", expression: "smile", pose: "stand" },
+  ];
+  const moved = clone(baseline);
+  (cutsOf(moved)[0] as Cut).characters_in_frame = [
+    { character_id: "b", expression: "smil", pose: "stand" },
+    { character_id: "a", expression: "smile", pose: "stand" },
+  ];
+  const nv = findNewViolations(moved, baseline);
+  check("보호거부 frame교환", nv.length > 0, nv);
+}
+// (c) id 그대로 caption.text·position 편집 → 통과
+{
+  const baseline = validBoard();
+  (((cutsOf(baseline)[0] as Cut).characters_in_frame as Cut[])[0] as Cut).expression = "smil";
+  const edited = clone(baseline);
+  ((cutsOf(edited)[0].caption as Cut) as Cut).text = "고친 대사";
+  ((cutsOf(edited)[0].caption as Cut) as Cut).position = "center";
+  check("보호통과 frame유지 caption편집", findNewViolations(edited, baseline).length === 0);
+}
+
 // 경합: 같은 baseline에서 두 저장 동시 → 하나 200, 하나 409
 {
   const repo = new MockRepo([validBoard()]);

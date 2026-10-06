@@ -325,14 +325,37 @@ for (const supporting of [false, true]) {
   g1.subject_tags = [{ raw: "태그" }];
   expectProblems("A11 태그", g1, "A11");
 
-  // locator 안정 식별자
-  const l1 = withCut0({ shot_type: "초접사" } as unknown as Cut);
-  const lp = storyboardContractProblems(l1).find((p) => p.rule === "A6");
-  if (lp !== undefined && lp.locator === "cut#1.shot_type") {
-    console.log("ok   locator 안정");
+  // frame locator 회귀(spec-263 rev5 3-1 "frame" 줄) — 인물에 묶인 식별자
+  const f1 = demoBoard(FLOW_BEATS[0], "clear", false);
+  ((cutsOf(f1)[0].characters_in_frame as Cut[])[0] as Cut).expression = "smil";
+  const fp = storyboardContractProblems(f1).find((p) => p.rule === "A6");
+  if (fp !== undefined && fp.locator === "cut#1.frame#a.expression") {
+    console.log("ok   frame locator 안정");
   } else {
     failed++;
-    console.error(`FAIL locator 안정 — ${JSON.stringify(lp)}`);
+    console.error(`FAIL frame locator 안정 — ${JSON.stringify(fp)}`);
+  }
+  const f2 = demoBoard(FLOW_BEATS[0], "clear", false);
+  ((cutsOf(f2)[0].characters_in_frame as Cut[])[0] as Cut).character_id = "zzz";
+  const fp2 = storyboardContractProblems(f2).find((p) => p.rule === "A9");
+  if (fp2 !== undefined && fp2.locator === "cut#1.frame#zzz.character_id") {
+    console.log("ok   A9 frame locator");
+  } else {
+    failed++;
+    console.error(`FAIL A9 frame locator — ${JSON.stringify(fp2)}`);
+  }
+  const f3 = demoBoard(FLOW_BEATS[0], "clear", false);
+  const fr3 = cutsOf(f3)[0].characters_in_frame as Cut[];
+  fr3.push({ character_id: "a", expression: "smile", pose: "stand" });
+  (fr3[0] as Cut).expression = "smil";
+  const fp3 = storyboardContractProblems(f3).find(
+    (p) => p.rule === "A6" && p.locator.indexOf("frame[0]!") >= 0
+  );
+  if (fp3 !== undefined && fp3.locator === "cut#1.frame[0]!.expression") {
+    console.log("ok   frame locator 불안정");
+  } else {
+    failed++;
+    console.error(`FAIL frame locator 불안정 — ${JSON.stringify(fp3)}`);
   }
 
   // throw 금지

@@ -35,7 +35,10 @@
 //
 // locator: cut_index가 정상(1~4 정수)·유일하면 `cut#<cut_index>`, 아니면
 // `cuts[<배열순번>]!`(불안정 표시). cast는 character_id가 정상(비어 있지 않은
-// 문자열)·유일하면 `cast#<id>`, 아니면 `cast[<순번>]!`. 필드는 `.shot_type` 등을 붙임.
+// 문자열)·유일하면 `cast#<id>`, 아니면 `cast[<순번>]!`. frame 원소는 그 컷 안에서
+// character_id가 정상·유일하면 `<컷 locator>.frame#<id>`, 아니면
+// `<컷 locator>.frame[<순번>]!` — 하위 필드(expression·pose 등)와 A9도 이 체계로.
+// 필드는 `.shot_type` 등을 붙임.
 // cause: 단일 필드는 그 값 자체(deepEqual 대상). 개수·관계 규칙은 검사에 쓴 투영
 // (A4 = cuts의 cut_index 목록과 길이, A3 = cast의 [id, role] 목록,
 // A9 = 그 컷의 character_id 목록 + cast id 목록).
@@ -293,6 +296,26 @@ function castLocator(cast: unknown[], index: number): string {
   return `cast[${index}]!`;
 }
 
+/**
+ * frame 원소 locator(spec-263 rev5 3-1 "frame" 줄). 그 컷 안에서
+ * character_id가 비어 있지 않은 문자열·유일하면 `<컷 locator>.frame#<id>`,
+ * 아니면 `<컷 locator>.frame[<순번>]!`(불안정 → 3-2 frame 컬렉션 투영이 받음).
+ * 배열 순번만 쓰면 다른 인물로 위반이 옮겨가도 같은 locator가 되어 보호가
+ * 통과해 버리므로, 인물을 식별자에 묶는다.
+ */
+function frameLocator(frames: unknown[], index: number, cutLoc: string): string {
+  const rec = isRecord(frames[index]) ? (frames[index] as Record<string, unknown>) : null;
+  const id = rec?.character_id;
+  if (typeof id === "string" && id.length > 0) {
+    let count = 0;
+    for (const e of frames) {
+      if (isRecord(e) && (e as Record<string, unknown>).character_id === id) count++;
+    }
+    if (count === 1) return `${cutLoc}.frame#${id}`;
+  }
+  return `${cutLoc}.frame[${index}]!`;
+}
+
 function rawCutIndices(cuts: unknown[]): unknown[] {
   return cuts.map((c) => (isRecord(c) ? (c as Record<string, unknown>).cut_index : c));
 }
@@ -525,7 +548,7 @@ function collectProblems(sb: unknown, demoCacheValues?: ReadonlySet<string>): Co
         }
         const ids = castIds(cast);
         fr.forEach((e, j) => {
-          const eloc = `${floc}[${j}]`;
+          const eloc = frameLocator(fr, j, loc);
           if (!isRecord(e)) {
             problems.push({ rule: "A5", locator: eloc, kind: "type", cause: e });
             return;
