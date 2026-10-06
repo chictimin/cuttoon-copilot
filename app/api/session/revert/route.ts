@@ -22,9 +22,17 @@ export async function POST(request: Request) {
   try {
     const result = await revertSession(sessionId);
     if (!result.ok) {
-      return result.reason === "session_not_found"
-        ? Response.json({ error: "없음" }, { status: 404 })
-        : Response.json({ error: "되돌릴 이전 버전이 없습니다" }, { status: 409 });
+      if (result.reason === "session_not_found") {
+        return Response.json({ error: "없음" }, { status: 404 });
+      }
+      if (result.reason === "invalid_subject_tags") {
+        return Response.json(
+          { error: "되돌릴 버전의 소재 태그가 형식에 맞지 않습니다" },
+          { status: 409 }
+        );
+      }
+      // 남은 reason은 no_previous_version → 409 (기존 분기 유지).
+      return Response.json({ error: "되돌릴 이전 버전이 없습니다" }, { status: 409 });
     }
     return Response.json({
       sessionId: result.session.sessionId,

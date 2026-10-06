@@ -27,6 +27,51 @@ export interface SubjectTag {
   category?: string;
 }
 
+/** 저장 계약형. 저장은 category 필수(trim 후 비어 있지 않음)다. */
+export interface StoredSubjectTag {
+  raw: string;
+  category: string;
+}
+
+/**
+ * 저장 검사 계약(spec-a1 3절 pin). 첫 위반에서 메시지를 반환, 통과면 null.
+ * 글자 수 = Array.from(s).length(코드포인트, JSON Schema maxLength 기준).
+ */
+export function subjectTagsProblem(value: unknown): string | null {
+  if (!Array.isArray(value)) return "subject_tags는 배열이어야 합니다";
+  if (value.length > SUBJECT_TAG_MAX_COUNT) return "subject_tags는 최대 3개입니다";
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return `subject_tags[${i}]는 객체여야 합니다`;
+    }
+    const record = item as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      if (key !== "raw" && key !== "category") {
+        return `subject_tags[${i}]에 허용되지 않은 키가 있습니다`;
+      }
+    }
+    const raw = record.raw;
+    if (
+      typeof raw !== "string" ||
+      !raw.isWellFormed() ||
+      Array.from(raw).length < 1 ||
+      Array.from(raw).length > SUBJECT_TAG_MAX_LENGTH
+    ) {
+      return `subject_tags[${i}].raw는 1~30자 문자열이어야 합니다`;
+    }
+    const category = record.category;
+    if (
+      typeof category !== "string" ||
+      !category.isWellFormed() ||
+      category.trim().length === 0
+    ) {
+      return `subject_tags[${i}].category는 비어 있지 않은 문자열이어야 합니다`;
+    }
+  }
+  return null;
+}
+
 /** 추론·지정 모두 실패했을 때 쓰는 카테고리. */
 export const SUBJECT_TAG_FALLBACK_CATEGORY = "제품";
 
@@ -48,10 +93,13 @@ function cleanTagText(text: string): string {
   // 줄바꿈이 들어간 괄호는 위 정규식이 \n을 배제하므로 태그가 아니다.
   // `<`·`>`는 제거하는데, `<b>` 같은 마크업이 `<b>`→`b`처럼 글자로 남을 수 있다.
   // 태그명이 되는 자리라 실제 피해는 작아 수용한다(저위험).
-  return text
-    .replace(/[\r\n<>]/g, "")
-    .trim()
-    .slice(0, SUBJECT_TAG_MAX_LENGTH);
+  return Array.from(
+    text
+      .replace(/[\r\n<>]/g, "")
+      .trim()
+  )
+    .slice(0, SUBJECT_TAG_MAX_LENGTH)
+    .join("");
 }
 
 /** 저장용 raw + 매칭용 원문을 함께 들고 있는 내부 파싱 결과. */

@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { StoryboardCut } from "@/lib/llm/storyboard-guard";
+import { subjectTagsProblem } from "@/lib/llm/subject-tags";
 import { getDb } from "./client";
 
 /**
@@ -289,7 +290,7 @@ export async function saveSessionVersion(
  */
 export type RevertResult =
   | { ok: true; session: SavedSession }
-  | { ok: false; reason: "session_not_found" | "no_previous_version" };
+  | { ok: false; reason: "session_not_found" | "no_previous_version" | "invalid_subject_tags" };
 
 /**
  * 되돌리기 1단계. 직전 버전의 내용을 새 버전으로 복사한다 — 행을 지우지 않으므로
@@ -324,6 +325,11 @@ export async function revertSession(sessionId: string): Promise<RevertResult> {
 
   const [current, previous] = rows;
   const storyboard = previous.storyboard as Storyboard;
+  const previousTags = (previous.storyboard as Storyboard & { subject_tags?: unknown })
+    .subject_tags;
+  if (previousTags !== undefined && subjectTagsProblem(previousTags) !== null) {
+    return { ok: false, reason: "invalid_subject_tags" };
+  }
   const nextVersion = current.version + 1;
 
   const { error: insertError } = await getDb()

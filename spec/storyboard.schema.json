@@ -41,7 +41,7 @@
     "subject_tags": {
       "type": "array",
       "maxItems": 3,
-      "description": "소재 [태그]의 저장 매핑 (issue #206). 없으면 기존 세션 그대로 유효(cta_strength 없음과 같은 원칙). subject는 원문(괄호 포함) 그대로 둔다.",
+      "description": "소재 [태그]의 저장 매핑 (issue #206). 없으면 기존 세션 그대로 유효(cta_strength 없음과 같은 원칙). subject는 원문(괄호 포함) 그대로 둔다. 형식 계약만. subject와의 순서·중복 대응은 보장하지 않으며 읽는 쪽은 subject를 다시 파싱해 category만 순서대로 쓴다(원문 누출 없음).",
       "items": {
         "type": "object",
         "required": ["raw", "category"],
@@ -56,7 +56,7 @@
           "category": {
             "type": "string",
             "minLength": 1,
-            "description": "고유명사 없는 한국어 카테고리 명사구(예: 운동 앱). 없으면 제품으로 해석한다."
+            "description": "고유명사 없는 한국어 카테고리 명사구(예: 운동 앱). 저장 시 필수(trim 후 비어 있지 않음). 읽는 쪽은 형태가 어긋나면 제품으로 해석한다."
           }
         }
       }
