@@ -398,6 +398,10 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         <p className="text-sm text-zinc-500">
           대사를 고치거나, 말풍선을 원하는 자리로 끌어다 놓으세요
         </p>
+        {/* #259 6번: 이 말풍선은 한 줄 알약 모양의 위치 확인용이다. 말풍선 종류·줄바꿈·꼬리는 Export에서만 그려진다. */}
+        <p className="text-xs text-zinc-400">
+          화면의 말풍선은 위치 확인용 미리보기예요. 실제 모양은 내보내기에서 확인하세요
+        </p>
       </div>
 
       {actionError && (
