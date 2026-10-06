@@ -282,6 +282,8 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 - 글자 폭은 실제 폰트 측정이 아니라 추정치(한글 = 폰트 크기, 영문·숫자 = 0.55배)다.
 - 아주 긴 대사 경계·`center` 덮음은 #192로 해결. `center` 꼬리 방향(화자 쪽)은 #199 후속.
 
+**프로젝트 폰트 (#209)** — 확인 API(`POST /api/preset/font/validate` → `validateFontUrl`(`lib/llm/font-probe.ts`))와 Export(`loadFont`(`lib/render/font.ts`))는 같은 공용 함수 `resolveFontSource`로 폰트를 고르고 읽는다. 정책은 호출하는 층이 정하고(둘 다 `httpsOnly`), 성공 응답의 `url`은 입력값 trim 그대로 둔다. 성공 보장은 검증 시점 기준이다 — 등록 뒤 원격 응답이 바뀌면 Export는 `loadFont`의 시스템 폰트 폴백으로 그린다.
+
 ## 6. 데이터 파일 vs 코드 (화면·스키마·LLM·백엔드 영역분)
 
 **`spec/data/`로 이미 분리된 것**
