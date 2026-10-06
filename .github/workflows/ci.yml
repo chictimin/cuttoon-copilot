@@ -50,7 +50,8 @@ jobs:
             lib/llm/font-resolve.demo.ts \
             lib/openai/prompt.demo.ts \
             lib/render/compose.demo.ts \
-            lib/render/font.demo.ts
+            lib/render/font.demo.ts \
+            lib/render/demo-cache.demo.ts
           do
             echo "::group::$f"
             npx tsx "$f" || { echo "::error::$f 실패"; status=1; }
