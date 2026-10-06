@@ -9,6 +9,7 @@ import {
   type StoredSubjectTag,
 } from "@/lib/llm/subject-tags";
 import { resolveImageUrl } from "../../asset-url";
+import { useProjectFont } from "./useProjectFont";
 import type { CaptionPosition, Storyboard } from "../../session/[id]/storyboard-types";
 
 // spec-a3 3-2(e): 에디터도 로드 시 저장본을 정규화한다. 화면 타입은 A① 소유라
@@ -97,6 +98,9 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  // #209: 프로젝트 폰트. 프리셋을 못 읽거나 폰트가 없으면 null·undefined — 현행 그대로.
+  const [presetId, setPresetId] = useState<string | null>(null);
+  const captionFontFamily = useProjectFont(presetId);
   // spec-a3 3-3: 400(subject_tags) 복구. saveRecovery가 true면 복구 버튼+안내를
   // 기존 에러 아래에 보여준다. saveLockRef는 원래 저장과 복구를 같은 플래그로 막는다.
   const [recovering, setRecovering] = useState(false);
@@ -133,6 +137,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
             ? { ...restored, subject_tags: loaded.tags }
             : stripSubjectTags(restored);
         setSaved({ version: data.version, storyboard: normalized });
+        setPresetId(typeof data.presetId === "string" ? data.presetId : null);
         setDraft(clone(normalized));
         setPhase("ready");
 
@@ -441,7 +446,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
                 draggable
                 onDragStart={(e) => e.dataTransfer.setData("text/plain", String(i))}
                 className="absolute max-w-[70%] cursor-move truncate rounded-full bg-white px-3 py-1 text-xs font-medium shadow"
-                style={POSITION_STYLE[cut.caption.position]}
+                style={{ ...POSITION_STYLE[cut.caption.position], fontFamily: captionFontFamily }}
                 title="끌어서 말풍선 위치를 옮길 수 있어요"
               >
                 {cut.caption.text}
