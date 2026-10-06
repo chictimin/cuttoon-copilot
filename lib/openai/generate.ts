@@ -83,6 +83,9 @@ interface MinimalPreset {
     // 쓰고 있었다 — 시트와 컷이 서로 다른 스타일 지시를 받는 상태였다.
     palette?: string[]
     keywords?: string[]
+    // #151: keywords 를 어휘 사전으로 바꾼 영문 힌트(resolvePresetStyle 결과). 있으면
+    // 프롬프트에는 이쪽을 쓴다. 원본 keywords 는 그대로 저장돼 있다.
+    keyword_hints?: string[]
     // bubble_style 은 읽지 않는다. 말풍선은 생성 이미지에 넣지 않고 나중에
     // 합성하므로(PRD 6절) B③ 쪽 값이다.
   }
@@ -90,6 +93,8 @@ interface MinimalPreset {
   // 버려지고 있었다. 프롬프트 조립은 B① 몫이라(PRD 5절) 여기서 넣는다.
   rules?: {
     forbidden?: string[]
+    // #151: forbidden 의 영문 힌트. keyword_hints 와 같은 규칙으로 읽는다.
+    forbidden_hints?: string[]
   }
   // 온보딩에서 사용자가 직접 고른 값이다(골든 패스 2·3단계). 장면 연출에 쓴다 —
   // 50대 부모가 등장하는 헬스케어 장면과 20대 취준생 IT 장면은 배경·소품이 다르다.
@@ -191,7 +196,9 @@ export function ratioClause(value?: string): string {
 
 // 대사는 텍스트 레이어로 나중에 얹는다(PRD 6절) — 프롬프트에 caption 텍스트를
 // 절대 포함하지 않는다. reserved_zone만 전달해 자리를 비워두게 한다.
-function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cut?: MinimalCut): string {
+// export 하는 이유: prompt.demo.ts 가 키워드·금지어 힌트 폴백(#151)을 실제 조립
+// 문자열로 확인한다. 유료 호출 없이 순수하게 문자열만 만든다.
+export function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cut?: MinimalCut): string {
   const s = preset.style
   // character_ratio 만 라벨이 뒤에 붙는 형태였다 — `${값} body proportions`. 힌트
   // 서술문은 그 자체로 완결된 구라서 뒤에 라벨을 또 붙이면 문장이 깨진다.
@@ -255,7 +262,10 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   // 값이 없으면 문장을 넣지 않는다. 시트 쪽은 비었을 때 "designer's choice" 를
   // 넣는데, 컷에서는 그 채움말이 오히려 지시로 읽혀 시트에서 정해진 색을 흔든다.
   if (preset.style?.palette?.length) parts.push(`Color palette: ${preset.style.palette.join(', ')}.`)
-  if (preset.style?.keywords?.length) parts.push(`Style keywords: ${preset.style.keywords.join(', ')}.`)
+  // #151: 영문 힌트가 있으면 힌트, 없으면 원본. 힌트 필드가 없는 기존 프로젝트는
+  // 지금과 같은 문장이 나간다. extract.ts 시트 쪽도 같은 규칙이다.
+  const keywords = preset.style?.keyword_hints ?? preset.style?.keywords
+  if (keywords?.length) parts.push(`Style keywords: ${keywords.join(', ')}.`)
 
   parts.push(
     // "Subject: 무릎 연골 나감." 처럼 명사구만 넣으면 모델이 소재를 표정으로만
@@ -352,7 +362,7 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
 
   // 금지 요소는 마지막 제약 구간에 넣는다. 사용자가 적은 자유 단어라(enum 아님)
   // 장면 서술 사이에 끼우면 소재나 cast 서술과 다투기 쉽다.
-  const forbidden = preset.rules?.forbidden?.filter((w) => w.trim())
+  const forbidden = (preset.rules?.forbidden_hints ?? preset.rules?.forbidden)?.filter((w) => w.trim())
   if (forbidden?.length) parts.push(`Do not include: ${forbidden.join(', ')}.`)
 
   parts.push('No speech bubbles. No text or lettering anywhere in the image — captions are composited separately afterward.')
