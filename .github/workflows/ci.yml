@@ -20,3 +20,43 @@ jobs:
           OPENAI_API_KEY: ci-build-placeholder
       - run: npx tsc --noEmit
       - run: npm run lint
+
+  # issue #219: 경계 검증 demo(*.demo.ts)를 PR마다 돌린다. 테스트 러너가 없어서 demo가 깨져도
+  # 사람이 직접 돌리기 전에는 알 수 없었다.
+  # - 환경(dev)·비밀값 없이 별도 잡으로 둔다. typecheck 잡의 진짜 Supabase 값이 demo로 넘어가
+  #   dev 버킷에 요청이 나가지 않게 한다(prompt.demo가 asset-store를 import하면 버킷 조회를 시도한다).
+  # - 실행할 demo는 명시 목록이다(A안). 외부 의존이 없는 것만 넣고, 새 demo는 이 목록에 추가한다.
+  # - 하나가 실패해도 끝까지 돌려 실패 목록을 한 번에 보여 주고, 하나라도 실패하면 잡이 실패한다.
+  demo:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ci-demo-placeholder
+      SUPABASE_URL: https://ci-demo-placeholder.invalid
+      SUPABASE_SERVICE_ROLE_KEY: ci-demo-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: npm ci
+      - name: demo
+        run: |
+          status=0
+          for f in \
+            lib/llm/preset-guard.demo.ts \
+            lib/llm/storyboard-guard.demo.ts \
+            lib/llm/subject-tags.demo.ts \
+            lib/llm/style-resolve.demo.ts \
+            lib/llm/font-probe.demo.ts \
+            lib/llm/font-resolve.demo.ts \
+            lib/openai/prompt.demo.ts \
+            lib/render/compose.demo.ts \
+            lib/render/font.demo.ts
+          do
+            echo "::group::$f"
+            npx tsx "$f" || { echo "::error::$f 실패"; status=1; }
+            echo "::endgroup::"
+          done
+          echo "::group::app/api/generate/_smoke-test.mjs --static-only"
+          node app/api/generate/_smoke-test.mjs --static-only || { echo "::error::_smoke-test --static-only 실패"; status=1; }
+          echo "::endgroup::"
+          exit $status
