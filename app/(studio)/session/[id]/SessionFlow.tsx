@@ -85,6 +85,13 @@ function normalizeTurns(turns: BrainstormTurn[]): BrainstormTurn[] {
   });
 }
 
+// #150: 대사 요청의 supporting_id — 조립된 cast의 조연 character_id(마스코트면
+// mascot.label). 조연이 없으면 키를 빼 서버가 "supporting"으로 처리하게 둔다.
+function supportingIdField(storyboard: Storyboard): { supporting_id?: string } {
+  const supporting = storyboard.cast.find((member) => member.role === "supporting");
+  return supporting ? { supporting_id: supporting.character_id } : {};
+}
+
 const FALLBACK_QUESTION: Record<"protagonist" | "supporting", string> = {
   protagonist: PROTAGONIST_QUESTION,
   supporting: SUPPORTING_QUESTION,
@@ -338,7 +345,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subject: trimmed,
-          context: { industry: preset?.context.industry ?? [] },
+          // #150: 마스코트가 있으면 서버가 조연 첫 후보로 넣는다(없으면 키 생략).
+          context: {
+            industry: preset?.context.industry ?? [],
+            ...(preset?.mascot ? { mascot: preset.mascot } : {}),
+          },
         }),
       });
       if (!res.ok) {
@@ -410,7 +421,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     };
 
     const timer = setTimeout(() => {
-      setStoryboard(assembleStoryboard(subject, full, preset.style.palette, undefined, sessionCta));
+      // #150: 마스코트는 4번째 인자로만 넘긴다 — 조연 답변이 마스코트 후보면
+      // cast의 조연 character_id가 mascot.label이 된다. 5번째는 #205 CTA.
+      setStoryboard(
+        assembleStoryboard(subject, full, preset.style.palette, preset.mascot, sessionCta)
+      );
       // F2: 조립된 기본 대사를 먼저 보여주고 이미지 호출 전에 생성 대사로 바꾼다.
       setStep("captions");
     }, 600);
@@ -447,6 +462,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             interests: preset.context.interests,
             cta_format: preset.rules.cta_format,
           },
+          ...supportingIdField(storyboard),
           // #205: 조립에 쓴 것과 같은 cta. 빠지면 서버가 clear로 보고 none 4컷에 400을 낸다.
           cta: sessionCta,
         }),
@@ -543,6 +559,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             interests: preset.context.interests,
             cta_format: preset.rules.cta_format,
           },
+          ...supportingIdField(storyboard),
           cta: sessionCta,
           cut_index: cutIndex,
         }),
