@@ -56,6 +56,43 @@ const VALID = {
   bubble_style: getEnumAt(["properties", "style", "properties", "bubble_style"]),
 };
 
+const ENUM_FIELDS = [
+  "line_weight",
+  "saturation",
+  "character_ratio",
+  "background_density",
+  "bubble_style",
+] as const;
+
+/** 앞에서부터 첫 정확 일치 1개 — mergeStyleValues와 appliedEnumKeywords의 공유 규칙. */
+function findFirstEnumMatch(keywords: string[], validValues: string[]): string | undefined {
+  for (const keyword of keywords) {
+    if (validValues.includes(keyword)) {
+      return keyword;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * enum으로 실제 적용된 키워드 목록 (spec-b2 3-1).
+ *
+ * enum 필드 5개 각각에서 mergeStyleValues와 같은 규칙(앞에서부터 첫 정확
+ * 일치 1개)으로 고른 키워드를 모은 배열(중복 제거, 입력 순서). 같은 필드의
+ * 두 번째 이후 enum 단어는 적용되지 않았으므로 포함하지 않는다.
+ */
+export function appliedEnumKeywords(userKeywords: string[]): string[] {
+  const picked: string[] = [];
+  for (const field of ENUM_FIELDS) {
+    const match = findFirstEnumMatch(userKeywords, VALID[field]);
+    if (match !== undefined && !picked.includes(match)) {
+      picked.push(match);
+    }
+  }
+  picked.sort((a, b) => userKeywords.indexOf(a) - userKeywords.indexOf(b));
+  return picked;
+}
+
 const DEFAULT_STYLE_VALUES: MergedStyleResult = {
   line_weight: "medium",
   saturation: "pastel",
@@ -82,14 +119,7 @@ export function mergeStyleValues(
   const findKeywordMatch = <T extends string>(
     keywords: string[],
     validValues: string[]
-  ): T | undefined => {
-    for (const keyword of keywords) {
-      if (validValues.includes(keyword)) {
-        return keyword as T;
-      }
-    }
-    return undefined;
-  };
+  ): T | undefined => findFirstEnumMatch(keywords, validValues) as T | undefined;
 
   // 사용자 키워드가 있으면 우선, 없으면 추출값(또는 기본값) 사용
   const line_weight = (

@@ -16,6 +16,7 @@ import {
 } from "./preset-guard";
 import {
   mergeStyleValues,
+  appliedEnumKeywords,
   type MergedStyleResult,
   type StyleExtractionResult,
 } from "./style-merge";
@@ -52,10 +53,21 @@ export function resolvePresetStyle(input: ResolvePresetStyleInput): ResolvePrese
     rules: { forbidden: input.forbidden },
   });
 
+  // spec-b2 3-2: enum으로 이미 적용된 키워드는 findings에서 삭제하지 않고
+  // status만 "enum_applied"로 바꿔 남긴다. rules.forbidden은 대상이 아니다.
+  const applied = appliedEnumKeywords(input.userKeywords);
+  const findings = checked.findings.map((finding) =>
+    finding.field === "style.keywords" &&
+    finding.status === "unmapped" &&
+    applied.includes(finding.original)
+      ? { ...finding, status: "enum_applied" as const }
+      : finding
+  );
+
   return {
     style,
     keywordHints: checked.resolvedHints["style.keywords"],
     forbiddenHints: checked.resolvedHints["rules.forbidden"],
-    findings: checked.findings,
+    findings,
   };
 }
