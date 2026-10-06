@@ -246,6 +246,16 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [saveRecovery, setSaveRecovery] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const saveLockRef = useRef(false);
+
+  // #259: 4컷을 만드는 중이거나 만든 뒤 저장 전이면, 새로고침·탭 닫기 때 브라우저 확인창을 띄운다.
+  // 이미 저장된 세션을 다시 연 화면(isRestoredView)과 저장 완료(saved)는 잃을 것이 없다.
+  const hasUnsavedResult = step === "generating" || (step === "cuts" && !isRestoredView);
+  useEffect(() => {
+    if (!hasUnsavedResult) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsavedResult]);
   const [presetError, setPresetError] = useState<string | null>(null);
 
   // issue #123: preset(상의 색 후보 palette 포함)을 브레인스토밍 진행과 병렬로
