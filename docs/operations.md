@@ -100,7 +100,7 @@ npm run lint             # 린트
 npm run spec:sync-check  # 스키마 · 데이터 정합 검사
 ```
 
-위 블록은 순서가 아니다 — 처음 실행 순서는 README 참고. `npm start`는 `build` 산출물이 있어야 동작한다(단독 실행 불가).
+위 블록은 순서가 아니다 — 처음 실행 순서는 [README](../README.md#처음-실행) 참고. `npm start`는 `build` 산출물이 있어야 동작한다(단독 실행 불가).
 
 ## 구현 현황
 
