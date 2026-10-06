@@ -153,6 +153,17 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
     };
   }, [sessionId]);
 
+  // #259: 저장하지 않은 수정이 있으면 새로고침·탭 닫기 때 브라우저 확인창을 띄운다.
+  // 앱 안의 링크 이동은 막지 않는다.
+  const hasUnsavedEdits =
+    phase === "ready" && !!draft && !!saved && JSON.stringify(draft) !== JSON.stringify(saved.storyboard);
+  useEffect(() => {
+    if (!hasUnsavedEdits) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsavedEdits]);
+
   if (phase === "loading") {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center">
@@ -213,19 +224,20 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
     });
   }
 
-  async function handleSave() {
-    if (!draft) return;
+  // 저장이 끝까지 성공했을 때만 true. 내보내기 전 저장(#259)이 이 결과를 본다.
+  async function handleSave(): Promise<boolean> {
+    if (!draft) return false;
 
     try {
       // #205: 강도를 함께 넘겨야 none(CTA 컷 0개)이 기존 규칙(CTA 1개)에 막히지 않는다.
       assertStoryboardRuntimeInvariants(draft.cuts, draft.cta_strength);
     } catch {
       setActionError("스토리보드에 문제가 있어요");
-      return;
+      return false;
     }
 
     // spec-a3 3-3: 동기 잠금 — 복구 버튼과 같은 플래그를 쓴다.
-    if (saveLockRef.current) return;
+    if (saveLockRef.current) return false;
     saveLockRef.current = true;
     setActionError(null);
     setSaveRecovery(false);
@@ -244,15 +256,17 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         if (res.status === 400 && typeof body?.error === "string" && body.error.startsWith("subject_tags")) {
           setSaveRecovery(true);
         }
-        return;
+        return false;
       }
 
       const data = await res.json();
       setSaved({ version: data.version, storyboard: draft });
       setSaveNotice(null);
       setSavedAt(new Date().toLocaleTimeString());
+      return true;
     } catch {
       setActionError("저장에 실패했어요. 다시 시도해주세요");
+      return false;
     } finally {
       setSaving(false);
       saveLockRef.current = false;
@@ -332,6 +346,9 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
     setExportNotice(null);
     setExporting(true);
     try {
+      // #259: Export는 DB 저장본만 읽는다. 미저장 수정이 있으면 먼저 저장하고, 저장이 실패하면
+      // 수정 전 대사로 내보내지 않고 멈춘다(오류·복구 버튼은 handleSave가 이미 보여 준다).
+      if (isDirty && !(await handleSave())) return;
       const res = await fetch(`/api/session/export?id=${encodeURIComponent(sessionId)}`);
 
       if (res.status === 409) {
@@ -508,7 +525,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         <button
           type="button"
           onClick={handleExport}
-          disabled={exporting}
+          disabled={exporting || saving || reverting || recovering}
           className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
         >
           {exporting ? "내보내는 중…" : "내보내기"}
