@@ -48,6 +48,7 @@ jobs:
             lib/llm/style-resolve.demo.ts \
             lib/llm/font-probe.demo.ts \
             lib/llm/font-resolve.demo.ts \
+            lib/llm/session-cast.demo.ts \
             lib/openai/prompt.demo.ts \
             lib/render/compose.demo.ts \
             lib/render/font.demo.ts \
