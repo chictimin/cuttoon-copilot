@@ -54,6 +54,21 @@ checks.push(
   ["forbidden thin → rules.forbidden unmapped 유지", find(forbiddenEnum, "rules.forbidden", "thin")?.status === "unmapped"],
 );
 
+// B2 재작업 회귀: trim된 finding 문자열이 같아도 실제로 소비된 입력 위치의 finding만 바뀐다.
+const kwFindings = (result: typeof vocab) =>
+  result.findings.filter((f) => f.field === "style.keywords");
+const spacedFirst = resolvePresetStyle({ extracted: null, userKeywords: [" thin", "thin"], forbidden: [] });
+const spacedSecond = resolvePresetStyle({ extracted: null, userKeywords: ["thin", " thin"], forbidden: [] });
+const withBlanks = resolvePresetStyle({ extracted: null, userKeywords: ["thin", "", "  ", "pastel"], forbidden: [] });
+const dupThin = resolvePresetStyle({ extracted: null, userKeywords: ["thin", "thin"], forbidden: [] });
+
+checks.push(
+  ["[\" thin\",\"thin\"] → 두 번째만 enum_applied", kwFindings(spacedFirst).length === 2 && kwFindings(spacedFirst)[0]?.status === "unmapped" && kwFindings(spacedFirst)[1]?.status === "enum_applied"],
+  ["[\"thin\",\" thin\"] → 첫 번째만 enum_applied", kwFindings(spacedSecond).length === 2 && kwFindings(spacedSecond)[0]?.status === "enum_applied" && kwFindings(spacedSecond)[1]?.status === "unmapped"],
+  ["빈 입력 섞임 → thin·pastel finding만 enum_applied", kwFindings(withBlanks).length === 2 && kwFindings(withBlanks).every((f) => f.status === "enum_applied")],
+  ["[\"thin\",\"thin\"] → 첫 번째만 enum_applied", kwFindings(dupThin).length === 2 && kwFindings(dupThin)[0]?.status === "enum_applied" && kwFindings(dupThin)[1]?.status === "unmapped"],
+);
+
 let failed = 0;
 for (const [name, pass] of checks) {
   if (pass) {

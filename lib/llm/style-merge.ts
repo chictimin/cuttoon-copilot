@@ -64,14 +64,34 @@ const ENUM_FIELDS = [
   "bubble_style",
 ] as const;
 
+/** 앞에서부터 첫 정확 일치의 입력 인덱스 — merge 경로와 소비 판정의 공유 규칙. */
+function findFirstEnumMatchIndex(keywords: string[], validValues: string[]): number {
+  return keywords.findIndex((keyword) => validValues.includes(keyword));
+}
+
 /** 앞에서부터 첫 정확 일치 1개 — mergeStyleValues와 appliedEnumKeywords의 공유 규칙. */
 function findFirstEnumMatch(keywords: string[], validValues: string[]): string | undefined {
-  for (const keyword of keywords) {
-    if (validValues.includes(keyword)) {
-      return keyword;
+  const index = findFirstEnumMatchIndex(keywords, validValues);
+  return index === -1 ? undefined : keywords[index];
+}
+
+/**
+ * enum으로 실제 소비된 입력 인덱스 목록 (B2 재작업).
+ *
+ * enum 필드 5개 각각에서 mergeStyleValues와 같은 규칙(앞에서부터 첫 정확
+ * 일치)으로 고른 입력 위치를 모은 배열(중복 제거, 오름차순). 같은 문자열이
+ * 두 번 나와도 첫 위치만 소비된다.
+ */
+export function appliedEnumKeywordIndices(userKeywords: string[]): number[] {
+  const indices: number[] = [];
+  for (const field of ENUM_FIELDS) {
+    const index = findFirstEnumMatchIndex(userKeywords, VALID[field]);
+    if (index !== -1 && !indices.includes(index)) {
+      indices.push(index);
     }
   }
-  return undefined;
+  indices.sort((a, b) => a - b);
+  return indices;
 }
 
 /**
@@ -83,13 +103,12 @@ function findFirstEnumMatch(keywords: string[], validValues: string[]): string |
  */
 export function appliedEnumKeywords(userKeywords: string[]): string[] {
   const picked: string[] = [];
-  for (const field of ENUM_FIELDS) {
-    const match = findFirstEnumMatch(userKeywords, VALID[field]);
-    if (match !== undefined && !picked.includes(match)) {
-      picked.push(match);
+  for (const index of appliedEnumKeywordIndices(userKeywords)) {
+    const keyword = userKeywords[index];
+    if (!picked.includes(keyword)) {
+      picked.push(keyword);
     }
   }
-  picked.sort((a, b) => userKeywords.indexOf(a) - userKeywords.indexOf(b));
   return picked;
 }
 
