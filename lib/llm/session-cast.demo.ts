@@ -1,4 +1,4 @@
-// session-cast 고정 기본값 fixture (spec-cast rev2 4절 T1~T8).
+// session-cast 고정 기본값 fixture.
 // 테스트 러너를 추가하지 않는다 — lib/llm/storyboard-guard.demo.ts와 같은 컨벤션.
 //
 // 실행: npx tsx lib/llm/session-cast.demo.ts
@@ -33,7 +33,7 @@ function desc(
     .description;
 }
 
-// T1 기본값(H4): 머리·옷 언급 없음 → 짧은 검은 머리 + 상의 palette[0], 순서 원문 → 머리 → 상의.
+// 기본값: 머리·옷 언급 없음 → 짧은 검은 머리 + 상의 palette[0], 순서 원문 → 머리 → 상의.
 check("const-hair", DEFAULT_PROTAGONIST_HAIR === "짧은 검은 머리");
 check("const-color", DEFAULT_PROTAGONIST_HAIR_COLOR === "검은 머리");
 check("t1-h4", desc("30대 직장인") === "30대 직장인, 짧은 검은 머리, 상의 #112233");
@@ -47,7 +47,7 @@ check(
 );
 check("t1-order", protagonistAppearance("30대 직장인", ["#112233"]).join(",") === "짧은 검은 머리,상의 #112233");
 
-// T2 결정성: random 무시 + 입력 불변 + palette 첫 색 고정(대소문자 그대로).
+// 결정성: random 무시 + 입력 불변 + palette 첫 색 고정(대소문자 그대로).
 const t2a = [0, 0.1, 0.5, 0.99].map((v) =>
   desc("30대 직장인", ["#AA", "#BB"], () => v),
 );
@@ -72,23 +72,23 @@ check(
   desc("30대 직장인", ["#ff0000"]) === "30대 직장인, 짧은 검은 머리, 상의 #ff0000",
 );
 
-// T3 머리색 우선(H2): 머리 조각 없음.
+// 머리색 우선: 머리 조각 없음.
 for (const p of ["갈색 머리의 직장인", "금발 대학생", "흰머리 할머니", "머리는 갈색인 디자이너", "검게 염색한 머리 디자이너", "brown-haired student"]) {
   check(`t3-h2:${p}`, desc(p, []) === p, desc(p, []));
 }
 
-// T4 스타일만(H3): 검은 머리 1회, 짧은 미포함.
+// 모양만 언급: 검은 머리 1회, 짧은 미포함.
 for (const p of ["긴 머리 여성", "포니테일 학생", "곱슬머리 청년", "long hair woman"]) {
   const x = desc(p, []);
   check(`t4-h3:${p}`, x === `${p}, 검은 머리` && x.indexOf("짧은") < 0, x);
 }
 
-// T5 무모(H1): 머리 조각 없음.
+// 무모: 머리 조각 없음.
 for (const p of ["대머리 남성", "삭발한 군인", "bald man"]) {
   check(`t5-h1:${p}`, desc(p, []) === p, desc(p, []));
 }
 
-// T6 옷 색 우선: 상의 없음 + shirtColor null, 머리 조각은 3-2대로(독립 판정).
+// 옷 색 우선: 상의 없음 + shirtColor null, 머리 조각은 독립 판정.
 for (const p of ["빨간 셔츠를 입은 직장인", "흰 가운 의사", "navy suit designer"]) {
   const o = buildSessionCast({ protagonist: p, supporting: null, palette: ["#112233"] });
   check(
@@ -102,7 +102,7 @@ check(
   desc("빨간 셔츠를 입은 긴 머리 여성") === "빨간 셔츠를 입은 긴 머리 여성, 검은 머리",
 );
 
-// T7 오탐 0: 티켓·와인 단독·하의는 상의 아님 → 기본값 그대로.
+// 오탐 방지: 티켓·와인 단독·하의는 상의 아님 → 기본값 그대로.
 for (const p of ["하얀 티켓을 든 사람", "와인을 좋아하는 직장인", "검은 바지 학생"]) {
   check(`t7-sus:${p}`, desc(p) === `${p}, 짧은 검은 머리, 상의 #112233`, desc(p));
 }
@@ -111,7 +111,7 @@ check(
   desc("갈색 머리의 직장인") === "갈색 머리의 직장인, 상의 #112233",
 );
 
-// T8 범위 밖·중복: 빈 palette·조연 분기·빈 주인공 예외·둘 다 언급.
+// 범위 밖·중복: 빈 palette·조연 분기·빈 주인공 예외·둘 다 언급.
 const emptyPal = buildSessionCast({ protagonist: "30대 직장인", supporting: null, palette: [] });
 check(
   "t8-empty-pal",

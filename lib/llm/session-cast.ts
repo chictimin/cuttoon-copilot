@@ -53,7 +53,7 @@ export interface SessionCast {
 export class SessionCastError extends Error {}
 
 /**
- * 주인공 머리 기본값 (spec-cast rev2 3-1). 머리 언급이 전혀 없을 때(H4) 붙는다.
+ * 주인공 머리 기본값. 머리 언급이 전혀 없을 때(H4) 붙는다.
  */
 export const DEFAULT_PROTAGONIST_HAIR = "짧은 검은 머리";
 
@@ -62,7 +62,7 @@ export const DEFAULT_PROTAGONIST_HAIR = "짧은 검은 머리";
  */
 export const DEFAULT_PROTAGONIST_HAIR_COLOR = "검은 머리";
 
-// spec-cast rev2 3-3 판정 단어. fixture로 동결된 최소 목록이다.
+// 판정 단어. 고정된 최소 목록이다.
 // 와인은 `와인색`일 때만 색이다 — 단독 와인은 목록에 넣지 않고 ○색(generic)으로만 잡는다.
 // `염색`·`탈색`은 색이 아니라 행위라서 generic에서 제외한다
 // ("염색한 머리"는 H3, "탈색한 머리"는 알려진 한계로 H4).
@@ -106,7 +106,7 @@ const HAIR_STYLE_EN_RE = /\b(?:long hair|short hair|ponytail|braids?|braided|cur
 
 type HairMention = "hairless" | "colored" | "style-only" | "none";
 
-// spec-cast rev2 3-2 3단 규칙. 판정 순서대로 첫 해당 단에서 끝난다(H1 → H2 → H3 → H4).
+// 머리 3단 규칙 (H1 무모 → H2 머리색 → H3 모양만 → H4 언급 없음). 판정 순서대로 첫 해당 단에서 끝난다.
 function classifyHairMention(protagonist: string): HairMention {
   // 기본 문구가 이미 있으면 H2로 생략 → 중복 삽입 0.
   if (protagonist.includes(DEFAULT_PROTAGONIST_HAIR)) {
@@ -134,7 +134,7 @@ function classifyHairMention(protagonist: string): HairMention {
 
 const TOP_WORD_SRC =
   "와이셔츠|티셔츠|맨투맨|앞치마|블라우스|스웨터|유니폼|카디건|가디건|셔츠|남방|상의|재킷|자켓|코트|원피스|니트|후드|후디|조끼|정장|양복|점퍼|가운|옷|티";
-// 상의 단어 뒤 경계 (spec-cast rev2 3-3): 끝·공백·문장부호·조사만 허용 → "하얀 티켓" 오탐 0.
+// 상의 단어 뒤 경계: 끝·공백·문장부호·조사만 허용 → "하얀 티켓" 오탐 0.
 const TOP_TAIL_SRC =
   "(?=$|[\\s.,!?…()\\[\\]{}\"'—–-]|으로|차림|[을를이가은는에의와과도만로])";
 const CLOTHING_HEX_SRC = "#[0-9A-Fa-f]{6}";
@@ -166,7 +166,7 @@ function hasClothingColorMention(protagonist: string): boolean {
 }
 
 /**
- * 주인공 description 뒤에 붙일 외형 조각 목록 (spec-cast rev2 3-1).
+ * 주인공 description 뒤에 붙일 외형 조각 목록.
  * 순서 고정: 머리 → 상의. 머리(H1~H4)와 상의는 각자 독립 판정한다
  * (사용자 서술 우선 + 기본값) — 옷색만 있는 서술에도 H4 머리가 붙는다.
  * 결정적: 같은 protagonist + 순서까지 같은 palette면 같은 출력.
@@ -211,7 +211,7 @@ export function pickShirtColor(colors: string[], random: () => number = Math.ran
  */
 export function buildSessionCast(input: BuildSessionCastInput): SessionCast {
   // random은 받되 쓰지 않는다 — 상의 색은 palette[0] 고정이라 호출처를 바꾸지 않아도 된다.
-  // (T2 결정성: 호출 시 throw하는 random을 주입해도 성공한다.)
+  // (결정성: 호출 시 throw하는 random을 주입해도 성공한다.)
   const { protagonist, supporting, mascot, palette } = input;
 
   if (!protagonist || protagonist.trim().length === 0) {
