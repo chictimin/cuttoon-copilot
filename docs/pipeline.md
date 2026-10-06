@@ -91,7 +91,8 @@ flowchart TD
 | 2 | 대사·말풍선 편집 | `EditorFlow.tsx` | 로컬 state만, 호출 없음 |
 | 3 | `handleSave` | `EditorFlow.tsx` | `POST /api/session/version` (백엔드·저장) |
 | 4 | `handleRevert` | `EditorFlow.tsx` | `POST /api/session/revert` (백엔드·저장) |
-| 5 | `handleExport` | `EditorFlow.tsx` | `GET /api/session/export` — 렌더링 경계, 5-2번 참고 |
+| 5 | `handleExport` | `EditorFlow.tsx` | 미저장 수정이 있으면 `handleSave`를 먼저 호출하고 실패하면 내보내지 않는다(#264). `GET /api/session/export` — 렌더링 경계, 5-2번 참고 |
+| 6 | 이탈 경고 | `EditorFlow.tsx`·`SessionFlow.tsx` | 미저장 결과·생성 중 새로고침·탭 닫기 시 브라우저 확인창(`beforeunload`, #259·#264) |
 
 ## 5. 이미지 생성·합성 파트
 

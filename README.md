@@ -34,18 +34,20 @@
 
 프리셋 = 프로젝트 그림체·타깃 설정 묶음. 표지 3안 = 1컷 후보 3장 중 고르기.
 
+화면 표기 대응: 문서의 레퍼런스 = 화면의 "참고 그림", 문서의 프리셋(저장) = 화면의 "프로젝트 설정"(#266).
+
 각 단계의 구현 상태는 [구현 현황](docs/operations.md#ops-status), 진행 중인 작업은 [2차 작업 표](docs/operations.md#ops-tasks). 제약·제외 기능·아키텍처 결정은 정본인 [PRD.md](./PRD.md)를 따른다.
 
 ## 비용·대기
 
-한 바퀴에 [이미지 호출 7회](docs/pipeline.md)(캐릭터 시트 1 + 표지 3 + 나머지 3컷). 단계별 대기 약 40초(시트)·70초(표지 3안)·130초(3컷, E2E 1차 실측). 생성 중 새로고침하면 결과가 사라지니 기다린다. 시험 삼아 돌릴 때는 `IMAGE_PROVIDER=openai-low`([P0 판정](docs/operations.md#ops-p0)·발표·최종 회귀는 `openai`로만).
+한 바퀴에 [이미지 호출 7회](docs/pipeline.md)(캐릭터 시트 1 + 표지 3 + 나머지 3컷). 단계별 대기 약 40초(시트)·70초(표지 3안)·130초(3컷, E2E 1차 실측). 생성 중·미저장 결과로 새로고침·탭 닫기를 하면 브라우저 확인창이 뜬다(#264). 시험 삼아 돌릴 때는 `IMAGE_PROVIDER=openai-low`([P0 판정](docs/operations.md#ops-p0)·발표·최종 회귀는 `openai`로만). 표지를 누르면 바로 나머지 3컷(유료) 생성이 시작된다(화면 안내 문구, #268).
 
 ## 스택
 
 | 영역 | 선택 |
 | --- | --- |
 | 앱 | Next.js 16 (App Router) · React 19 · TypeScript |
-| 컷 생성 | OpenAI Responses API — 텍스트 모델 `gpt-5`(`RESPONSES_MODEL`) + image_generation 도구 (`lib/openai/generate.ts`) |
+| 컷 생성 | OpenAI Responses API — 텍스트 모델 `gpt-5`(`RESPONSES_MODEL`, 코드 상수) + image_generation 도구 (`lib/openai/generate.ts`) |
 | 캐릭터 시트 | `gpt-image-1` (`generateCharacterSheet`, `lib/openai/extract.ts`) |
 | 텍스트(브레인스토밍 · 스타일 추출) | `gpt-4o` (`generateBrainstormTurns` — `lib/llm/brainstorm.ts`, `extractStyle` — `lib/openai/extract.ts`) |
 | DB · 스토리지 | Supabase |
