@@ -14,7 +14,13 @@ import {
   NO_SUPPORTING_OPTION,
   PROTAGONIST_QUESTION,
   SUPPORTING_QUESTION,
+  autoAnswer,
 } from "@/lib/llm/brainstorm-options";
+import {
+  displaySubject,
+  normalizeStoredSubjectTags,
+  type StoredSubjectTag,
+} from "@/lib/llm/subject-tags";
 // caption-tones.ts도 JSON 로더라 OPENAI_API_KEY를 쓰지 않아 클라이언트에서 안전하다.
 import { loadCaptionTones } from "@/lib/llm/caption-tones";
 // #205: 흐름 라벨 표시·CTA 요청 타입과 CTA 목록도 JSON 로더·순수 함수라 클라이언트에서 안전하다.
@@ -90,6 +96,17 @@ function normalizeTurns(turns: BrainstormTurn[]): BrainstormTurn[] {
 function supportingIdField(storyboard: Storyboard): { supporting_id?: string } {
   const supporting = storyboard.cast.find((member) => member.role === "supporting");
   return supporting ? { supporting_id: supporting.character_id } : {};
+}
+
+// spec-a3 3-2: 조립 전에는 상태 subjectTags, 조립 후에는 storyboard.subject_tags가
+// 단일 출처다. 화면 타입(storyboard-types.ts)은 A① 소유라 손대지 않고, 이 화면에서만
+// 쓰는 별칭으로 subject_tags를 단다(assembleStoryboard 반환형과 같은 모양).
+type Board = Storyboard & { subject_tags?: StoredSubjectTag[] };
+
+function stripSubjectTags(board: Board): Board {
+  const copy = { ...board };
+  delete copy.subject_tags;
+  return copy;
 }
 
 const FALLBACK_QUESTION: Record<"protagonist" | "supporting", string> = {
@@ -194,7 +211,16 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // F2: 기본 대사로 남은 컷 번호(서버 fallbackCutIndexes 기준). "기본 대사" 표시에 쓴다.
   const [defaultCutIndexes, setDefaultCutIndexes] = useState<number[]>([]);
   const [regenCutIndex, setRegenCutIndex] = useState<number | null>(null);
-  const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
+  const [storyboard, setStoryboard] = useState<Board | null>(null);
+  // spec-a3 3-2: 조립 전 태그 단일 출처(브레인스토밍 결과). 조립할 때
+  // assembleStoryboard 6번째 인자로 넘기면 storyboard.subject_tags가 된다.
+  const [subjectTags, setSubjectTags] = useState<StoredSubjectTag[]>([]);
+  // spec-a3 3-2(a): 브레인스토밍 요청마다 올리는 id + 요청 당시 소재. 응답은
+  // id가 최신이고 요청 소재가 현재 소재와 같을 때만 태그를 반영한다.
+  const requestIdRef = useRef(0);
+  // 응답 시점의 현재 소재와 대조한다(클로저의 subject는 요청 시점 값이라 렌더마다 거울에 둔다).
+  const subjectRef = useRef(subject);
+  subjectRef.current = subject;
   const [preset, setPreset] = useState<Preset | null>(null);
   const [coverVariants, setCoverVariants] = useState<GeneratedCut[] | null>(null);
   const [coverRequested, setCoverRequested] = useState<number | undefined>(undefined);
@@ -203,7 +229,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
   // 나머지 3컷 체이닝의 진행 상태 — 중간 실패 뒤 "이어서 만들기"가 이미 만든 컷과
   // 다음 컷 체이닝 토큰에서 재개하도록 렌더와 무관하게 들고 있는다(#104).
-  const chainRef = useRef<{ storyboard: Storyboard; token: string } | null>(null);
+  const chainRef = useRef<{ storyboard: Board; token: string } | null>(null);
   // #207: 표지 3안을 보여줄 때마다 한 라운드씩 쌓아 두었다가 "저장" 때 selections로
   // 함께 보낸다. 화면에 그리지 않는 기록이라 state가 아니라 ref로 든다.
   const selectionLogRef = useRef<SelectionLog>(createSelectionLog());
@@ -213,6 +239,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [draftCaption, setDraftCaption] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // spec-a3 3-3: 400(subject_tags) 복구. saveRecovery가 true면 복구 버튼+안내를
+  // 기존 에러 아래에 보여준다. saveLockRef는 원래 저장과 복구를 같은 플래그로
+  // 막는다(두 번 클릭·동시 클릭으로 세션 2개 생성 금지 — state가 아니라 동기 잠금).
+  const [recovering, setRecovering] = useState(false);
+  const [saveRecovery, setSaveRecovery] = useState(false);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const saveLockRef = useRef(false);
   const [presetError, setPresetError] = useState<string | null>(null);
 
   // issue #123: preset(상의 색 후보 palette 포함)을 브레인스토밍 진행과 병렬로
@@ -257,12 +290,20 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         const data = await res.json();
         if (cancelled) return;
 
-        const restored: Storyboard = data.storyboard;
-        const urls = await resolveCutImages(restored.cuts);
+        // spec-a3 3-2(e): 재진입은 저장본 자체를 정규화해 상태와 저장본을 같은
+        // 값으로 둔다. 태그가 깨졌으면 storyboard에 subject_tags 키 없이 둔다.
+        const restored = data.storyboard as Board;
+        const reentry = normalizeStoredSubjectTags(restored.subject_tags, restored.subject);
+        const normalized: Board =
+          reentry.tags.length > 0
+            ? { ...restored, subject_tags: reentry.tags }
+            : stripSubjectTags(restored);
+        const urls = await resolveCutImages(normalized.cuts);
         if (cancelled) return;
 
-        setStoryboard(restored);
-        setSubject(restored.subject);
+        setStoryboard(normalized);
+        setSubjectTags(reentry.tags);
+        setSubject(normalized.subject);
         setCutImageUrls(urls);
         setSavedSessionId(sessionId);
         setIsRestoredView(true);
@@ -333,11 +374,23 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // 여기서 setTurnsError(null) 로 시작하지 않는다 — effect 가 이 함수를 부르는
   // 경로에서 동기 setState 가 되어 cascading render 를 만든다
   // (react-hooks/set-state-in-effect). 초기화는 재시도 버튼 쪽에서 한다.
+  // spec-a3 3-2(b): 소재 변경은 이 함수 하나로 — 태그 비움 + 진행 중 요청의
+  // 태그 반영 무효화. 입력 onChange와 후보 onClick이 함께 쓴다.
+  function changeSubject(next: string) {
+    setSubject(next);
+    setSubjectTags([]);
+    requestIdRef.current += 1;
+  }
+
   async function loadTurns() {
     const trimmed = subject.trim();
     // 소재가 없으면 라우트가 400 을 준다 — 부르기 전에 끊는다. "다음" 버튼이
     // 빈 소재를 막고 있어 실제로는 도달하지 않는다.
     if (!trimmed) return;
+    // spec-a3 3-2(a): 요청 id와 요청 당시 소재를 기록한다. 요청 body에는 태그 없음.
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const requestSubject = trimmed;
 
     try {
       const res = await fetch("/api/brainstorm", {
@@ -356,9 +409,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error ?? "선택지를 만들지 못했습니다");
       }
-      const { turns: loaded, resolved } = (await res.json()) as {
+      const { turns: loaded, resolved, subjectTags: responseTags } = (await res.json()) as {
         turns: BrainstormTurn[];
         resolved?: ExtractedSlot[];
+        subjectTags?: unknown;
       };
       if (!Array.isArray(loaded) || loaded.length === 0) {
         throw new Error("선택지가 비어 있습니다");
@@ -372,6 +426,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         setResolvedSlots(resolved);
       }
       setTurns(normalizeTurns(loaded));
+      // spec-a3 3-2(a): id가 최신이고 요청 소재가 현재 소재와 같을 때만 태그 반영.
+      // turns 등 기존 반영 조건은 현행 유지 — 태그 반영만 이 조건을 탄다.
+      if (requestId === requestIdRef.current && requestSubject === subjectRef.current) {
+        setSubjectTags(normalizeStoredSubjectTags(responseTags, requestSubject).tags);
+      }
     } catch {
       setTurnsError("선택지를 만드는 데 실패했어요. 다시 시도해주세요");
     }
@@ -423,8 +482,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     const timer = setTimeout(() => {
       // #150: 마스코트는 4번째 인자로만 넘긴다 — 조연 답변이 마스코트 후보면
       // cast의 조연 character_id가 mascot.label이 된다. 5번째는 #205 CTA.
+      // spec-a3 3-2(c): 6번째는 조립 전 단일 출처 subjectTags. 비면 필드 생략(조립 함수 내).
       setStoryboard(
-        assembleStoryboard(subject, full, preset.style.palette, preset.mascot, sessionCta)
+        assembleStoryboard(subject, full, preset.style.palette, preset.mascot, sessionCta, subjectTags)
       );
       // F2: 조립된 기본 대사를 먼저 보여주고 이미지 호출 전에 생성 대사로 바꾼다.
       setStep("captions");
@@ -447,6 +507,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     setCaptionStatus("loading");
     setCaptionError(null);
 
+    // spec-a3 3-2(d): 조립 후 단일 출처는 storyboard.subject_tags. 대사 body를
+    // 별도 상태에서 만들지 않는다. 태그가 비면 키를 뺀다.
+    const tags = storyboard.subject_tags ?? [];
     try {
       const res = await fetch(CAPTIONS_ROUTE, {
         method: "POST",
@@ -465,6 +528,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           ...supportingIdField(storyboard),
           // #205: 조립에 쓴 것과 같은 cta. 빠지면 서버가 clear로 보고 none 4컷에 400을 낸다.
           cta: sessionCta,
+          ...(tags.length > 0 ? { subject_tags: tags } : {}),
         }),
       });
       if (!res.ok) {
@@ -544,6 +608,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   async function regenCutCaption(cutIndex: number) {
     if (!storyboard || !preset || !toneId) return;
     setRegenCutIndex(cutIndex);
+    // spec-a3 3-2(d): 다시 뽑기도 같은 단일 출처. 재진입 후 진행 문맥(toneId 등)
+    // 미복원은 범위 밖이라 현행대로 toneId 없으면 반환한다.
+    const tags = storyboard.subject_tags ?? [];
     try {
       const res = await fetch(CAPTIONS_ROUTE, {
         method: "POST",
@@ -561,6 +628,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           },
           ...supportingIdField(storyboard),
           cta: sessionCta,
+          ...(tags.length > 0 ? { subject_tags: tags } : {}),
           cut_index: cutIndex,
         }),
       });
@@ -644,7 +712,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     if (!storyboard || !preset) return;
     selectionLogRef.current = markSelected(selectionLogRef.current, index);
     const firstCutIndex = storyboard.cuts[0].cut_index;
-    const updated: Storyboard = {
+    const updated: Board = {
       ...storyboard,
       cuts: storyboard.cuts.map((cut, i) =>
         i === 0
@@ -659,7 +727,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   // 컷이 하나 끝날 때마다 storyboard·이미지 URL을 바로 반영한다. 다음 컷이 실패해도
   // 이미 유료로 만든 컷이 화면 상태에 남고, 재시도는 첫 미생성 컷부터 이어진다.
-  async function runChainedCuts(startStoryboard: Storyboard, token: string) {
+  async function runChainedCuts(startStoryboard: Board, token: string) {
     if (!preset) return;
     chainRef.current = { storyboard: startStoryboard, token };
     setStep("generating");
@@ -730,7 +798,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       return;
     }
 
+    // spec-a3 3-3: 동기 잠금 — 복구 버튼과 같은 플래그를 쓴다.
+    if (saveLockRef.current) return;
+    saveLockRef.current = true;
     setSaveError(null);
+    setSaveRecovery(false);
     setSaving(true);
     const selections = toPayload(selectionLogRef.current);
     try {
@@ -749,6 +821,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         setSaveError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+        // spec-a3 3-3: HTTP 400이고 error가 "subject_tags"로 시작할 때만 복구 버튼.
+        if (res.status === 400 && typeof body?.error === "string" && body.error.startsWith("subject_tags")) {
+          setSaveRecovery(true);
+        }
         return;
       }
 
@@ -768,11 +844,71 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         window.history.replaceState(null, "", `/session/${savedId}`);
       }
       setSavedSessionId(savedId);
+      setSaveNotice(null);
       setStep("saved");
     } catch {
       setSaveError("저장에 실패했어요. 다시 시도해주세요");
     } finally {
       setSaving(false);
+      saveLockRef.current = false;
+    }
+  }
+
+  // spec-a3 3-3: "소재 태그 없이 저장" 복구. 요청 본문은 현재 storyboard에서
+  // subject_tags 키를 뺀 사본이고 화면 상태는 아직 바꾸지 않는다. 실패하면 원본
+  // 유지·에러 표시·버튼 재사용, 성공할 때만 사본으로 교체한다.
+  async function handleRecoverSave() {
+    if (!storyboard || saveLockRef.current) return;
+    saveLockRef.current = true;
+    setRecovering(true);
+    setSaveError(null);
+    try {
+      const stripped = stripSubjectTags(storyboard);
+      const projectId = window.sessionStorage.getItem("cuttoon:project-id");
+      const presetId = window.sessionStorage.getItem("cuttoon:preset-id");
+      if (!projectId || !presetId) {
+        setSaveError("먼저 온보딩에서 프로젝트를 만들어주세요");
+        return;
+      }
+      const selections = toPayload(selectionLogRef.current);
+      const res = await fetch("/api/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId,
+          presetId,
+          storyboard: stripped,
+          ...(selections.length > 0 ? { selections } : {}),
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setSaveError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+        return;
+      }
+
+      const { sessionId: savedId, selectionsSaved } = (await res.json()) as {
+        sessionId: string;
+        selectionsSaved?: boolean;
+      };
+      if (selectionsSaved === false) {
+        setSelectionNotice("선택 기록은 저장되지 않았어요. 컷툰은 정상 저장됐습니다.");
+      }
+      if (savedId !== sessionId) {
+        window.history.replaceState(null, "", `/session/${savedId}`);
+      }
+      setSavedSessionId(savedId);
+      setStoryboard(stripped);
+      setSubjectTags([]);
+      setSaveRecovery(false);
+      setSaveNotice("소재 태그 매핑 없이 저장했어요");
+      setStep("saved");
+    } catch {
+      setSaveError("저장에 실패했어요. 다시 시도해주세요");
+    } finally {
+      setRecovering(false);
+      saveLockRef.current = false;
     }
   }
 
@@ -811,9 +947,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           <p className="text-sm text-zinc-500">
             이 컷툰 한 편의 실제 소재를 한 줄로 적어주세요
           </p>
+          {/* spec-a3 3-5: 선택 사항 + 가상 실명 예시. 새 입력 요소 없음. */}
+          <p className="text-sm text-zinc-500">
+            브랜드나 제품명을 넣으려면 실제 이름을 [대괄호]로 감싸 주세요. 예: [별빛핏]으로 운동 시작
+          </p>
           <input
             value={subject}
-            onChange={(e) => setSubject(e.target.value)}
+            onChange={(e) => changeSubject(e.target.value)}
             placeholder="예: 무릎 연골 나감"
             className="w-full rounded-md border border-zinc-300 px-4 py-3 text-sm"
           />
@@ -840,7 +980,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 <button
                   key={candidate}
                   type="button"
-                  onClick={() => setSubject(candidate)}
+                  onClick={() => changeSubject(candidate)}
                   className={`rounded-md border px-4 py-2.5 text-left text-sm hover:bg-zinc-50 ${
                     subject === candidate ? "border-zinc-900 bg-zinc-50" : "border-zinc-300"
                   }`}
@@ -951,16 +1091,22 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   직접 쓸게
                 </button>
               )}
-              {/* 선택지가 비면(모델이 그 턴을 빼먹은 경우) 고를 것이 없으니 감춘다 */}
-              {turns[turnIndex].options.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => recordAnswer(turns[turnIndex].options[0])}
-                  className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-500 hover:bg-zinc-50"
-                >
-                  알아서 해줘
-                </button>
-              )}
+              {/* spec-a3 3-6: "알아서 해줘"는 선택지 개수와 무관하게 렌더한다.
+                  선택지가 있으면 options[0], 빈 턴이면 autoAnswer 결정값. */}
+              <button
+                type="button"
+                onClick={() =>
+                  recordAnswer(
+                    autoAnswer(turns[turnIndex], {
+                      mascot: preset?.mascot ?? undefined,
+                      context: preset?.context ?? undefined,
+                    })
+                  )
+                }
+                className="rounded-md border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-500 hover:bg-zinc-50"
+              >
+                알아서 해줘
+              </button>
             </div>
           )}
         </div>
@@ -1208,6 +1354,22 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               {saveError}
             </p>
           )}
+          {/* spec-a3 3-3: 기존 에러 아래 복구 버튼 + 안내 1줄. 다른 400·5xx에는 안 보인다. */}
+          {saveRecovery && (
+            <div className="flex w-full max-w-md flex-col items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void handleRecoverSave()}
+                disabled={saving || recovering}
+                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
+              >
+                {recovering ? "저장 중…" : "소재 태그 없이 저장"}
+              </button>
+              <p className="text-sm text-zinc-500">
+                저장된 대사·그림은 그대로이고, 이후 컷을 다시 뽑으면 브랜드 대신 &lsquo;제품&rsquo;으로 나올 수 있어요
+              </p>
+            </div>
+          )}
           <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
             {storyboard.cuts.map((cut, i) => (
               <div key={cut.cut_index} className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
@@ -1286,7 +1448,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || recovering}
               className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
             >
               {saving ? "저장 중…" : "저장"}
@@ -1297,8 +1459,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
       {step === "saved" && storyboard && (
         <div className="flex flex-col items-center gap-4 text-center">
-          <h1 className="text-xl font-semibold">저장됐습니다</h1>
-          <p className="text-sm text-zinc-500">&ldquo;{storyboard.subject}&rdquo; 4컷이 준비됐어요</p>
+          <h1 className="text-xl font-semibold">{saveNotice ?? "저장됐습니다"}</h1>
+          <p className="text-sm text-zinc-500">&ldquo;{displaySubject(storyboard.subject)}&rdquo; 4컷이 준비됐어요</p>
           <Link
             href={`/editor/${savedSessionId ?? sessionId}`}
             className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"

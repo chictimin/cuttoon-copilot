@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { displaySubject } from "@/lib/llm/subject-tags";
 import { resolveImageUrl } from "../../asset-url";
 
 // issue #136: 만든 컷툰(세션)을 다시 볼 경로가 DB·API·화면 어디에도 없었다.
@@ -168,7 +169,7 @@ export default function ProjectSessions({ projectId }: { projectId: string }) {
                     )}
                   </div>
                   <div className="flex min-w-0 flex-col gap-1">
-                    <span className="truncate font-medium">{session.subject}</span>
+                    <span className="truncate font-medium">{displaySubject(session.subject)}</span>
                     <span className="text-xs text-zinc-500">
                       {session.status === "complete"
                         ? "완성됨"
