@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { assertValidPreset, type Preset } from "@/lib/llm/preset-guard";
+import { resolvePresetStyle } from "@/lib/llm/style-resolve";
 import { analyzeStyle, type StyleAnalysisResult } from "./style-analysis";
 import DetailsStep, { type DetailsFormValue } from "./DetailsStep";
 import MascotStep, { type MascotValue } from "./MascotStep";
@@ -39,6 +40,9 @@ export default function OnboardingFlow() {
   const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<StyleAnalysisResult | null>(null);
+  // #151: 레퍼런스 없이 진행. analysis는 null로 두고(가짜 분석값 금지) 이 상태로만
+  // 구분한다 — 저장은 extracted: null, style_refs: []로 간다.
+  const [skippedReference, setSkippedReference] = useState(false);
   // issue #122: style.keywords는 레퍼런스 추출로는 채워지지 않는다 — 온보딩에서
   // 직접 입력받는 게 스키마가 정의한 두 번째 입력 경로다. PRD 4절 딸깍 원칙의
   // 예외로 자유 타이핑을 허용한다(chictimin 확인, #122).
@@ -57,6 +61,7 @@ export default function OnboardingFlow() {
     try {
       const result = await analyzeStyle(files);
       setAnalysis(result);
+      setSkippedReference(false);
       setStep("result");
     } catch {
       setError("다시 시도해주세요");
@@ -84,6 +89,21 @@ export default function OnboardingFlow() {
     void runAnalysis(valid);
   }
 
+  // #151: 업로드 단계의 "레퍼런스 없이 진행" — 이미지 분석 호출 없이 결과 단계로.
+  function handleSkipReference() {
+    setError(null);
+    setAnalysis(null);
+    setSkippedReference(true);
+    setStep("result");
+  }
+
+  // 스킵 결과 화면의 "레퍼런스 올리기" — 업로드 단계로 되돌아간다.
+  function handleBackToUpload() {
+    setError(null);
+    setSkippedReference(false);
+    setStep("upload");
+  }
+
   function handleRetry() {
     if (referenceFiles.length === 0) return;
     void runAnalysis(referenceFiles);
@@ -107,7 +127,7 @@ export default function OnboardingFlow() {
   }
 
   async function createProject(details: DetailsFormValue, mascot: MascotValue | null) {
-    if (!analysis) return;
+    if (!analysis && !skippedReference) return;
 
     setError(null);
     setSaving(true);
@@ -115,7 +135,20 @@ export default function OnboardingFlow() {
     // 캐릭터 시트는 style(분석 단계)과 context(이 폼)가 둘 다 있어야 만들 수
     // 있어서 여기서 생성한다 — 프로젝트 생성 시 1회(#19 결정: 세션마다 다시
     // 만들지 않음).
-    const styleWithKeywords = { ...analysis.style, keywords: parseTags(keywordsText) };
+    // #151: 병합·영문 힌트 치환은 resolvePresetStyle 한 곳에서. 원본 키워드·금지
+    // 요소는 그대로 보존하고(#233 계약 (a)) 힌트는 별도 필드로 둔다. 같은 style을
+    // 시트 요청과 저장 프리셋 양쪽에 쓴다. 레퍼런스를 건너뛰면 extracted는 null.
+    const userKeywords = parseTags(keywordsText);
+    const resolved = resolvePresetStyle({
+      extracted: analysis?.style ?? null,
+      userKeywords,
+      forbidden: details.forbidden,
+    });
+    const styleWithKeywords: Preset["style"] = {
+      ...resolved.style,
+      keywords: userKeywords,
+      keyword_hints: resolved.keywordHints,
+    };
 
     let characterSheetAsset: string;
     try {
@@ -155,12 +188,13 @@ export default function OnboardingFlow() {
       project_name: details.projectName,
       assets: {
         character_sheet: characterSheetAsset,
-        style_refs: analysis.styleRefAssets,
+        style_refs: analysis?.styleRefAssets ?? [],
         reference_asset_ids: [],
       },
       style: styleWithKeywords,
       rules: {
         forbidden: details.forbidden,
+        forbidden_hints: resolved.forbiddenHints,
         cta_format: details.ctaId,
         cta_strength: details.ctaStrength,
       },
@@ -216,16 +250,18 @@ export default function OnboardingFlow() {
           fileInputRef={fileInputRef}
           onDragStateChange={setIsDragging}
           onFilesSelected={handleFilesSelected}
+          onSkip={handleSkipReference}
         />
       )}
       {step === "analyzing" && <AnalyzingStep />}
-      {step === "result" && analysis && (
+      {step === "result" && (analysis || skippedReference) && (
         <ResultStep
           analysis={analysis}
           previewUrl={previewUrl}
           keywordsText={keywordsText}
           onKeywordsTextChange={setKeywordsText}
           onRetry={handleRetry}
+          onBackToUpload={handleBackToUpload}
           onConfirm={handleConfirmStyle}
         />
       )}
@@ -267,12 +303,14 @@ function UploadStep({
   fileInputRef,
   onDragStateChange,
   onFilesSelected,
+  onSkip,
 }: {
   error: string | null;
   isDragging: boolean;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onDragStateChange: (dragging: boolean) => void;
   onFilesSelected: (files: FileList | File[]) => void;
+  onSkip: () => void;
 }) {
   return (
     <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
@@ -322,6 +360,14 @@ function UploadStep({
           }}
         />
       </label>
+
+      <button
+        type="button"
+        onClick={onSkip}
+        className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
+      >
+        레퍼런스 없이 진행
+      </button>
     </div>
   );
 }
@@ -355,22 +401,39 @@ function ResultStep({
   keywordsText,
   onKeywordsTextChange,
   onRetry,
+  onBackToUpload,
   onConfirm,
 }: {
-  analysis: StyleAnalysisResult;
+  /** null이면 레퍼런스를 건너뛴 것 — 기본 그림체를 보여준다. */
+  analysis: StyleAnalysisResult | null;
   previewUrl: string | null;
   keywordsText: string;
   onKeywordsTextChange: (text: string) => void;
   onRetry: () => void;
+  onBackToUpload: () => void;
   onConfirm: () => void;
 }) {
-  const { style } = analysis;
+  const skipped = analysis === null;
+  // 스킵이면 키워드 입력 전 기본값(#151). 키워드가 enum과 일치하면 저장 값은 달라질 수 있다.
+  const style =
+    analysis?.style ??
+    resolvePresetStyle({ extracted: null, userKeywords: [], forbidden: [] }).style;
 
   return (
     <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
-      <h1 className="text-xl font-semibold">이런 스타일로 만들었어요</h1>
+      <h1 className="text-xl font-semibold">
+        {skipped ? "레퍼런스 없이 기본 그림체로 시작해요" : "이런 스타일로 만들었어요"}
+      </h1>
+      {skipped && (
+        <p className="text-sm text-zinc-500">
+          아래 그림체 키워드를 적으면 기본값 대신 반영돼요. 키워드에 따라 달라질 수 있어요
+        </p>
+      )}
 
-      <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
+      <div
+        className={`grid w-full grid-cols-1 gap-4 ${skipped ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}
+      >
+        {!skipped && (
         <figure className="flex flex-col items-center gap-2">
           {previewUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- 사용자가 방금 올린 파일의 blob URL, next/image 불필요
@@ -386,6 +449,7 @@ function ResultStep({
             업로드한 레퍼런스 · 캐릭터 시트는 다음 단계 확정 후 생성돼요
           </figcaption>
         </figure>
+        )}
 
         <figure className="flex flex-col items-center gap-2">
           <div className="grid aspect-square w-full grid-cols-2 gap-1 overflow-hidden rounded-lg">
@@ -421,17 +485,19 @@ function ResultStep({
           className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
         />
         <p className="text-xs text-zinc-400">
-          레퍼런스에서 못 뽑아낸 그림체 느낌을 직접 적어주세요. 위 분석 결과에 더해져요
+          {skipped
+            ? "레퍼런스가 없을수록 그림체를 알려주는 단서예요. 느낌을 직접 적어주세요"
+            : "레퍼런스에서 못 뽑아낸 그림체 느낌을 직접 적어주세요. 위 분석 결과에 더해져요"}
         </p>
       </div>
 
       <div className="flex gap-3">
         <button
           type="button"
-          onClick={onRetry}
+          onClick={skipped ? onBackToUpload : onRetry}
           className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
         >
-          다시 뽑기
+          {skipped ? "레퍼런스 올리기" : "다시 뽑기"}
         </button>
         <button
           type="button"

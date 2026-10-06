@@ -45,7 +45,8 @@ export async function analyzeStyle(files: File[]): Promise<StyleAnalysisResult> 
 
   return {
     styleRefAssets,
-    // style.keywords는 온보딩에서 따로 안 모은다(자유 키워드 입력 단계 없음) — 빈 배열.
+    // keywords는 여기서 모으지 않는다 — OnboardingFlow가 키워드 입력을 받아
+    // resolvePresetStyle로 합친다(#151).
     style: { ...style, keywords: [] },
   };
 }
