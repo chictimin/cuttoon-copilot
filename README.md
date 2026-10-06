@@ -45,9 +45,9 @@
 | 영역 | 선택 |
 | --- | --- |
 | 앱 | Next.js 16 (App Router) · React 19 · TypeScript |
-| 컷 생성 | OpenAI Responses API — 텍스트 모델 `gpt-5` + image_generation 도구 (`lib/openai/generate.ts:19`) |
-| 캐릭터 시트 | `gpt-image-1` (`lib/openai/extract.ts:213`) |
-| 텍스트(브레인스토밍 · 스타일 추출) | `gpt-4o` (`lib/llm/brainstorm.ts:137`, `lib/openai/extract.ts:92`) |
+| 컷 생성 | OpenAI Responses API — 텍스트 모델 `gpt-5`(`RESPONSES_MODEL`) + image_generation 도구 (`lib/openai/generate.ts`) |
+| 캐릭터 시트 | `gpt-image-1` (`generateCharacterSheet`, `lib/openai/extract.ts`) |
+| 텍스트(브레인스토밍 · 스타일 추출) | `gpt-4o` (`generateBrainstormTurns` — `lib/llm/brainstorm.ts`, `extractStyle` — `lib/openai/extract.ts`) |
 | DB · 스토리지 | Supabase |
 | 렌더 합성 | sharp (`lib/render/`) |
 
