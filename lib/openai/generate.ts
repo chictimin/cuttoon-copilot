@@ -216,7 +216,13 @@ export function ratioClause(value?: string): string {
 // 절대 포함하지 않는다. reserved_zone만 전달해 자리를 비워두게 한다.
 // export 하는 이유: prompt.demo.ts 가 키워드·금지어 힌트 폴백(#151)과 소재 [브랜드]
 // 투영(#206)을 실제 조립 문자열로 확인한다. 유료 호출 없이 순수하게 문자열만 만든다.
-export function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cut?: MinimalCut): string {
+export function buildCutPrompt(
+  storyboard: MinimalStoryboard,
+  preset: MinimalPreset,
+  cut?: MinimalCut,
+  // 이 호출이 previous_response_id 로 앞 컷(표지 포함)을 이어받는가. generateCut 이 정한다.
+  opts: { continuesChain?: boolean } = {}
+): string {
   const s = preset.style
   // character_ratio 만 라벨이 뒤에 붙는 형태였다 — `${값} body proportions`. 힌트
   // 서술문은 그 자체로 완결된 구라서 뒤에 라벨을 또 붙이면 문장이 깨진다.
@@ -383,6 +389,19 @@ export function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPre
       parts.push(desc ? `Character: ${project(desc)}. ${traits}.` : `Character: ${traits || 'neutral expression, standing'}.`)
     }
 
+    // #240: 주인공 머리색이 컷마다 바뀌었다(검정↔갈색, 주황→검정). cast 서술에 머리색이
+    // 없고(세션당 고정은 상의 색뿐, #148), 마스코트가 아니면 시트도 다른 인물이라 컷
+    // 사이에 머리를 붙잡는 것이 없었다. 체이닝된 컷은 앞 컷 이미지를 대화 맥락으로
+    // 갖고 있으므로 "앞 컷과 같게" 를 명시한다. 표지·첫 컷은 앞 컷이 없어 넣지 않는다
+    // — 없는 대상을 가리키면 모델이 시트 인물로 읽을 수 있다.
+    if (opts.continuesChain && (cut.characters_in_frame ?? []).length) {
+      parts.push(
+        `This panel continues the earlier panels of this conversation. Every character who ` +
+          `appeared in them must look exactly the same here — same hair color, hairstyle, ` +
+          `face, age, outfit and outfit colors. Never change anyone's hair color between panels.`
+      )
+    }
+
     if (cut.reserved_zone) parts.push(reservedZoneHint(cut.reserved_zone))
   }
 
@@ -533,7 +552,10 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   // 유료 호출 전에 읽어 모르는 값이면 여기서 멈춘다(#190).
   const setting = imageSetting()
 
-  const prompt = buildCutPrompt(storyboard, preset, cut)
+  // ComfyUI 는 체이닝이 없어 앞 컷을 모른다(comfyui.ts 머리말) — 그때는 연속 문장을 넣지 않는다.
+  const prompt = buildCutPrompt(storyboard, preset, cut, {
+    continuesChain: !!input.continueFrom && setting !== 'comfyui',
+  })
   const { base64, responseId } = await callImageGeneration(
     prompt,
     input.referenceAssets,
