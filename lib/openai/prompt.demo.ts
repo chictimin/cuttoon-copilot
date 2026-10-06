@@ -332,7 +332,7 @@ async function main(): Promise<void> {
     ]);
   }
 
-  // --- 6. #240 체이닝 컷 머리색 유지 · #243 시트 여백 ---
+  // --- 6. #240 체이닝 컷 머리색 유지 ---
   {
     const sb = {
       subject: "demo",
@@ -350,14 +350,6 @@ async function main(): Promise<void> {
       !buildCutPrompt(sb, {}, { cut_index: 3, characters_in_frame: [] }, { continuesChain: true }).includes(KEEP),
     ]);
     checks.push(["cut 없음 → 문장 없음", !buildCutPrompt(sb, {}, undefined, { continuesChain: true }).includes(KEEP)]);
-  }
-  {
-    const LAYOUT = "No part of any figure (hair, hands, feet) may touch or be cut off by the canvas edge.";
-    checks.push(["일반 시트 → 여백 문장", buildCharacterPrompt(basePreset()).includes(LAYOUT)]);
-    checks.push([
-      "마스코트 시트 → 여백 문장",
-      buildCharacterPrompt({ ...basePreset(), mascot: { label: "m", description: "a brave fox" } }).includes(LAYOUT),
-    ]);
   }
 
   let failed = 0;

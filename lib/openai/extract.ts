@@ -170,10 +170,6 @@ export function buildCharacterPrompt(preset: PresetInput): string {
     ? `Character: ${mascot.description}. This is the project's recurring mascot — draw this same person in all three poses.`
     : `Character context: A person typical of the ${industryStr} field, targeting ${ageStr} age group, ${lifeStr} life stage.`;
 
-  // #243: 세 포즈를 정사각형에 나란히 그리다 인물을 너무 크게 잡아, 정면은 왼쪽·옆모습은
-  // 오른쪽 가장자리에서 잘렸다(1024×1024 요청·리사이즈라 후처리 크롭은 없음 — 모델 구도).
-  // 시트는 매 컷 reference 라 옆모습이 잘리면 그 정보가 빠진다. Layout 문장으로 여백을
-  // 요구한다. 마스코트 시트·일반 시트가 같은 템플릿이라 둘 다 적용된다.
   return `Character reference sheet for a webtoon/comic series.
 
 Style: ${s.line_weight ?? "medium"} line weight, ${s.saturation ?? "vivid"} colors, ${ratio}.
@@ -186,8 +182,6 @@ Draw the character in THREE poses on a single white-background sheet:
 1. Front view, neutral expression, standing
 2. 3/4 view, smiling
 3. Side view, walking
-
-Layout: all three full-body figures must fit completely inside the canvas. Scale them down so every figure has clear white margin on all sides — at the left and right edges of the canvas and between figures. No part of any figure (hair, hands, feet) may touch or be cut off by the canvas edge.
 
 No speech bubbles. No text. Clean reference sheet layout with clear separation between poses.`;
 }
