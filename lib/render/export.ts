@@ -5,7 +5,7 @@
 
 import { readAsset } from "../asset-store";
 import { composeCut } from "./compose";
-import { loadFont, type FontAsset } from "./font";
+import { loadFont, type PresetFont } from "./font";
 import { buildZip } from "./zip";
 import type { Cut } from "./types";
 
@@ -16,7 +16,7 @@ export interface ExportResult {
 }
 
 // font: 프리셋의 프로젝트 웹폰트(#209). 없거나 받지 못하면 시스템 폰트로 그리고 Export는 계속된다.
-export async function exportCuts(cuts: Cut[], opts: { font?: FontAsset | null } = {}): Promise<ExportResult> {
+export async function exportCuts(cuts: Cut[], opts: { font?: PresetFont | null } = {}): Promise<ExportResult> {
   const font = await loadFont(opts.font);
   const sorted = [...cuts].sort((a, b) => a.cut_index - b.cut_index);
   const entries: { name: string; data: Buffer }[] = [];
