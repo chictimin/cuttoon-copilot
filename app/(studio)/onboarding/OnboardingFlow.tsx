@@ -149,6 +149,13 @@ export default function OnboardingFlow() {
       keywords: userKeywords,
       keyword_hints: resolved.keywordHints,
     };
+    // 시트 요청과 저장 프리셋이 같은 rules를 쓴다(#233 계약 — 원본 forbidden + forbidden_hints).
+    const rules: Preset["rules"] = {
+      forbidden: details.forbidden,
+      forbidden_hints: resolved.forbiddenHints,
+      cta_format: details.ctaId,
+      cta_strength: details.ctaStrength,
+    };
 
     let characterSheetAsset: string;
     try {
@@ -159,6 +166,7 @@ export default function OnboardingFlow() {
           kind: "character_sheet",
           preset: {
             style: styleWithKeywords,
+            rules,
             context: {
               industry: details.industry,
               age_band: details.ageBand,
@@ -192,12 +200,7 @@ export default function OnboardingFlow() {
         reference_asset_ids: [],
       },
       style: styleWithKeywords,
-      rules: {
-        forbidden: details.forbidden,
-        forbidden_hints: resolved.forbiddenHints,
-        cta_format: details.ctaId,
-        cta_strength: details.ctaStrength,
-      },
+      rules,
       context: {
         industry: details.industry,
         interests: details.interests,
