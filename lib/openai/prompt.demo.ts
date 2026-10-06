@@ -14,7 +14,7 @@ import type { PresetInput } from "./extract";
 
 async function main(): Promise<void> {
   const { imageSetting, imageQuality } = await import("./image-setting");
-  const { activeMascot, ratioClause } = await import("./generate");
+  const { activeMascot, ratioClause, buildCutPrompt } = await import("./generate");
   const { buildCharacterPrompt } = await import("./extract");
 
   const checks: [string, boolean][] = [];
@@ -172,6 +172,92 @@ async function main(): Promise<void> {
     checks.push([
       "ratioClause(undefined) 문자열이 그대로 포함(값 없음)",
       prompt.includes(ratioClause(undefined)),
+    ]);
+  }
+
+  // --- #206 소재 [브랜드] 투영 (buildCutPrompt) ---
+  // 그림 프롬프트에 대괄호 원문(브랜드)이 0회 나가야 한다. 매칭 기준은 투영 함수와 같이
+  // 대소문자·공백 무시라, 검사도 같은 정규화로 본다. 브랜드는 예시 이름이다.
+  type CutStoryboard = Parameters<typeof buildCutPrompt>[0];
+  const norm = (t: string) => t.toLowerCase().replace(/\s+/g, "");
+  const leaks = (prompt: string, raw: string) => norm(prompt).includes(norm(raw));
+  const cut1 = {
+    cut_index: 1,
+    narrative_beat: "problem",
+    characters_in_frame: [{ character_id: "protagonist", expression: "worried", pose: "stand" }],
+  };
+  const tagged = (subject: string | undefined, desc: string, subject_tags?: unknown): string =>
+    buildCutPrompt(
+      {
+        subject,
+        cast: [{ character_id: "protagonist", role: "protagonist", description: desc }],
+        cuts: [cut1],
+        subject_tags,
+      } as CutStoryboard,
+      {},
+      cut1
+    );
+
+  {
+    // 대괄호 소재 + 태그 → category
+    const p = tagged("[블루핏 앱]으로 무릎 관리", "블루핏 앱을 매일 켜는 50대 여성", [
+      { raw: "블루핏 앱", category: "운동 앱" },
+    ]);
+    checks.push(["태그 있음 → 소재 문장 category", p.includes("The story is about 운동 앱으로 무릎 관리. ")]);
+    checks.push(["태그 있음 → cast 서술 category", p.includes("Character: 운동 앱을 매일 켜는 50대 여성. ")]);
+    checks.push(["태그 있음 → 원문 0회", !leaks(p, "블루핏 앱") && !leaks(p, "블루핏")]);
+  }
+  {
+    // 대괄호 소재 + 태그 없음(옛 세션·화면 미배선) → "제품"
+    const p = tagged("[블루핏 앱]으로 무릎 관리", "블루핏 앱을 매일 켜는 50대 여성");
+    checks.push(["태그 없음 → 소재 문장 '제품'", p.includes("The story is about 제품으로 무릎 관리. ")]);
+    checks.push(["태그 없음 → cast 서술 '제품'", p.includes("Character: 제품을 매일 켜는 50대 여성. ")]);
+    checks.push(["태그 없음 → 원문 0회", !leaks(p, "블루핏")]);
+  }
+  {
+    // 대괄호 없는 소재 → 소재·서술이 원문 그대로(기존과 같은 문장)
+    const p = tagged("무릎 연골 나감", "짧은 회색 머리의 60대 어머니");
+    checks.push(["대괄호 없음 → 소재 그대로", p.includes("The story is about 무릎 연골 나감. ")]);
+    checks.push(["대괄호 없음 → 서술 그대로", p.includes("Character: 짧은 회색 머리의 60대 어머니. ")]);
+  }
+  {
+    // cast 서술의 공백·대소문자 변형도 투영된다("New Balance" ↔ "newbalance"·"NEW  BALANCE")
+    const p = tagged(
+      "[New Balance] 운동화로 출근",
+      "newbalance 운동화를 신은 30대 남성, NEW  BALANCE 로고 모자",
+      [{ raw: "New Balance", category: "운동화 브랜드" }]
+    );
+    checks.push(["변형 → 원문 0회", !leaks(p, "New Balance")]);
+    checks.push([
+      "변형 → 서술 두 곳 모두 category",
+      p.includes("Character: 운동화 브랜드 운동화를 신은 30대 남성, 운동화 브랜드 로고 모자. "),
+    ]);
+  }
+  {
+    // 태그 개수 초과(4번째)·category에 원문을 담은 경우도 "제품"으로 막힌다
+    const p = tagged("[A사] [B사] [C사] [D사] 비교", "D사 점퍼를 입은 사람", [
+      { raw: "A사", category: "A사 앱" },
+      { raw: "B사", category: "은행" },
+      { raw: "C사", category: "카드" },
+    ]);
+    checks.push(["4번째 태그·원문 category → 원문 0회", ["A사", "D사"].every((r) => !leaks(p, r))]);
+  }
+  {
+    // 형태가 어긋난 subject_tags(category 숫자) → 죽지 않고 "제품"
+    let p = "";
+    try {
+      p = tagged("[블루핏 앱] 후기", "평범한 직장인", [{ raw: "블루핏 앱", category: 3 }]);
+    } catch {
+      p = "";
+    }
+    checks.push(["잘못된 subject_tags → '제품'", p.includes("The story is about 제품 후기. ")]);
+  }
+  {
+    // 소재가 비면 기존 기본 문장
+    const p = tagged(undefined, "평범한 직장인");
+    checks.push([
+      "소재 없음 → 기본 문장",
+      p.includes("The story is about a person dealing with an everyday situation. "),
     ]);
   }
 
