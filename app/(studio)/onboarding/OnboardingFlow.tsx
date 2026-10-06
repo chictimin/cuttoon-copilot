@@ -21,6 +21,29 @@ function parseTags(text: string): string[] {
     .filter(Boolean);
 }
 
+// #238: 영문 사전에 없어 입력하신 그대로 전달되는 그림체 키워드. enum으로 이미 적용된 단어는
+// resolvePresetStyle이 enum_applied로 따로 표시하므로(#255) unmapped만 모은다. 같은 단어는 한 번만.
+function unmappedKeywordWords(keywordsText: string): string[] {
+  const { findings } = resolvePresetStyle({
+    extracted: null,
+    userKeywords: parseTags(keywordsText),
+    forbidden: [],
+  });
+  return Array.from(
+    new Set(
+      findings
+        .filter((f) => f.field === "style.keywords" && f.status === "unmapped")
+        .map((f) => f.original)
+    )
+  );
+}
+
+// 최대 3개까지 보여 주고 넘으면 "외 N개".
+function formatUnmappedWords(words: string[]): string {
+  const shown = words.slice(0, 3).join(", ");
+  return words.length > 3 ? `${shown} 외 ${words.length - 3}개` : shown;
+}
+
 function validateFiles(files: File[]): { valid: File[]; error: string | null } {
   if (files.length === 0) {
     return { valid: [], error: null };
@@ -419,6 +442,28 @@ function ResultStep({
   onConfirm: () => void;
 }) {
   const skipped = analysis === null;
+  // #238: 영문 사전에 없는 키워드 안내. 입력 중에는 다시 계산하지 않고, 화면에 들어올 때와
+  // "이걸로 할게"를 누를 때만 계산한다(chictimin 10/6 결정, 팝업·저장 없음). 안내할 단어가 있으면
+  // 첫 클릭에서는 안내를 보여 주고 멈추고, 같은 입력으로 다시 누르면 넘어간다 — 안 그러면 다음 단계로
+  // 넘어가며 안내가 보일 틈이 없다. 입력을 고치면 안내는 사라진다.
+  const [notice, setNotice] = useState<{ text: string; words: string[] } | null>(() => {
+    const words = unmappedKeywordWords(keywordsText);
+    return words.length > 0 ? { text: keywordsText, words } : null;
+  });
+  function handleKeywordsChange(text: string) {
+    setNotice(null);
+    onKeywordsTextChange(text);
+  }
+  function handleConfirm() {
+    if (notice?.text !== keywordsText) {
+      const words = unmappedKeywordWords(keywordsText);
+      if (words.length > 0) {
+        setNotice({ text: keywordsText, words });
+        return;
+      }
+    }
+    onConfirm();
+  }
   // 스킵이면 키워드 입력 전 기본값(#151). 키워드가 enum과 일치하면 저장 값은 달라질 수 있다.
   const style =
     analysis?.style ??
@@ -485,10 +530,15 @@ function ResultStep({
         <input
           id="style_keywords"
           value={keywordsText}
-          onChange={(e) => onKeywordsTextChange(e.target.value)}
+          onChange={(e) => handleKeywordsChange(e.target.value)}
           placeholder="예: 수채화, 따뜻한, 손그림"
           className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
         />
+        {notice && notice.words.length > 0 && (
+          <p className="text-xs text-zinc-500">
+            영문 사전에 없는 단어는 입력하신 그대로 전달돼요: {formatUnmappedWords(notice.words)}
+          </p>
+        )}
         <p className="text-xs text-zinc-400">
           {skipped
             ? "레퍼런스가 없을수록 그림체를 알려주는 단서예요. 느낌을 직접 적어주세요"
@@ -506,7 +556,7 @@ function ResultStep({
         </button>
         <button
           type="button"
-          onClick={onConfirm}
+          onClick={handleConfirm}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
         >
           이걸로 할게
