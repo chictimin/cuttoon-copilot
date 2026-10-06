@@ -76,4 +76,6 @@ export interface Storyboard {
   subject: string;
   cast: CastMember[];
   cuts: Cut[];
+  /** 이 컷툰 한 편의 CTA 강도 (issue #205). 없으면 clear로 해석. */
+  cta_strength?: "none" | "soft" | "clear";
 }

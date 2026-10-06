@@ -1,9 +1,10 @@
 import OpenAI from "openai";
 import sharp from "sharp";
 import { uploadAsset } from "../asset-store";
-import { OUTPUT_SIZE, ratioClause } from "./generate";
+import { OUTPUT_SIZE, activeMascot, ratioClause } from "./generate";
 import type { GeneratedImageResult } from "./provider";
 import { imageQuality, imageSetting, logImageSetting } from "./image-setting";
+import { generateWithComfyui } from "./comfyui";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -125,6 +126,8 @@ export interface PresetInput {
     life_stage: string[];
     main_subjects: string[];
   };
+  // #150: 프로젝트 고정 마스코트(선택). 있으면 시트가 독자 프로필 대신 이 인물을 그린다.
+  mascot?: { label?: string; description?: string };
 }
 
 // export 하는 이유: 시트와 컷의 프롬프트가 **문구 수준으로** 같은 스타일 지시를
@@ -154,13 +157,23 @@ export function buildCharacterPrompt(preset: PresetInput): string {
   // 발견된 것과 같은 실수다.
   const ratio = ratioClause(s.character_ratio);
 
+  // #150: 마스코트가 있으면 시트는 그 인물을 그린다 — preset.schema.json 의 시트 계약
+  // ("프로젝트의 고정 마스코트 한 명")대로다. 컷 쪽(buildCutPrompt)이 같은 activeMascot()
+  // 으로 "시트 인물과 같은 사람" 문장을 켜므로 판정이 두 파일에서 갈라지지 않는다.
+  // 마스코트가 없으면 기존처럼 preset.context(타깃 독자 프로필)로 그린다 — 기존 프리셋은
+  // 그대로 동작한다.
+  const mascot = activeMascot(preset);
+  const characterLine = mascot
+    ? `Character: ${mascot.description}. This is the project's recurring mascot — draw this same person in all three poses.`
+    : `Character context: A person typical of the ${industryStr} field, targeting ${ageStr} age group, ${lifeStr} life stage.`;
+
   return `Character reference sheet for a webtoon/comic series.
 
 Style: ${s.line_weight ?? "medium"} line weight, ${s.saturation ?? "vivid"} colors, ${ratio}.
 Color palette: ${paletteStr}.
 Style keywords: ${keywordsStr}.
 
-Character context: A person typical of the ${industryStr} field, targeting ${ageStr} age group, ${lifeStr} life stage.
+${characterLine}
 
 Draw the character in THREE poses on a single white-background sheet:
 1. Front view, neutral expression, standing
@@ -205,16 +218,7 @@ async function resizeToOutput(
   }
 }
 
-export async function generateCharacterSheet(
-  preset: PresetInput
-): Promise<GeneratedImageResult> {
-  const prompt = buildCharacterPrompt(preset);
-  // 유료 호출 전에 읽어 모르는 값이면 여기서 멈춘다(#190). 컷과 같은 설정을 따른다 —
-  // 시트만 기본 화질이면 저가 QA에서도 시트 비용은 그대로 나간다.
-  const setting = imageSetting();
-  const quality = imageQuality(setting);
-  logImageSetting("character_sheet", setting);
-
+async function generateSheetWithOpenAI(prompt: string, quality: "low" | undefined): Promise<string> {
   const response = await client.images.generate({
     model: "gpt-image-1",
     prompt,
@@ -227,11 +231,28 @@ export async function generateCharacterSheet(
   if (!data?.b64_json) {
     throw new Error("gpt-image-1 응답에 이미지 데이터가 없음");
   }
+  return data.b64_json;
+}
+
+export async function generateCharacterSheet(
+  preset: PresetInput
+): Promise<GeneratedImageResult> {
+  const prompt = buildCharacterPrompt(preset);
+  // 유료 호출 전에 읽어 모르는 값이면 여기서 멈춘다(#190). 컷과 같은 설정을 따른다 —
+  // 시트만 기본 화질이면 저가 QA에서도 시트 비용은 그대로 나간다.
+  const setting = imageSetting();
+  const quality = imageQuality(setting);
+  logImageSetting("character_sheet", setting);
+
+  const b64 =
+    setting === "comfyui"
+      ? (await generateWithComfyui(prompt, OUTPUT_SIZE)).base64
+      : await generateSheetWithOpenAI(prompt, quality);
 
   // #104: 여기까지 오면 유료 호출은 이미 성공한 뒤다 — 리사이즈가 실패해도
   // 결과를 버리지 않는다. resizeToOutput이 실패 시 원본 버퍼 + 실제 메타데이터를
   // 반환하므로 width/height도 실제 값과 어긋나지 않는다.
-  const { buffer, width, height } = await resizeToOutput(data.b64_json);
+  const { buffer, width, height } = await resizeToOutput(b64);
   const { assetUri } = await uploadAsset(buffer, "image/png", "character-sheet.png");
 
   return {

@@ -12,6 +12,7 @@
 import presetSchema from "@/spec/preset.schema.json";
 import styleVocabulary from "@/spec/data/style-vocabulary.json";
 import { isValidCtaId, type Interest } from "./cta-presets";
+import type { CtaStrength } from "./narrative-flow";
 
 export type { Interest };
 export type LineWeight = "thin" | "medium" | "thick";
@@ -48,6 +49,8 @@ export interface Preset {
   rules: {
     forbidden: string[];
     cta_format: string;
+    /** 프로젝트 CTA 강도 기본값 (issue #205). 없으면 clear로 해석. */
+    cta_strength?: CtaStrength;
   };
   context: {
     industry: string[];
@@ -97,6 +100,7 @@ const VALID = {
   age_band: getEnumAt(["properties", "context", "properties", "age_band", "items"]),
   life_stage: getEnumAt(["properties", "context", "properties", "life_stage", "items"]),
   interests: getEnumAt(["properties", "context", "properties", "interests", "items"]),
+  cta_strength: getEnumAt(["properties", "rules", "properties", "cta_strength"]),
 };
 
 // getEnumAt이 경로를 못 찾으면 []를 반환하는데, 그대로 두면 나중에 "값이 유효하지 않음"
@@ -192,6 +196,12 @@ export function assertValidPreset(data: unknown): asserts data is Preset {
   }
   if (!isValidCtaId(rules.cta_format as string)) {
     fail(`rules.cta_format "${String(rules.cta_format)}"가 cta_presets.json의 preset id가 아님`);
+  }
+  if (
+    rules.cta_strength !== undefined &&
+    !VALID.cta_strength.includes(rules.cta_strength as string)
+  ) {
+    fail(`rules.cta_strength 값이 유효하지 않음: ${String(rules.cta_strength)}`);
   }
 
   // context

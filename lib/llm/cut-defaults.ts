@@ -34,6 +34,11 @@ export interface CutDefaultsFile {
   supporting_cut_index: number;
   /** 1컷 time_of_day 기본값. */
   first_cut_time_of_day: string;
+  /** cta beat 폴백 대사 강도별 (issue #205 K4b). none은 CTA beat가 없어 쓰지 않는다. */
+  cta_fallback: {
+    soft: string;
+    clear: string;
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -247,6 +252,16 @@ export function assertValidCutDefaultsFile(data: unknown): asserts data is CutDe
       `first_cut_time_of_day "${data.first_cut_time_of_day}"가 스키마 enum에 없음`
     );
   }
+
+  if (!isRecord(data.cta_fallback)) {
+    throw new CutDefaultsValidationError("cta_fallback이 객체가 아님");
+  }
+  if (typeof data.cta_fallback.soft !== "string" || data.cta_fallback.soft.length === 0) {
+    throw new CutDefaultsValidationError("cta_fallback.soft 누락/빈 문자열");
+  }
+  if (typeof data.cta_fallback.clear !== "string" || data.cta_fallback.clear.length === 0) {
+    throw new CutDefaultsValidationError("cta_fallback.clear 누락/빈 문자열");
+  }
 }
 
 // 모듈 로드 시점에 한 번 검증 — cta-presets.ts와 같은 이유로 fail-fast.
@@ -264,7 +279,12 @@ export function getBeatExpressionPose(beat: string): BeatExpressionPose | undefi
 }
 
 /** beat별 폴백 대사. 템플릿의 {subject} 자리에 소재를 넣는다. */
-export function defaultCaptionForBeat(beat: string, subject: string): string {
+export function defaultCaptionForBeat(beat: string, subject: string, ctaStrength = "clear"): string {
+  // cta beat는 선택 강도를 따른다 (issue #205 K4b). soft면 전용 은근한 폴백,
+  // 그 외(clear·없음·none)는 현행 문장 — none은 CTA beat가 없어 이 경로를 타지 않는다.
+  if (beat === "cta" && ctaStrength === "soft") {
+    return cutDefaultsFile.cta_fallback.soft;
+  }
   const template = cutDefaultsFile.beat_caption_templates[beat] ?? "지금 바로 확인해보세요";
   return template.split("{subject}").join(subject);
 }

@@ -109,6 +109,11 @@
           "type": "string",
           "minLength": 1,
           "description": "마지막 컷 CTA의 프로젝트 기본값. 세션에서 다른 값으로 덮어쓸 수 있고, 덮어쓰지 않으면 이 값이 주입된다. spec/data/cta_presets.json에 정의된 preset 중 하나의 id를 저장한다 (예: 'consult_request'). 자유 문자열 타입은 유지하되(스키마 레벨 enum 아님), 값은 항상 cta_presets.json의 presets[].id 중 하나와 일치해야 한다 — presets 목록이 계속 늘어날 수 있어 JSON Schema enum으로 고정하지 않음 (issue #4)"
+        },
+        "cta_strength": {
+          "type": "string",
+          "enum": ["none", "soft", "clear"],
+          "description": "프로젝트의 CTA 강도 기본값 (issue #205). none(이야기만)·soft(은근하게)·clear(확실하게). required에 넣지 않는다 — 없으면 clear로 해석해 기존 프리셋이 그대로 유효하다"
         }
       }
     },

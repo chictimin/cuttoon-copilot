@@ -14,6 +14,7 @@ import vocabulary from '@/spec/vocabulary.json'
 import type { ImageProvider, GeneratedImageResult, ReservedZone } from './provider'
 import { readAsset, uploadAsset } from '../asset-store'
 import { imageQuality, imageSetting, logImageSetting, type ImageSetting } from './image-setting'
+import { generateWithComfyui } from './comfyui'
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -109,6 +110,27 @@ interface MinimalPreset {
   assets?: {
     character_sheet?: string
   }
+  // #150: 프로젝트 고정 마스코트(preset.schema.json 최상위 선택 필드). 있으면 캐릭터
+  // 시트가 이 인물을 그리고, 컷에서는 이 label 을 character_id 로 가진 인물만 시트와
+  // 같은 사람으로 지시한다.
+  mascot?: {
+    label?: string
+    description?: string
+  }
+}
+
+// #150: 마스코트가 "있다"의 판정을 한 곳에 둔다. extract.ts(시트)와 buildCutPrompt(컷)가
+// 같은 함수를 써야 시트는 마스코트를 그렸는데 컷은 "시트와 다른 사람"이라고 지시하는
+// 어긋남이 생기지 않는다 — ratioClause 를 공유한 것과 같은 이유다(#126·#129).
+//
+// label·description 둘 다 비어 있지 않을 때만 마스코트로 본다(스키마 minLength 1).
+// 하나라도 비면 시트가 마스코트를 그리지 않으므로 컷도 기존 문장을 쓴다.
+export function activeMascot(
+  preset: { mascot?: { label?: string; description?: string } } | undefined
+): { label: string; description: string } | undefined {
+  const label = preset?.mascot?.label?.trim()
+  const description = preset?.mascot?.description?.trim()
+  return label && description ? { label, description } : undefined
 }
 
 // "Leave the top edge empty" 로 쓰면 모델이 그림 위에 별도의 흰 띠를 붙인다 —
@@ -208,16 +230,24 @@ function buildCutPrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, cu
   // 참이 될 수 없는 조건을 남기면 다음 사람이 그것을 계약으로 읽기 때문이다 —
   // 이 파일에서 그 실수를 두 번 했다(preset.schema.json 의 stale 문구, 샘플 fixture).
   //
-  // ponytail: #123 이 조연을 프로젝트 마스코트로 고정하고 시트가 그 인물을 그리게
-  // 되면, 프레임에 그 인물이 있는 컷에서만 동일성 문장으로 되돌린다. 그때 판정 값은
-  // role 서술 규약이 아니라 preset 쪽 매핑 필드여야 한다 — role === 'supporting' 은
-  // 조연이 둘이 되면 조용히 틀린다.
-  const parts = [
-    `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
+  // #150: 마스코트가 있으면 시트가 그 인물을 그린다(extract.ts buildCharacterPrompt).
+  // 그 인물이 프레임에 있는 컷에서만 동일성 문장으로 바꾼다. 판정은 role 이 아니라
+  // character_id === preset.mascot.label 이다 — role === 'supporting' 은 조연이 둘이
+  // 되거나 마스코트가 아닌 조연을 고른 세션에서 조용히 틀린다. 마스코트가 없거나
+  // 프레임에 없으면 위 이유대로 기존 문장(시트 인물과 다른 사람)을 그대로 쓴다.
+  const mascot = activeMascot(preset)
+  const mascotInFrame =
+    !!mascot && (cut?.characters_in_frame ?? []).some((c) => c.character_id === mascot.label)
+  const sheetSentence = mascotInFrame
+    ? `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
+      `attached reference sheet. The character drawn on that sheet appears in this panel — ` +
+      `keep their face, hairstyle, outfit and body proportions the same as on the sheet. ` +
+      `Anyone else in this panel is a different person; follow the character descriptions ` +
+      `below for who they are.`
+    : `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
       `attached reference sheet, but the person in this panel is a different character from ` +
-      `the one drawn on that sheet — follow the character description below for who they are.`,
-    `Style: ${styleStr}.`,
-  ]
+      `the one drawn on that sheet — follow the character description below for who they are.`
+  const parts = [sheetSentence, `Style: ${styleStr}.`]
 
   // extract.ts(B②)의 캐릭터 시트 프롬프트와 같은 문구를 쓴다. 시트와 컷이 문자
   // 그대로 같은 지시를 받아야 스타일이 어긋나지 않는다.
@@ -381,9 +411,13 @@ async function callImageGeneration(
   kind: 'cover_variant' | 'cut',
   previousResponseId?: string
 ): Promise<{ base64: string; responseId: string }> {
+  logImageSetting(kind, setting)
+  // ComfyUI 는 시트를 reference 로 받지 않고 체이닝도 없다(comfyui.ts 머리말). 아래
+  // reference 0장 차단은 유료 호출을 막는 장치라 여기서는 읽지 않는다.
+  if (setting === 'comfyui') return generateWithComfyui(prompt, OUTPUT_SIZE)
+
   const inputImages = await toInputImages(referenceUris(referenceAssets, preset))
   const quality = imageQuality(setting)
-  logImageSetting(kind, setting)
 
   // openai SDK(^7.5.0)의 Responses 타입이 image_generation 도구 옵션을 아직 못
   // 따라와 as any로 우회한다 — 실제 호출로 요청/응답 모양을 검증했다 (#18).

@@ -1,17 +1,20 @@
 {
-  "narrative_flow_version": "1.0",
+  "narrative_flow_version": "1.1",
   "flows": [
     {
       "key": "문제 제기 → 이전 상황 → 해결 → CTA",
-      "beats": ["problem", "before", "solution", "cta"]
+      "beats": ["problem", "before", "solution", "cta"],
+      "no_cta_beats": ["problem", "before", "solution", "after"]
     },
     {
       "key": "질문 던지기 → 사실 전달 → 효과 강조 → CTA",
-      "beats": ["question", "fact", "benefit", "cta"]
+      "beats": ["question", "fact", "benefit", "cta"],
+      "no_cta_beats": ["question", "fact", "benefit", "after"]
     },
     {
       "key": "이전 상황 → 전환 계기 → 이후 → CTA",
-      "beats": ["before", "turning", "after", "cta"]
+      "beats": ["before", "turning", "after", "cta"],
+      "no_cta_beats": ["before", "turning", "after", "benefit"]
     }
   ]
 }

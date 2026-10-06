@@ -30,13 +30,37 @@
       "type": "array",
       "minItems": 4,
       "maxItems": 4,
-      "description": "4컷 고정. narrative_beat는 vocabulary.json의 10개 태그 중 자유롭게 골라 이 컷툰만의 흐름을 짠다 (기승전결처럼 고정된 4단계 순서를 강제하지 않음). 다만 'cta' 비트는 정확히 1컷에 있어야 하고(preset.rules.cta_format이 항상 존재하는 이유), 그 위치는 4번 컷(마지막)으로 고정한다 — CTA는 서사 비트가 아니라 마지막 컷의 고정 역할이라는 게 프로젝트 전제(리뷰 결정, $defs.cut.allOf 참고). cut_index 유일성(1~4 각 1회)은 스키마가 아니라 storyboard-guard.ts의 런타임 체크로 강제한다 — 배열 요소가 객체라 uniqueItems로 못 잡음.",
-      "items": { "$ref": "#/$defs/cut" },
-      "contains": { "properties": { "narrative_beat": { "const": "cta" } } },
-      "minContains": 1,
-      "maxContains": 1
+      "description": "4컷 고정. narrative_beat는 vocabulary.json의 10개 태그 중 자유롭게 골라 이 컷툰만의 흐름을 짠다 (기승전결처럼 고정된 4단계 순서를 강제하지 않음). cta 비트 개수는 cta_strength에 따라 최상위 allOf가 정한다 — none이면 0개, 그 외(없음 포함, clear로 해석)면 정확히 1개. cut_index 유일성(1~4 각 1회)은 스키마가 아니라 storyboard-guard.ts의 런타임 체크로 강제한다 — 배열 요소가 객체라 uniqueItems로 못 잡음.",
+      "items": { "$ref": "#/$defs/cut" }
+    },
+    "cta_strength": {
+      "type": "string",
+      "enum": ["none", "soft", "clear"],
+      "description": "이 컷툰 한 편의 CTA 강도 (issue #205). 없으면 clear로 해석해 기존 스토리보드(필드 없음)가 그대로 유효하다."
     }
   },
+  "allOf": [
+    {
+      "if": { "required": ["cta_strength"], "properties": { "cta_strength": { "const": "none" } } },
+      "then": {
+        "properties": {
+          "cuts": {
+            "not": { "contains": { "properties": { "narrative_beat": { "const": "cta" } } } }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "cuts": {
+            "contains": { "properties": { "narrative_beat": { "const": "cta" } } },
+            "minContains": 1,
+            "maxContains": 1
+          }
+        }
+      },
+      "description": "cta_strength가 none이면 cta 비트 0개, 그 외(없음 포함)면 정확히 1개. cta 비트의 위치(4번 고정)는 $defs.cut.allOf가 정한다."
+    }
+  ],
   "$defs": {
     "castMember": {
       "type": "object",
@@ -148,7 +172,7 @@
         {
           "if": { "properties": { "narrative_beat": { "const": "cta" } } },
           "then": { "properties": { "cut_index": { "const": 4 } } },
-          "description": "CTA는 서사 비트가 아니라 마지막 컷의 고정 역할이라는 게 프로젝트 전제라서(레포 문서가 CTA를 항상 '마지막 컷'으로 다룸), 위치를 4번으로 고정한다 (리뷰 결정)."
+          "description": "CTA는 서사 비트가 아니라 마지막 컷의 고정 역할이라는 게 프로젝트 전제라서(레포 문서가 CTA를 항상 '마지막 컷'으로 다룸), cta 비트가 있으면 위치를 4번으로 고정한다 (리뷰 결정, 최상위 allOf 참고 — none이면 cta 비트 자체가 없다)."
         }
       ]
     }

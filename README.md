@@ -40,7 +40,7 @@ npm run lint             # 린트
 npm run spec:sync-check  # 스키마 · 데이터 정합 검사
 ```
 
-`.env`는 저장소에 없다(추적 제외). 팀 내부 채널로 전달받는다. 필수 환경변수는 `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` 세 개다. 선택 변수는 `IMAGE_PROVIDER` — 비우면 `openai`, 개발·QA 비용 절감용 `openai-low`(#190). 키 이름은 `.env.example` 참고. 이미지 생성 테스트는 `OPENAI_API_KEY`를 각자 개인 키로 바꿔 쓴다.
+`.env`는 저장소에 없다(추적 제외). 팀 내부 채널로 전달받는다. 필수 환경변수는 `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` 세 개다. 선택 변수는 `IMAGE_PROVIDER` — 비우면 `openai`, 개발·QA 비용 절감용 `openai-low`(#190), 로컬 ComfyUI로 그리는 개발 테스트 전용 `comfyui`(#226, `COMFYUI_*` 변수 필요). P0 판정·발표·최종 회귀는 `openai`로만 한다. 키 이름은 `.env.example` 참고. 이미지 생성 테스트는 `OPENAI_API_KEY`를 각자 개인 키로 바꿔 쓴다.
 
 ### Supabase 셋업
 
@@ -76,7 +76,7 @@ cuttoon-copilot/
 │      ├─ session/             세션 관리 · Export             chictimin
 │      ├─ upload/              레퍼런스 업로드                chictimin
 │      ├─ brainstorm/          브레인스토밍 3턴                chictimin
-│      ├─ generate/            이미지 생성 (maxDuration=300)  joniverse-ai
+│      ├─ generate/            이미지 생성                    joniverse-ai
 │      └─ extract/             스타일 추출                    joniverse-ai
 ├─ lib/
 │  ├─ asset-store.ts           업로드 검증 · Storage 저장      chictimin
@@ -159,7 +159,7 @@ cuttoon-copilot/
 | 11 | 버그 | **완료**(PR #192 머지) — 아주 긴 대사 말풍선이 그림 오른쪽 밖으로 잘림 (`top_right`) | 품질 | 10-08 | smartman3514-commits | #169 |
 | 12 | 버그 | **완료**(PR #192 머지) — 아주 긴 대사 center 말풍선이 인물을 덮어 꼬리가 사라짐 | 품질 | 10-08 | smartman3514-commits | #170 |
 | 13 | 버그 | center 말풍선 꼬리를 화자 방향으로 (#170 후속) | 품질 | 미정 | smartman3514-commits | #199 |
-| 14 | 기능 | CTA를 세션 단위로 — 마무리 강도 3단계 + 이번 편 목적 (1단) | 품질 | 미정 | chictimin · JEON-DAEJIN | #205 |
+| 14 | 기능 | CTA를 세션 단위로 — 마무리 강도 3단계 + 이번 편 목적 (**완료** — 1단 PR #223 · 2단 온보딩 기본 강도 PR #229 머지. "이번 편에 알릴 내용"은 #206에서 이어서 검토) | 품질 | 미정 | chictimin · JEON-DAEJIN | #205 |
 | 15 | 기능 | 소재 [브랜드·제품명] 표기 (공용 함수 PR #215 머지 — 남은 것: 연결(브레인스토밍·대사), 이미지 프롬프트 치환(joniverse-ai), 소재 안내 문구(JEON-DAEJIN, 이미지 치환 확인 후)) | 품질 | 미정 | chictimin | #206 |
 | 16 | 기능 | 표지 선택 기록 (**완료** — 서버 PR #210 · 화면 PR #213 머지, QA #216 남음) | 품질 | 미정 | chictimin · JEON-DAEJIN | #207 |
 

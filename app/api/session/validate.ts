@@ -3,6 +3,7 @@ import {
   StoryboardValidationError,
   assertStoryboardRuntimeInvariants,
 } from "@/lib/llm/storyboard-guard";
+import type { CtaStrength } from "@/lib/llm/narrative-flow";
 
 /**
  * 저장 전 최소 검증.
@@ -34,5 +35,20 @@ export function assertStoryboardShape(body: unknown): asserts body is Storyboard
     throw new StoryboardValidationError("cuts 배열이 없습니다");
   }
 
-  assertStoryboardRuntimeInvariants(sb.cuts as Parameters<typeof assertStoryboardRuntimeInvariants>[0]);
+  // CTA 강도(issue #205): 없으면 clear 취급이라 guard 기본값과 일치한다.
+  // 무효값이면 400(라우트가 StoryboardValidationError를 400으로 받는다).
+  const strength = sb.cta_strength;
+  if (
+    strength !== undefined &&
+    strength !== "none" &&
+    strength !== "soft" &&
+    strength !== "clear"
+  ) {
+    throw new StoryboardValidationError("cta_strength는 none·soft·clear 중 하나여야 합니다");
+  }
+
+  assertStoryboardRuntimeInvariants(
+    sb.cuts as Parameters<typeof assertStoryboardRuntimeInvariants>[0],
+    strength as CtaStrength | undefined
+  );
 }

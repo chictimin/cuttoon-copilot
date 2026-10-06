@@ -53,6 +53,8 @@ import {
   getSupportingDefault,
 } from "./cut-defaults";
 import { getCaptionToneById } from "./caption-tones";
+import { getCtaPresetById, getFallbackCtaId } from "./cta-presets";
+import type { CtaRequest, CtaStrength } from "./narrative-flow";
 import vocabularyRaw from "@/spec/vocabulary.json";
 
 export interface CaptionContext {
@@ -76,6 +78,11 @@ export interface CaptionsRequest {
    * 없으면 "supporting"(현행 호환).
    */
   supporting_id?: string;
+  /**
+   * CTA 강도 요청 (issue #205). 없으면 clear + 프로젝트 기본 목적(현행).
+   * none이면 purpose_id를 보내도 무시한다.
+   */
+  cta?: CtaRequest;
 }
 
 export interface CutCaption {
@@ -190,7 +197,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-async function callCaptionsModel(prompt: string, maxTokens: number): Promise<string> {
+/**
+ * 캡션 모델 1회 호출. retryOnTimeout이 true면(1차 호출만) TimeoutError 시 1회
+ * 다시 시도한다 — 실패 복구이지 품질 보정이 아니라서, 검증 재요청 호출에는
+ * 붙이지 않는다(최악 12초×3=36초 방지).
+ */
+async function callCaptionsModel(
+  prompt: string,
+  maxTokens: number,
+  retryOnTimeout = false
+): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY 환경 변수가 없습니다");
@@ -214,6 +230,10 @@ async function callCaptionsModel(prompt: string, maxTokens: number): Promise<str
     });
   } catch (err) {
     if (err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      if (retryOnTimeout) {
+        console.info("[captions-timeout] 1차 호출 타임아웃, 1회 재시도");
+        return callCaptionsModel(prompt, maxTokens, false);
+      }
       console.error("캡션 OpenAI 타임아웃");
       throw new Error("대사 생성 시간이 초과됐습니다. 다시 시도해주세요.");
     }
@@ -505,10 +525,66 @@ function resolveSupportingId(input: CaptionsRequest): string {
     : "supporting";
 }
 
+/** CTA 강도를 정한다. 요청이 없으면 clear(현행). */
+function resolveStrength(input: CaptionsRequest): CtaStrength {
+  return input.cta?.strength ?? "clear";
+}
+
+/**
+ * 이번 편의 CTA 목적 id를 정한다. none이면 목적을 쓰지 않는다(undefined).
+ * purpose_id가 null이면 프로젝트 기본(context.cta_format)이다.
+ */
+function resolvePurposeId(input: CaptionsRequest): string | undefined {
+  const cta = input.cta;
+  if (!cta || cta.strength === "none") return undefined;
+  return cta.purpose_id ?? input.context.cta_format;
+}
+
+/**
+ * <맥락>의 CTA 형식 줄 (issue #205 K0). preset id를 그대로 넣지 않고 목적
+ * 라벨·template 문장을 넣는다. id가 목록에 없으면 fallback_id 규칙 그대로.
+ */
+function ctaContextLine(ctaFormat: string): string {
+  const preset =
+    getCtaPresetById(ctaFormat) ?? getCtaPresetById(getFallbackCtaId());
+  if (!preset) return `CTA 형식: ${ctaFormat}`;
+  return `CTA 형식: ${preset.label}: ${preset.template}`;
+}
+
+/**
+ * 강도별 지시 블록 (issue #205 K4). clear는 빈 문자열(현행 그대로).
+ * 사용자가 고른 강도·목적은 보정 없이 그대로 쓴다 — 생성된 대사를 권유
+ * 유무로 재작성·재요청하지 않는다.
+ */
+function strengthBlock(strength: CtaStrength): string {
+  if (strength === "none") {
+    return `\n<CTA 강도: 없음>\n- 권유·구매·가입·링크·상담 문구를 쓰지 마시오. 마지막 컷도 이야기 마무리로 끝내시오.\n`;
+  }
+  if (strength === "soft") {
+    return `\n<CTA 강도: 은근>\n- 권유가 필요하면 앞 컷 맥락에 이어지는 인물의 자연스러운 한 줄로만 쓰시오. 명령형 광고 문구·링크·가격을 쓰지 마시오. 목적은 암시만 하시오.\n`;
+  }
+  return "";
+}
+
+/** 재요청에도 강도별 대사 지시를 싣는다. clear는 빈 문자열(현행 그대로). */
+function strengthRetryNote(strength: CtaStrength): string {
+  if (strength === "none") return " CTA 강도 없음: 권유·구매·가입·링크·상담 문구 금지, 이야기 마무리로.";
+  if (strength === "soft")
+    return " CTA 강도 은근: 권유는 앞 컷 맥락에 이어지는 자연스러운 한 줄만. 명령형 광고 문구·링크·가격 금지.";
+  return "";
+}
+
 function buildPrompt(input: CaptionsRequest, wanted: number[]): string {
   const tone = getCaptionToneById(input.tone_id);
   const hasSupporting = input.cast.length > 1;
   const supportingId = resolveSupportingId(input);
+  const strength = resolveStrength(input);
+  // none이면 CTA 줄 자체를 넣지 않는다 — 프로젝트 기본 목적 문장("지금 상담
+  // 신청하기" 등)이 프롬프트에 남아 권유로 새는 것을 막는다.
+  const ctaLine =
+    strength === "none"
+      ? ""
+      : `${ctaContextLine(resolvePurposeId(input) ?? input.context.cta_format)}\n`;
   const cutLines = wanted
     .map((i) => {
       const beat = input.beats[i - 1];
@@ -533,8 +609,8 @@ ${tone ? `${tone.label}: ${tone.description}` : input.tone_id}
 <맥락>
 분야: ${input.context.industry.join(", ")}
 관심사: ${input.context.interests.join(", ")}
-CTA 형식: ${input.context.cta_format}
-</맥락>
+${ctaLine}</맥락>
+${strengthBlock(resolveStrength(input))}
 
 허용 목록(JSON 배열 그대로, 다른 값 금지):
 - shot_type: ${JSON.stringify(VOCAB.shot_type)}
@@ -635,7 +711,7 @@ ${cutLines}
 요구사항:
 - 적힌 컷마다 필요한 쪽(대사·연출)만 정확히. cut_index는 대상 컷 번호 그대로.
 - 연출 값은 허용 목록만: shot_type ${JSON.stringify(VOCAB.shot_type)}, camera_angle ${JSON.stringify(VOCAB.camera_angle)}, time_of_day ${JSON.stringify(VOCAB.time_of_day)} 또는 null, expression ${JSON.stringify(VOCAB.expression)}, pose ${JSON.stringify(VOCAB.pose)}, caption_position ${JSON.stringify(VOCAB.position)}, reserved_zone ${JSON.stringify(VOCAB.reserved_zone)} 또는 null.
-- 대사는 따옴표·설명 문구 없이 대사만.
+- 대사는 따옴표·설명 문구 없이 대사만.${strengthRetryNote(resolveStrength(input))}
 - JSON 형식만 반환`;
 }
 
@@ -659,7 +735,7 @@ async function generateCaptionsForCuts(
 ): Promise<CaptionsResult> {
   const hasSupporting = input.cast.length > 1;
   const supportingId = resolveSupportingId(input);
-  const firstContent = await callCaptionsModel(buildPrompt(input, wanted), maxTokens);
+  const firstContent = await callCaptionsModel(buildPrompt(input, wanted), maxTokens, true);
   const first = parseResponseObject(firstContent);
   const captionState = collectValidCaptions(first.captions, wanted);
 
@@ -744,6 +820,8 @@ async function generateCaptionsForCuts(
   const directions: CutDirection[] = [];
   const fallbackCutIndexes: number[] = [];
   const fallbackDirectionCuts: number[] = [];
+  // 폴백 대사도 선택 강도를 따른다 (issue #205 K4b).
+  const fallbackStrength = resolveStrength(input);
   for (const i of wanted) {
     const cutIndex = i as 1 | 2 | 3 | 4;
     const text = captionState.valid.get(i);
@@ -753,7 +831,7 @@ async function generateCaptionsForCuts(
       // 여전히 무효인 그 컷만 컷 기본값 문장으로 채운다.
       captions.push({
         cut_index: cutIndex,
-        text: defaultCaptionForBeat(input.beats[i - 1], subject),
+        text: defaultCaptionForBeat(input.beats[i - 1], subject, fallbackStrength),
       });
       fallbackCutIndexes.push(i);
     }
