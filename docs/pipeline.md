@@ -1,5 +1,7 @@
 # 컷툰 코파일럿 파이프라인 — 온보딩 → 세션 → 에디터
 
+<!-- 기준점 id는 변경 금지 -->
+
 마지막 전체 대조: 2026-10-06 · `cf9feb7`. 그보다 오래된 절에만 절 기준을 남긴다.
 
 머지된 코드만 기준으로 한다. 열려 있는 PR·이슈의 계획은 넣지 않는다. 함수명이 주 식별자이고 file:line은 보조다 — 라인은 커밋마다 밀린다.
@@ -45,6 +47,7 @@ flowchart TD
   온보딩 --> 세션 --> 에디터
 ```
 
+<a id="pipe-onboarding"></a>
 ## 2. 온보딩 (화면)
 
 | 순서 | 함수 | 위치 | 호출 대상 |
@@ -57,6 +60,7 @@ flowchart TD
 | 6 | 프로젝트 이름 변경 (#161) | — (화면 호출자 없음) | `PATCH /api/preset`(`app/api/preset/route.ts`) → `renameProject`(`lib/db/presets.ts`) |
 | 7 | 프로젝트 비활성화 (#161) | — (화면 호출자 없음) | `DELETE /api/preset`(`app/api/preset/route.ts`) → `archiveProject`(`lib/db/presets.ts`). 하드 삭제가 아니라 `projects.archived_at` 소프트 삭제라 세션·컷 데이터는 남고 목록에서만 빠진다 |
 
+<a id="pipe-session"></a>
 ## 3. 세션 (화면)
 
 | 순서 | 함수 | 위치 | 호출 대상 |
@@ -78,6 +82,7 @@ flowchart TD
 
 `selections` 테이블에 "보여 준 후보 묶음(라운드)" 단위로 쌓는다 — 한 행 = 화면에 보여준 후보 한 묶음. `variant_index`는 고른 위치(다시 뽑기로 버린 라운드면 null), `(session_id, cut_index, round)`은 유일하다. 화면이 모아 두었다가 `handleSave` → `POST /api/session`의 `selections`로 함께 보내면, `createSession` 성공 뒤에 `insertSelections`(`lib/db/selections.ts`)가 저장한다. 일시적 DB 오류에만 전체 예산 3초 안에서 재시도하고(시도별 최대 1초·백오프 200·400ms·남은 예산 300ms 미만이면 포기), 그래도 실패하면 세션 저장은 200 + `selectionsSaved: false`로 응답한다(사용자 작업 보존 우선). 화면 쪽 기록 헬퍼 4개는 `lib/session/selection-log.ts`다 — `createSelectionLog`, `recordRound`, `markRegenerated`, `markSelected`, 전송용으로 바꾸는 `toPayload`. 화면 연결(#213): 표지 표시 때마다 `recordRound`, 선택 때 `markSelected`, 저장 때 `toPayload`로 동봉하고, `selectionsSaved:false`면 실패 토스트(비차단). 읽는 쪽(프로젝트별 선호·프리셋 승격 규칙)은 이번에 만들지 않고, 나중에 `sessions.preset_id`로 묶어 읽는다(#202).
 
+<a id="pipe-editor"></a>
 ## 4. 에디터 (화면)
 
 | 순서 | 함수 | 위치 | 호출 대상 |

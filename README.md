@@ -1,5 +1,7 @@
 # 컷툰 제작 AI 코파일럿
 
+<!-- 기준점 id는 변경 금지 -->
+
 기업 연계 프로젝트. 4컷 컷툰 생성 코파일럿.
 레퍼런스 이미지와 소재를 넣으면 4컷 컷툰 ZIP이 나온다.
 
@@ -9,11 +11,12 @@
 - Node — CI는 24에서 돈다(`.github/workflows/ci.yml`). `package.json`에 `engines` 지정 없음
 - 이미지 생성 모델을 쓸 수 있는 OpenAI 키 필요(유료 호출 발생, 아래 비용 참고)
 
+<a id="readme-first-run"></a>
 ## 처음 실행
 
 1. `npm install`
 2. `cp .env.example .env` — 필수 3값(`OPENAI_API_KEY`·`SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`) 채우기. 선택값(`IMAGE_PROVIDER` 등)은 비워두면 기본값
-   - 팀원: [팀 채널](docs/operations.md#2차-일정--팀)의 `.env`를 받고 `OPENAI_API_KEY`만 개인 키로 교체
+   - 팀원: [팀 채널](docs/operations.md#ops-team)의 `.env`를 받고 `OPENAI_API_KEY`만 개인 키로 교체
    - 새로 셋업: 본인 OpenAI 키 + 본인 Supabase 프로젝트(Project Settings → API의 Project URL·`service_role` 키)
    - `SUPABASE_SERVICE_ROLE_KEY`는 서버 `.env` 전용 — 공유·커밋 금지(`lib/db/schema.sql` 머리말)
 3. Supabase 셋업 — 테이블만 만들고 버킷을 빠뜨리면 업로드와 이미지 읽기가 통째로 실패한다(`Bucket not found`, issue #67)
@@ -23,19 +26,19 @@
 
 선택 변수는 `IMAGE_PROVIDER` — 비우면 `openai`, 개발·QA 비용 절감용 `openai-low`(#190), 로컬 ComfyUI로 그리는 개발 테스트 전용 `comfyui`(#226, `COMFYUI_*` 변수 필요).
 
-처음 실행이 끝나고 코드를 고치면 [브랜치·git 규칙](docs/operations.md#브랜치--git-규칙)을 따른다.
+처음 실행이 끝나고 코드를 고치면 [브랜치·git 규칙](docs/operations.md#ops-git)을 따른다.
 
 ## 사용 흐름
 
-골든패스: [온보딩](docs/pipeline.md#2-온보딩-화면)(레퍼런스 업로드 → 스타일 추출 → 스타일 확인·재추출 → 상세 입력 확인 → 마스코트 선택 → 캐릭터 시트 → 프리셋 저장) → [세션](docs/pipeline.md#3-세션-화면)(소재 입력 → 브레인스토밍 3턴 → 말투 선택 → 대사 생성·확인 → 표지 3안 → 나머지 3컷 → 저장) → [에디터](docs/pipeline.md#4-에디터-화면)(대사 수정 · 되돌리기 → Export ZIP).
+골든패스: [온보딩](docs/pipeline.md#pipe-onboarding)(레퍼런스 업로드 → 스타일 추출 → 스타일 확인·재추출 → 상세 입력 확인 → 마스코트 선택 → 캐릭터 시트 → 프리셋 저장) → [세션](docs/pipeline.md#pipe-session)(소재 입력 → 브레인스토밍 3턴 → 말투 선택 → 대사 생성·확인 → 표지 3안 → 나머지 3컷 → 저장) → [에디터](docs/pipeline.md#pipe-editor)(대사 수정 · 되돌리기 → Export ZIP).
 
 프리셋 = 프로젝트 그림체·타깃 설정 묶음. 표지 3안 = 1컷 후보 3장 중 고르기.
 
-각 단계의 구현 상태는 [구현 현황](docs/operations.md#구현-현황), 진행 중인 작업은 [2차 작업 표](docs/operations.md#2차-작업-표). 제약·제외 기능·아키텍처 결정은 정본인 [PRD.md](./PRD.md)를 따른다.
+각 단계의 구현 상태는 [구현 현황](docs/operations.md#ops-status), 진행 중인 작업은 [2차 작업 표](docs/operations.md#ops-tasks). 제약·제외 기능·아키텍처 결정은 정본인 [PRD.md](./PRD.md)를 따른다.
 
 ## 비용·대기
 
-한 바퀴에 [이미지 호출 7회](docs/pipeline.md)(캐릭터 시트 1 + 표지 3 + 나머지 3컷). 단계별 대기 약 40초(시트)·70초(표지 3안)·130초(3컷, E2E 1차 실측). 생성 중 새로고침하면 결과가 사라지니 기다린다. 시험 삼아 돌릴 때는 `IMAGE_PROVIDER=openai-low`([P0 판정](docs/operations.md#p0-판정-현황)·발표·최종 회귀는 `openai`로만).
+한 바퀴에 [이미지 호출 7회](docs/pipeline.md)(캐릭터 시트 1 + 표지 3 + 나머지 3컷). 단계별 대기 약 40초(시트)·70초(표지 3안)·130초(3컷, E2E 1차 실측). 생성 중 새로고침하면 결과가 사라지니 기다린다. 시험 삼아 돌릴 때는 `IMAGE_PROVIDER=openai-low`([P0 판정](docs/operations.md#ops-p0)·발표·최종 회귀는 `openai`로만).
 
 ## 스택
 
