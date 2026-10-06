@@ -58,6 +58,8 @@ function withFont(font: unknown) {
   return { ...basePreset, assets: { ...basePreset.assets, font } };
 }
 
+const EM = String.fromCodePoint(0x1f600);
+const LONE = String.fromCharCode(0xd800);
 const fontCases: [string, unknown, boolean][] = [
   ["font 없음 → 통과(기존 프리셋 회귀 0)", { ...basePreset }, true],
   ["정상 font → 통과", withFont({ family: "N", url: "https://x/y.ttf", kind: "file" }), true],
@@ -67,6 +69,13 @@ const fontCases: [string, unknown, boolean][] = [
   ["http url → 거부", withFont({ family: "N", url: "http://x/y.ttf", kind: "file" }), false],
   ["family 0자 → 거부", withFont({ family: "", url: "https://x/y.ttf", kind: "file" }), false],
   ["family 61자 → 거부", withFont({ family: "a".repeat(61), url: "https://x/y.ttf", kind: "file" }), false],
+  ["family 한글 59자 → 통과", withFont({ family: "가".repeat(59), url: "https://x/y.ttf", kind: "file" }), true],
+  ["family 한글 60자 → 통과", withFont({ family: "가".repeat(60), url: "https://x/y.ttf", kind: "file" }), true],
+  ["family 한글 61자 → 거부", withFont({ family: "가".repeat(61), url: "https://x/y.ttf", kind: "file" }), false],
+  ["family 이모지 30개(코드포인트 30) → 통과", withFont({ family: EM.repeat(30), url: "https://x/y.ttf", kind: "file" }), true],
+  ["family 이모지 60개(코드포인트 60, UTF-16 120) → 통과", withFont({ family: EM.repeat(60), url: "https://x/y.ttf", kind: "file" }), true],
+  ["family 이모지 61개 → 거부", withFont({ family: EM.repeat(61), url: "https://x/y.ttf", kind: "file" }), false],
+  ["family 짝 없는 서로게이트 포함 60 코드포인트 → 통과", withFont({ family: "가".repeat(59) + LONE, url: "https://x/y.ttf", kind: "file" }), true],
 ];
 
 let fontFailed = 0;

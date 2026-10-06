@@ -184,12 +184,12 @@ export function assertValidPreset(data: unknown): asserts data is Preset {
     if (extraFont.length) {
       fail(`assets.font에 허용되지 않은 필드: ${extraFont.join(", ")}`);
     }
-    if (typeof font.family !== "string" || font.family.length < 1 || font.family.length > 60) {
+    if (typeof font.family !== "string" || Array.from(font.family).length < 1 || Array.from(font.family).length > 60) {
       fail("assets.font.family는 1~60자 문자열이어야 함");
     }
     if (
       typeof font.url !== "string" ||
-      font.url.length > 2048 ||
+      Array.from(font.url).length > 2048 ||
       !font.url.startsWith("https://")
     ) {
       fail("assets.font.url은 https://로 시작하는 2048자 이하 문자열이어야 함");
@@ -302,7 +302,7 @@ export function isValidPreset(data: unknown): data is Preset {
   }
 }
 
-export type UnmappedWordStatus = "mapped" | "substituted" | "unmapped";
+export type UnmappedWordStatus = "mapped" | "substituted" | "unmapped" | "enum_applied";
 export type VocabField = "style.keywords" | "rules.forbidden";
 
 export interface UnmappedWordFinding {
