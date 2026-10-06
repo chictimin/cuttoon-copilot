@@ -161,7 +161,11 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 | 9 | `rules.forbidden` → `Do not include:` | 사용자가 적은 금지 요소 |
 | 10 | 말풍선·글자 억제 | P0 게이트 2 |
 
+4번 소재 문장과 7번 `cast[].description`은 `projectForModel(text, subject, subject_tags)`로 투영해 넣는다 — 소재의 `[브랜드]` 원문 대신 category가 들어가고, `subject_tags`가 없거나 형태가 어긋나면 "제품"이다. 대괄호가 없는 소재는 그대로다(#206·#237). 캐릭터 시트는 소재를 받지 않아 해당되지 않는다.
+
 `spec/vocabulary.json` 의 `prompt_hints` 를 쓰는 자리가 2·5·6·7번이다. 힌트가 없는 값은 토큰이 그대로 나가므로, 새 enum 값이 생기면 힌트도 같이 넣어야 한다 — `npm run spec:sync-check` 가 커버리지를 검사한다.
+
+빈 힌트 배열(`[]`)은 원본으로 폴백하지 않는다 — `keyword_hints ?? keywords`라서 빈 배열이면 컷은 해당 문장이 생략되고, 캐릭터 시트는 `default comic style`이 들어간다(#234).
 
 **`spec/vocabulary.json` 소비 방식 (컷 프롬프트)**
 
