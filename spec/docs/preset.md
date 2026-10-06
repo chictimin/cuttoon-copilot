@@ -10,6 +10,10 @@
     - [3.3.1. Preset > assets > style_refs > style_refs items](#assets_style_refs_items)
   - [3.4. Property `Preset > assets > reference_asset_ids`](#assets_reference_asset_ids)
     - [3.4.1. Preset > assets > reference_asset_ids > reference_asset_ids items](#assets_reference_asset_ids_items)
+  - [3.5. Property `Preset > assets > font`](#assets_font)
+    - [3.5.1. Property `Preset > assets > font > family`](#assets_font_family)
+    - [3.5.2. Property `Preset > assets > font > url`](#assets_font_url)
+    - [3.5.3. Property `Preset > assets > font > kind`](#assets_font_kind)
 - [4. Property `Preset > style`](#style)
   - [4.1. Property `Preset > style > keywords`](#style_keywords)
     - [4.1.1. Preset > style > keywords > keywords items](#style_keywords_items)
@@ -103,6 +107,7 @@ Must be one of:
 | - [character_pool](#assets_character_pool )           | No      | array of string | No         | -          | 캐릭터 풀 확장용(issue #113 결정, #123). 지금은 항상 빈 배열 — 필드만 미리 박아 마이그레이션 회피(reference_asset_ids 와 같은 패턴). 프로젝트 설정 페이지에서 마스코트 외 인물을 추가할 수 있게 되면 여기가 채워진다. required 에 넣지 않는다 — 이미 저장된 프리셋이 깨진다                                                                                       |
 | + [style_refs](#assets_style_refs )                   | No      | array of string | No         | -          | 그림체 레퍼런스 업로드 애셋. 온보딩에서 스킵 가능 — 빈 배열이면 기본 스타일 적용                                                                                                                                                                                                                          |
 | + [reference_asset_ids](#assets_reference_asset_ids ) | No      | array of string | No         | -          | 누적 메모리용. 지금은 항상 빈 배열 — 필드만 미리 박아 마이그레이션 회피                                                                                                                                                                                                                               |
+| - [font](#assets_font )                               | No      | object          | No         | -          | -                                                                                                                                                                                                                                                                        |
 
 ### <a name="assets_character_sheet"></a>3.1. Property `Preset > assets > character_sheet`
 
@@ -208,6 +213,55 @@ Must be one of:
 | ------------ | -------- |
 | **Type**     | `string` |
 | **Required** | No       |
+
+### <a name="assets_font"></a>3.5. Property `Preset > assets > font`
+
+|                           |             |
+| ------------------------- | ----------- |
+| **Type**                  | `object`    |
+| **Required**              | No          |
+| **Additional properties** | Not allowed |
+
+| Property                         | Pattern | Type             | Deprecated | Definition | Title/Description |
+| -------------------------------- | ------- | ---------------- | ---------- | ---------- | ----------------- |
+| + [family](#assets_font_family ) | No      | string           | No         | -          | -                 |
+| + [url](#assets_font_url )       | No      | string           | No         | -          | -                 |
+| + [kind](#assets_font_kind )     | No      | enum (of string) | No         | -          | -                 |
+
+#### <a name="assets_font_family"></a>3.5.1. Property `Preset > assets > font > family`
+
+|              |          |
+| ------------ | -------- |
+| **Type**     | `string` |
+| **Required** | Yes      |
+
+| Restrictions   |    |
+| -------------- | -- |
+| **Min length** | 1  |
+| **Max length** | 60 |
+
+#### <a name="assets_font_url"></a>3.5.2. Property `Preset > assets > font > url`
+
+|              |          |
+| ------------ | -------- |
+| **Type**     | `string` |
+| **Required** | Yes      |
+
+| Restrictions                      |                                                                       |
+| --------------------------------- | --------------------------------------------------------------------- |
+| **Max length**                    | 2048                                                                  |
+| **Must match regular expression** | ```^https://``` [Test](https://regex101.com/?regex=%5Ehttps%3A%2F%2F) |
+
+#### <a name="assets_font_kind"></a>3.5.3. Property `Preset > assets > font > kind`
+
+|              |                    |
+| ------------ | ------------------ |
+| **Type**     | `enum (of string)` |
+| **Required** | Yes                |
+
+Must be one of:
+* "css"
+* "file"
 
 ## <a name="style"></a>4. Property `Preset > style`
 
@@ -735,4 +789,4 @@ Must be one of:
 | **Min length** | 1 |
 
 ----------------------------------------------------------------------------------------------------------------------------
-Generated using [json-schema-for-humans](https://github.com/coveooss/json-schema-for-humans) on 2026-10-04 at 20:58:53 +0900
+Generated using [json-schema-for-humans](https://github.com/coveooss/json-schema-for-humans) on 2026-10-06 at 11:19:20 +0900
