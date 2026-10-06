@@ -10,4 +10,5 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
       - run: npm ci
-      - run: npm run spec:sync-check
+      - name: 어휘·힌트 동기화 — 저장값 검증 아님
+        run: npm run spec:sync-check

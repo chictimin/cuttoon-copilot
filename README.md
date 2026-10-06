@@ -37,7 +37,8 @@ npm run dev              # 개발 서버
 npm run build            # 머지 전 빌드 확인
 npm start                # 프로덕션 실행
 npm run lint             # 린트
-npm run spec:sync-check  # 스키마 · 데이터 정합 검사
+npm run spec:sync-check  # 어휘·힌트 동기화 — 저장값 검증 아님
+npm run spec:docs        # 문서 생성 — 검사 아님
 ```
 
 `.env`는 저장소에 없다(추적 제외). 팀 내부 채널로 전달받는다. 필수 환경변수는 `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` 세 개다. 선택 변수는 `IMAGE_PROVIDER` — 비우면 `openai`, 개발·QA 비용 절감용 `openai-low`(#190), 로컬 ComfyUI로 그리는 개발 테스트 전용 `comfyui`(#226, `COMFYUI_*` 변수 필요). P0 판정·발표·최종 회귀는 `openai`로만 한다. 키 이름은 `.env.example` 참고. 이미지 생성 테스트는 `OPENAI_API_KEY`를 각자 개인 키로 바꿔 쓴다.

@@ -8,6 +8,13 @@
 // 서브객체 4곳에도 스키마엔 additionalProperties:false가 걸려 있지만 여기선 안 잡는다(예:
 // style.line_width처럼 오타난 필드가 이 가드는 통과함). uniqueItems(스키마 9곳)도 미검증.
 // 가드의 목적이 LLM 출력의 큰 형태 오류를 잡는 것이라 오타 필드까지는 지금 급하지 않다고 판단.
+//
+// 검사하는 규칙 / 하지 않는 규칙 (spec-263 P3 문구):
+// - assertValidPreset이 검사: 최상위 additionalProperties·preset_version·필수 키·asset 패턴·
+//   enum(스키마에서 읽음)·cta id·font·mascot. 위반 시 throw.
+// - presetContractProbe가 집계: B4·B5·B10·B16 중복, B15 하위(assets·style·rules·context)
+//   추가 키, B6 character_pool 형식. throw하지 않음(집계 전용).
+// - 어느 쪽도 하지 않음: character_pool 값의 실존 검사, 비객체 입력의 판정(probe는 빈 배열),
 
 import presetSchema from "@/spec/preset.schema.json";
 import styleVocabulary from "@/spec/data/style-vocabulary.json";
@@ -421,4 +428,140 @@ export function checkUnmappedWordsPolicy(preset: {
       "rules.forbidden": forbidden.hints,
     },
   };
+}
+
+// ── P0 preset probe (spec-263 rev4 3-5) ─────────────────────────────
+//
+// R 보호 설계용 집계 전용 순수 함수. assertValidPreset이 검사하지 않는 항목
+// (B4·B5·B10·B16 중복, B15 하위 추가 키, B6 character_pool 형식)을 problem
+// 목록으로 모은다. throw하지 않는다 — 컨테이너 형태 오류(비객체 입력)도 빈
+// 배열로 돌려준다(판정이 아니라 집계이므로. 비객체 거부는 assertValidPreset 몫).
+// cause에는 비교 근거만 담는다. 중복 값 자체는 메모리에만 머물고, P0 스크립트
+// 출력에는 건수·locator·값 타입만 나간다(원문 출력 금지).
+
+export type PresetProbeRule = "B4" | "B5" | "B10" | "B16" | "B15" | "B6";
+
+export interface PresetProbeProblem {
+  rule: PresetProbeRule;
+  locator: string;
+  kind: "duplicate" | "extra-key" | "format" | "type";
+  cause: unknown;
+}
+
+function findDuplicates(values: unknown[]): { count: number; index: number; value: unknown }[] {
+  const seen = new Map<unknown, { count: number; index: number }>();
+  values.forEach((v, i) => {
+    const hit = seen.get(v);
+    if (hit) hit.count += 1;
+    else seen.set(v, { count: 1, index: i });
+  });
+  return [...seen.entries()]
+    .filter(([, e]) => e.count > 1)
+    .map(([value, e]) => ({ value, count: e.count, index: e.index }));
+}
+
+function getSchemaPropsAt(pathParts: string[]): string[] {
+  let node: unknown = presetSchema;
+  for (const part of pathParts) {
+    if (!isRecord(node)) return [];
+    node = node[part];
+  }
+  if (!isRecord(node) || !isRecord(node.properties)) return [];
+  return Object.keys(node.properties);
+}
+
+function readCharacterPoolPattern(): RegExp {
+  let node: unknown = presetSchema;
+  for (const part of ["properties", "assets", "properties", "character_pool", "items", "pattern"]) {
+    if (!isRecord(node)) return ASSET_URI_PATTERN;
+    node = node[part];
+  }
+  if (typeof node !== "string") return ASSET_URI_PATTERN;
+  try {
+    return new RegExp(node);
+  } catch {
+    return ASSET_URI_PATTERN;
+  }
+}
+
+/**
+ * B4·B5·B10·B16 중복, B15 하위 추가 키, B6 character_pool 형식을 집계한다.
+ * 중복 검사는 스키마에 uniqueItems가 있는 문자열 배열 중 B4·B5·B10이 맡지 않은
+ * 것(style.keywords·style.palette·context 5종)을 B16으로 묶는다.
+ * B15 허용 키는 스키마 properties에서 읽는다(값 목록 복제 금지와 같은 취지).
+ */
+export function presetContractProbe(data: unknown): PresetProbeProblem[] {
+  const out: PresetProbeProblem[] = [];
+  if (!isRecord(data)) return out;
+
+  const at = (path: string[]): unknown => {
+    let node: unknown = data;
+    for (const part of path) {
+      if (!isRecord(node)) return undefined;
+      node = node[part];
+    }
+    return node;
+  };
+
+  const dupPaths: { rule: PresetProbeRule; path: string[] }[] = [
+    { rule: "B4", path: ["assets", "style_refs"] },
+    { rule: "B5", path: ["assets", "reference_asset_ids"] },
+    { rule: "B10", path: ["rules", "forbidden"] },
+    { rule: "B16", path: ["style", "keywords"] },
+    { rule: "B16", path: ["style", "palette"] },
+    { rule: "B16", path: ["context", "industry"] },
+    { rule: "B16", path: ["context", "interests"] },
+    { rule: "B16", path: ["context", "age_band"] },
+    { rule: "B16", path: ["context", "life_stage"] },
+    { rule: "B16", path: ["context", "main_subjects"] },
+  ];
+  for (const { rule, path } of dupPaths) {
+    const value = at(path);
+    if (!Array.isArray(value)) continue;
+    for (const d of findDuplicates(value)) {
+      out.push({
+        rule,
+        locator: `${path.join(".")}[${d.index}]`,
+        kind: "duplicate",
+        cause: { value: d.value, count: d.count },
+      });
+    }
+  }
+
+  for (const obj of ["assets", "style", "rules", "context"]) {
+    const node = at([obj]);
+    if (!isRecord(node)) continue;
+    const allowed = getSchemaPropsAt(["properties", obj]);
+    if (allowed.length === 0) continue;
+    for (const key of Object.keys(node)) {
+      if (!allowed.includes(key)) {
+        out.push({ rule: "B15", locator: `${obj}.${key}`, kind: "extra-key", cause: key });
+      }
+    }
+  }
+
+  const pool = at(["assets", "character_pool"]);
+  if (pool !== undefined) {
+    if (!Array.isArray(pool)) {
+      out.push({ rule: "B6", locator: "assets.character_pool", kind: "type", cause: typeof pool });
+    } else {
+      const pattern = readCharacterPoolPattern();
+      for (let i = 0; i < pool.length; i++) {
+        const v: unknown = pool[i];
+        if (typeof v !== "string" || !pattern.test(v)) {
+          out.push({ rule: "B6", locator: `assets.character_pool[${i}]`, kind: "format", cause: typeof v });
+        }
+      }
+      for (const d of findDuplicates(pool)) {
+        out.push({
+          rule: "B6",
+          locator: `assets.character_pool[${d.index}]`,
+          kind: "duplicate",
+          cause: { count: d.count },
+        });
+      }
+    }
+  }
+
+  return out;
 }
