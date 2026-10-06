@@ -217,6 +217,9 @@ export default function DetailsStep({
         <p className="mt-1 text-sm text-zinc-500">
           자동으로 뽑을 수 없는 값이라 직접 입력이 필요해요. 비워두면 기본값으로 진행돼요
         </p>
+        <p className="mt-1 text-xs text-zinc-400">
+          담당 분야·마케팅 목적·주요 소재를 모두 비우면, 컷툰을 만들 때 소재 추천 없이 직접 적어야 해요
+        </p>
       </div>
 
       <div className="flex flex-col gap-2">

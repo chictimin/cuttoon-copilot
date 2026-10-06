@@ -5,6 +5,7 @@
 
 import { readAsset } from "../asset-store";
 import { composeCut } from "./compose";
+import { isDemoCacheRef, readDemoCacheImage } from "./demo-cache";
 import { loadFont, type PresetFont } from "./font";
 import { buildZip } from "./zip";
 import type { Cut } from "./types";
@@ -16,7 +17,11 @@ export interface ExportResult {
 }
 
 // font: 프리셋의 프로젝트 웹폰트(#209). 없거나 받지 못하면 시스템 폰트로 그리고 Export는 계속된다.
-export async function exportCuts(cuts: Cut[], opts: { font?: PresetFont | null } = {}): Promise<ExportResult> {
+// demoCachePublicDir: 데모 캐시를 읽을 public 폴더(#240). demo만 임시 폴더를 넘기고 실제 호출은 생략한다.
+export async function exportCuts(
+  cuts: Cut[],
+  opts: { font?: PresetFont | null; demoCachePublicDir?: string } = {}
+): Promise<ExportResult> {
   const font = await loadFont(opts.font);
   const sorted = [...cuts].sort((a, b) => a.cut_index - b.cut_index);
   const entries: { name: string; data: Buffer }[] = [];
@@ -28,7 +33,10 @@ export async function exportCuts(cuts: Cut[], opts: { font?: PresetFont | null }
       skipped.push(cut.cut_index);
       continue;
     }
-    const imageBuffer = await readAsset(cut.generated_image);
+    // #240: 데모 캐시 세션은 public 경로를 저장한다 — manifest에 있는 값만 로컬에서 읽는다.
+    const imageBuffer = isDemoCacheRef(cut.generated_image)
+      ? await readDemoCacheImage(cut.generated_image, opts.demoCachePublicDir)
+      : await readAsset(cut.generated_image);
     if (!imageBuffer) {
       skipped.push(cut.cut_index);
       continue;

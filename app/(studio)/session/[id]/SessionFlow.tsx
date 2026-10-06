@@ -247,6 +247,16 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [saveRecovery, setSaveRecovery] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const saveLockRef = useRef(false);
+
+  // #259: 4컷을 만드는 중이거나 만든 뒤 저장 전이면, 새로고침·탭 닫기 때 브라우저 확인창을 띄운다.
+  // 이미 저장된 세션을 다시 연 화면(isRestoredView)과 저장 완료(saved)는 잃을 것이 없다.
+  const hasUnsavedResult = step === "generating" || (step === "cuts" && !isRestoredView);
+  useEffect(() => {
+    if (!hasUnsavedResult) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsavedResult]);
   const [presetError, setPresetError] = useState<string | null>(null);
 
   // issue #123: preset(상의 색 후보 palette 포함)을 브레인스토밍 진행과 병렬로
@@ -1316,6 +1326,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       {step === "cover" && coverVariants && storyboard && !genError && (
         <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
           <h1 className="text-xl font-semibold">마음에 드는 표지를 골라주세요</h1>
+          {/* #259 4번: 카드 자체가 버튼이고 확인 단계가 없다 — 누르면 바로 나머지 컷 생성이 시작되는 것을 미리 알린다. */}
+          <p className="text-sm text-zinc-500">표지를 누르면 바로 나머지 컷을 만들기 시작해요</p>
           {coverRequested != null && coverVariants.length < coverRequested && (
             <p className="w-full max-w-md rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-700">
               {coverRequested}안 중 {coverVariants.length}안만 만들어졌어요. 다시 뽑기를 눌러보세요
