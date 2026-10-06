@@ -1321,6 +1321,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       {step === "cover" && coverVariants && storyboard && !genError && (
         <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
           <h1 className="text-xl font-semibold">마음에 드는 표지를 골라주세요</h1>
+          {/* #259 4번: 카드 자체가 버튼이고 확인 단계가 없다 — 누르면 바로 나머지 컷 생성이 시작되는 것을 미리 알린다. */}
+          <p className="text-sm text-zinc-500">표지를 누르면 바로 나머지 컷을 만들기 시작해요</p>
           {coverRequested != null && coverVariants.length < coverRequested && (
             <p className="w-full max-w-md rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-700">
               {coverRequested}안 중 {coverVariants.length}안만 만들어졌어요. 다시 뽑기를 눌러보세요
