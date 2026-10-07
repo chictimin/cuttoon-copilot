@@ -382,12 +382,30 @@ export function buildCutPrompt(
     // 실측: 서술 없이 4회 생성했을 때 "60대 어머니"가 4/4 어린아이로 나왔고
     // 헤어스타일·복장·복장색·화면 내 크기가 전부 달라졌다. 서술을 넣은 뒤
     // 4/4 로 정확히 나왔다.
-    for (const c of cut.characters_in_frame ?? []) {
+    //
+    // #242: 2인 컷은 characters_in_frame[0] 을 왼쪽, [1] 을 오른쪽에 세운다. Export 가
+    // caption.speaker_index(0 → 왼쪽, 1 → 오른쪽)로 말풍선 꼬리 방향을 정하므로 그림의
+    // 좌우가 그 순서와 맞아야 한다. 프롬프트는 speaker_index 를 읽지 않고 순서만 쓴다 —
+    // 순서는 storyboard-assembly.ts 한 곳에서 정해지고(주인공이 [0]) 이후 바뀌지 않는다는
+    // 팀 합의가 전제다.
+    //
+    // 위치를 인물 문장 머리에 붙인다("Character on the left side of the panel: …"). 루프 뒤에
+    // "첫 번째 인물은 왼쪽" 한 문장을 따로 두면 모델이 서술의 순서를 세어 짝지어야 하고,
+    // 앞쪽 시트 문장("The character drawn on that sheet …")까지 "첫 번째" 로 셀 여지가 있다.
+    // 위치와 서술이 한 문장에 묶이면 그 짝짓기가 필요 없다.
+    //
+    // 1인·0인(그리고 스키마상 없는 3인 이상) 컷은 문장을 그대로 둔다 — 10-10 데모 캐시(전부
+    // 1인 컷)와 지금까지의 판정 조건을 바이트 단위로 지키기 위해서다. 표지도 같은 함수를
+    // 쓰므로 표지 컷이 2인이면 같은 규칙이 적용된다(표지 = 1번 컷 그림이라 말풍선 규칙도 같다).
+    const frame = cut.characters_in_frame ?? []
+    const sides = frame.length === 2 ? ['left', 'right'] : undefined
+    frame.forEach((c, i) => {
       const desc = c.character_id ? castById.get(c.character_id)?.description : undefined
       const traits = [hint('expression', c.expression), hint('pose', c.pose)].filter(Boolean).join(', ')
+      const label = sides ? `Character on the ${sides[i]} side of the panel:` : 'Character:'
       // 서술을 앞세운다 — 나이·성별 같은 정체성이 표정·포즈보다 먼저 고정돼야 한다.
-      parts.push(desc ? `Character: ${project(desc)}. ${traits}.` : `Character: ${traits || 'neutral expression, standing'}.`)
-    }
+      parts.push(desc ? `${label} ${project(desc)}. ${traits}.` : `${label} ${traits || 'neutral expression, standing'}.`)
+    })
 
     // #240: 주인공 머리색이 컷마다 바뀌었다(검정↔갈색, 주황→검정). cast 서술에 머리색이
     // 없고(세션당 고정은 상의 색뿐, #148), 마스코트가 아니면 시트도 다른 인물이라 컷
