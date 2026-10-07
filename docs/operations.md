@@ -155,7 +155,7 @@ npm run spec:sync-check  # 스키마 · 데이터 정합 검사
 | 10 | 버그 | 생성 결과 유실 방지 잔여분 (`generateChainedCuts`) (**완료** — PR #177 머지, #104 닫힘) | 품질 | 10-08 | JEON-DAEJIN | #104 |
 | 11 | 버그 | **완료**(PR #192 머지) — 아주 긴 대사 말풍선이 그림 오른쪽 밖으로 잘림 (`top_right`) | 품질 | 10-08 | smartman3514-commits | #169 |
 | 12 | 버그 | **완료**(PR #192 머지) — 아주 긴 대사 center 말풍선이 인물을 덮어 꼬리가 사라짐 | 품질 | 10-08 | smartman3514-commits | #170 |
-| 13 | 버그 | center 말풍선 꼬리를 화자 방향으로 (PR #235 머지로 함수 완료, #199 닫음 — 실제 결과물 반영은 #242: 10-07 chictimin · wide·full 보정 10-08 smartman3514-commits · 2인 컷 좌우 프롬프트 10-09 joniverse-ai) | 품질 | 10-09 | smartman3514-commits · chictimin · joniverse-ai | #242 |
+| 13 | 버그 | center 말풍선 꼬리를 화자 방향으로 (PR #235 머지로 함수 완료, #199 닫음 — 실제 결과물 반영은 #242: wide 컷 목표점 보정 완료(#273, full 제외) · 화자 필드 확정 공지 10-07 chictimin, 스키마·저장 검사 반영은 #263 머지 후 · 2인 컷 좌우 프롬프트 10-09 joniverse-ai · Export 화자 연결은 필드 반영 다음 날 smartman3514-commits) | 품질 | 10-09 | smartman3514-commits · chictimin · joniverse-ai | #242 |
 | 14 | 기능 | CTA를 세션 단위로 — 마무리 강도 3단계 + 이번 편 목적 (**완료** — 1단 PR #223 · 2단 온보딩 기본 강도 PR #229 머지. "이번 편에 알릴 내용"은 #206에서 이어서 검토) | 품질 | 미정 | chictimin · JEON-DAEJIN | #205 |
 | 15 | 기능 | 소재 [브랜드·제품명] 표기 (서버 PR #231 · 이미지 투영 PR #237 · 태그 저장 검사 PR #244 · 화면 배선 PR #251 · 복원 표식 PR #256 머지, #247 닫힘 — 남은 것: #206 잔여) | 품질 | 미정 | chictimin | #206 |
 | 16 | 기능 | 표지 선택 기록 (**완료** — 서버 PR #210 · 화면 PR #213 머지, #207 · #216 닫힘) | 품질 | 미정 | chictimin · JEON-DAEJIN | #207 |
