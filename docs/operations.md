@@ -64,7 +64,8 @@ cuttoon-copilot/
 │  │   ├─ prompt.demo.ts       프롬프트 검사 demo              joniverse-ai
 │  │   └─ provider.ts          ImageProvider 인터페이스        joniverse-ai
 │  ├─ render/                  텍스트 레이어 합성 · ZIP        smartman3514-commits
-│  │   └─ font.ts                프로젝트 폰트 읽기             smartman3514-commits
+│  │   ├─ font.ts                프로젝트 폰트 읽기             smartman3514-commits
+│  │   └─ position-box.ts        말풍선 칸별 자리 비율 (#279)   smartman3514-commits
 │  └─ db/                      Supabase 클라이언트 · 쿼리      chictimin
 ├─ spec/                       계약 (변경은 chictimin 승인)    chictimin
 │  ├─ preset.schema.json
@@ -82,6 +83,7 @@ cuttoon-copilot/
 | JEON-DAEJIN | `app/(studio)/` (단 `session/[id]/storyboard-assembly.ts`는 제외) | 화면 전체 |
 | joniverse-ai | `lib/openai/`, `app/api/generate/`, `app/api/extract/` | 이미지 생성 · 추출 · 캐릭터 시트 |
 | smartman3514-commits | `lib/render/` | 렌더링 버그 수정(#105, #169, #170) + QA 검증 |
+| (지정 없음) | `scripts/`(`p0-storyboard-scan`·`demo-cache-build`·`two-person-check`) | 작업용 스크립트 |
 
 1차에는 A①~B③ 6파트 체제였다. `pipeline.md`는 각자 자기 영역 절을 고친다. `public/demo-cache/`는 아직 만들어지지 않았고 담당은 joniverse-ai(10-10 생성 예정)이다.
 
