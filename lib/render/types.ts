@@ -16,6 +16,8 @@ export interface Cut {
   caption: Caption;
   // 렌더링에 필요한 것만 가져온다 — narrative_beat/shot_type 등 나머지 필드는
   // lib/render/가 안 쓰므로 여기 타입엔 안 실었다.
+  // 꼬리 목표점 보정용(#242 나). storyboard.schema.json의 shot_type enum 그대로 받는다.
+  shot_type?: string | null;
   // asset:// 참조는 lib/asset-store.ts가, 데모 캐시 public 경로("/demo-cache/…")는
   // lib/render/demo-cache.ts가 해석한다(#240).
   generated_image: string | null;
