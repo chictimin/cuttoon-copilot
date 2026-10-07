@@ -270,10 +270,10 @@ function runStatic(): void {
   const routeSrc = readFileSync("app/api/session/route.ts", "utf8");
   const getSrc = routeSrc.slice(routeSrc.indexOf("export async function GET"));
   check(
-    "Export 무변경",
+    "Export 판정배선 없음",
     markers.every((m) => !exportSrc.includes(m)) && getSrc.length > 0
   );
-  check("GET 무변경", markers.every((m) => !getSrc.includes(m)));
+  check("GET 판정배선 없음", markers.every((m) => !getSrc.includes(m)));
 
   const sessionsSrc = readFileSync("lib/db/sessions.ts", "utf8");
   const versionSrc = readFileSync("app/api/session/version/route.ts", "utf8");
@@ -548,7 +548,7 @@ async function runRealPath(): Promise<void> {
           : findNewViolations(v.storyboard, arr[i - 1].storyboard).length === 0
       );
     check(
-      "경합200+409+판정안된버전0",
+      "경합순차매핑200+409+판정안된버전0",
       r1.status === 200 &&
         r2.status === 409 &&
         j2.code === "version_conflict" &&
@@ -589,7 +589,12 @@ async function runRealPath(): Promise<void> {
     db.seedVersion(SID, 1, previous);
     db.seedVersion(SID, 2, validBoard());
     const r = await postRevert({ sessionId: SID });
-    check("revert tags우선409", r.status === 409, r);
+    check(
+      "revert tags우선409",
+      r.status === 409 &&
+        (r.json as Record<string, unknown>).code === "invalid_subject_tags",
+      r
+    );
   }
 
   // revert 정상 200 (실제 route)
