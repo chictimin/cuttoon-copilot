@@ -33,11 +33,14 @@ const BUBBLE_OPACITY = 0.98;
 // 당겨줘")에 따라 예전(y: 0.66)보다 인물 쪽(화면 중앙)에 확실히 더 가깝게 뒀다.
 // top_* 도 같은 이유로 예전(y: 0.0, 캔버스 맨 위)보다 인물(보통 화면 중앙 쪽) 쪽으로
 // 당겼다(인선님 피드백 2026-08-20: "사람하고 가깝게 그려줘").
+// #259-8 D(2026-10-07): bottom_* 0.46은 인물 얼굴 높이(세로 25~60%)와 겹쳐 말풍선이 얼굴을
+// 덮었다(저장 컷 32개 중 bottom 15개). 그림이 아래를 비우는 경우(reserved_zone: bottom)에
+// 그 비운 자리로 가도록 0.70으로 내린다. 긴 대사는 아래 경계 보정이 위로 올린다.
 const POSITION_BOX: Record<Position, { x: number; y: number; w: number }> = {
   top_left: { x: -0.03, y: 0.07, w: 0.44 },
   top_right: { x: 0.59, y: 0.07, w: 0.44 },
-  bottom_left: { x: 0.0, y: 0.46, w: 0.44 },
-  bottom_right: { x: 0.56, y: 0.46, w: 0.44 },
+  bottom_left: { x: 0.0, y: 0.7, w: 0.44 },
+  bottom_right: { x: 0.56, y: 0.7, w: 0.44 },
   center: { x: 0.22, y: 0.38, w: 0.56 },
 };
 
@@ -361,7 +364,8 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   // #79: 폴백된 값을 한 번만 정하고 이후(box·shape·tail) 전부 그 값을 써야 한다 —
   // box만 폴백하고 tailSvg()엔 원본을 넘기면 몸통은 center인데 꼬리는 안 그려져야
   // 할 자리에 그려지는 식으로 서로 어긋난다.
-  const position: Position = caption.position in POSITION_BOX ? caption.position : "center";
+  // `in`은 프로토타입까지 보므로 "toString" 같은 값도 통과해 box가 함수가 된다 — 자기 키만 본다(#277 리뷰).
+  const position: Position = Object.hasOwn(POSITION_BOX, caption.position) ? caption.position : "center";
   if (position !== caption.position) {
     console.warn(`[compose] 알 수 없는 caption.position "${caption.position}" — center로 폴백`);
   }
@@ -432,6 +436,16 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
     const cy = y + bubbleH / 2;
     const overflowTop = radii.ry - cy;
     if (overflowTop > 0) y += overflowTop;
+  }
+
+  // 아래쪽 경계(#259-8 D). bottom_*를 0.70으로 내리면서 줄이 많은 대사는 도형이 캔버스
+  // 아래로 나갈 수 있다 — 넘어간 만큼 위로 올린다(위 보정과 같은 방식, 몸통·글씨 모두 이 y를
+  // 쓴다). rounded는 타원 아래 끝, rect·cloud는 박스 아래 끝(구름 장식은 위쪽에만 붙는다).
+  // bottom 칸에만 건다 — top·center는 예전 결과 그대로 둔다(chictimin 리뷰, #276).
+  if (position === "bottom_left" || position === "bottom_right") {
+    const shapeBottom = bubbleType === "rounded" ? y + bubbleH / 2 + radii.ry : y + bubbleH;
+    const overflowBottom = shapeBottom - (canvasH - STROKE_MARGIN);
+    if (overflowBottom > 0) y -= overflowBottom;
   }
 
   // #79/#92 fallback을 여기서도 그대로 이어받는다 — bubbleShapeSvg에 원본 caption.*을

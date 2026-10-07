@@ -46,6 +46,24 @@ async function main() {
     console.error(`FAIL enum 밖 position — 크래시함: ${(err as Error).message}`);
   }
 
+  // 프로토타입 키("toString"·"constructor"·"__proto__")도 enum 밖 값이다 — `in` 검사로는 통과해서
+  // box가 함수/객체가 되고 좌표가 NaN이 됐다(#277 리뷰). 명시적 center와 같은 그림이어야 한다.
+  try {
+    const center = await composeCut(img, [{ text: "프로토타입 키", bubble_type: "rounded", position: "center" }]);
+    for (const key of ["toString", "constructor", "__proto__"]) {
+      const out = await composeCut(img, [{ text: "프로토타입 키", bubble_type: "rounded", position: key as unknown as Position }]);
+      if (Buffer.compare(center, out) === 0) {
+        console.log(`ok   position "${key}" — center로 폴백`);
+      } else {
+        failed++;
+        console.error(`FAIL position "${key}" — center와 다르게 그려짐`);
+      }
+    }
+  } catch (err) {
+    failed++;
+    console.error(`FAIL 프로토타입 키 position — ${(err as Error).message}`);
+  }
+
   // #79: box만 center로 폴백하고 tailSvg()엔 원본을 그대로 넘기면, 몸통은 center
   // 자리인데 꼬리는 (center가 아니라서) 그려지는 불일치가 생긴다. position="center"로
   // 명시한 것과 enum 밖 값으로 center에 떨어진 것의 렌더링 결과가 완전히 같아야
@@ -169,11 +187,55 @@ async function main() {
     console.error(`FAIL wide 목표점 합성 — ${(err as Error).message}`);
   }
 
+  // #259-8 D: bottom_* 말풍선은 화면 아래(0.70 근처)에 그려지고, 긴 대사도 캔버스 아래로
+  // 나가지 않는다. 검은 1024 캔버스에 합성한 뒤 흰 픽셀(말풍선 몸통)이 있는 행 범위를 잰다.
+  {
+    const black = await sharp({ create: { width: 1024, height: 1024, channels: 3, background: { r: 0, g: 0, b: 0 } } })
+      .png()
+      .toBuffer();
+    const whiteRows = async (caption: Caption) => {
+      const { data, info } = await sharp(await composeCut(black, [caption])).raw().toBuffer({ resolveWithObject: true });
+      const rows: number[] = [];
+      for (let yy = 0; yy < info.height; yy++) {
+        for (let xx = 0; xx < info.width; xx++) {
+          const i = (yy * info.width + xx) * info.channels;
+          if (data[i] > 200 && data[i + 1] > 200 && data[i + 2] > 200) { rows.push(yy); break; }
+        }
+      }
+      return { top: Math.min(...rows), bottom: Math.max(...rows), h: info.height };
+    };
+    const longText = "아침마다 무릎이 뻣뻣해서 계단을 내려갈 때마다 조심하게 되는데 퇴근 후 10분씩 스트레칭을 하면 정말 좀 나아질까 궁금해서 친구에게 물어봤어요";
+    for (const bubble_type of ["rounded", "rect", "cloud"] as const) {
+      const short = await whiteRows({ text: "무릎이 한결 가벼워졌어!", bubble_type, position: "bottom_left" });
+      const long = await whiteRows({ text: longText, bubble_type, position: "bottom_right" });
+      const ok = short.top >= short.h * 0.6 && long.bottom < long.h - 1;
+      if (ok) {
+        console.log(`ok   bottom ${bubble_type} — 짧은 대사 위끝 ${(short.top / short.h * 100).toFixed(0)}%, 긴 대사 아래끝 ${long.bottom}px(<${long.h - 1})`);
+      } else {
+        failed++;
+        console.error(`FAIL bottom ${bubble_type} — 짧은 위끝 ${short.top}, 긴 아래끝 ${long.bottom}`);
+      }
+    }
+
+    // 아래 경계 보정은 bottom 칸에만 — 캔버스를 넘칠 만큼 긴 대사여도 top·center 상자는
+    // 원래 자리(POSITION_BOX y)에서 시작해야 한다. rect는 상자 위 끝이 곧 y라 바로 잴 수 있다.
+    const huge = Array(15).fill(longText).join(" ");
+    for (const [position, boxY] of [["top_left", 0.07], ["top_right", 0.07], ["center", 0.38]] as const) {
+      const r = await whiteRows({ text: huge, bubble_type: "rect", position });
+      if (Math.abs(r.top - boxY * r.h) <= 4) {
+        console.log(`ok   ${position} 아주 긴 대사 — 아래 경계 보정 안 받음(위끝 ${r.top}px ≈ ${(boxY * r.h).toFixed(0)}px)`);
+      } else {
+        failed++;
+        console.error(`FAIL ${position} 아주 긴 대사 — 위끝 ${r.top}px, 원래 자리 ${(boxY * r.h).toFixed(0)}px에서 움직임`);
+      }
+    }
+  }
+
   if (failed > 0) {
     console.error(`\n${failed}건 실패`);
     process.exit(1);
   }
-  console.log("\n18건 통과");
+  console.log("\n27건 통과");
 }
 
 main();
