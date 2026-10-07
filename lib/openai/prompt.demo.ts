@@ -13,7 +13,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = "demo";
 import type { PresetInput } from "./extract";
 
 async function main(): Promise<void> {
-  const { imageSetting, imageQuality } = await import("./image-setting");
+  const { imageSetting, imageQuality, failReason } = await import("./image-setting");
   const { activeMascot, ratioClause, buildCutPrompt } = await import("./generate");
   const { buildCharacterPrompt } = await import("./extract");
 
@@ -352,7 +352,34 @@ async function main(): Promise<void> {
     checks.push(["cut 없음 → 문장 없음", !buildCutPrompt(sb, {}, undefined, { continuesChain: true }).includes(KEEP)]);
   }
 
-  // --- #242 2인 컷 좌우 배치 (characters_in_frame[0] 왼쪽, [1] 오른쪽) ---
+  // --- 7. failReason 허용 목록 (#274 리뷰) — 로그 실패 사유에 키·URL 이 새지 않는지 ---
+  // 가짜 값이다(실제 키 아님). status·code·name 어느 자리에 들어와도 반환값에 없어야 한다.
+  {
+    const secrets = [
+      "sk-proj-FAKE0123456789abcdef",
+      "sb_secret_FAKE0123456789abcdef",
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmYWtlIn0.c2lnbmF0dXJl",
+      "https://demo.invalid/v1/responses?key=FAKE",
+    ];
+    for (const secret of secrets) {
+      const label = secret.slice(0, 12);
+      for (const field of ["status", "code", "name"] as const) {
+        const reason = failReason({ [field]: secret });
+        checks.push([`failReason ${field}=${label}… → 값 없음`, !reason.includes(secret) && !reason.includes("FAKE")]);
+      }
+    }
+    checks.push([
+      "failReason 429 + project_spend_limit_exceeded → 그대로",
+      failReason({ status: 429, code: "project_spend_limit_exceeded" }) === "429 project_spend_limit_exceeded",
+    ]);
+    checks.push(["failReason 목록 밖 code → code_other", failReason({ status: 400, code: "sk-proj-FAKE" }) === "400 code_other"]);
+    checks.push(["failReason status 문자열 '503' → 503", failReason({ status: "503" }) === "503"]);
+    checks.push(["failReason status 범위 밖(42) → 버림·이름도 없으면 error", failReason({ status: 42 }) === "error"]);
+    checks.push(["failReason status·code 없음 → SDK 클래스 이름", failReason({ name: "RateLimitError" }) === "RateLimitError"]);
+    checks.push(["failReason 객체 아님 → error", failReason("sk-proj-FAKE") === "error"]);
+  }
+
+  // --- 8. #242 2인 컷 좌우 배치 (characters_in_frame[0] 왼쪽, [1] 오른쪽) ---
   {
     const sb = {
       subject: "demo",

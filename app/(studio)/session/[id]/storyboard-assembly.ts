@@ -210,6 +210,67 @@ function isCutIndex(value: unknown): value is Cut["cut_index"] {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 4;
 }
 
+// spec-259a rev3 2절 매핑표 (pin — D2·D3). 적용 컷은 zone이 정한 두 칸 중 하나로만 간다.
+// top/bottom 행은 좌우 유지·위아래를 zone에, left/right 행은 위아래 유지·좌우를 zone에(D2).
+// center는 top→top_left, bottom→bottom_left, left→top_left, right→top_right(D3).
+const CAPTION_ZONE_MAP: Record<string, Record<string, Cut["caption"]["position"]>> = {
+  top: {
+    top_left: "top_left",
+    top_right: "top_right",
+    bottom_left: "top_left",
+    bottom_right: "top_right",
+    center: "top_left",
+  },
+  bottom: {
+    top_left: "bottom_left",
+    top_right: "bottom_right",
+    bottom_left: "bottom_left",
+    bottom_right: "bottom_right",
+    center: "bottom_left",
+  },
+  left: {
+    top_left: "top_left",
+    top_right: "top_left",
+    bottom_left: "bottom_left",
+    bottom_right: "bottom_left",
+    center: "top_left",
+  },
+  right: {
+    top_left: "top_right",
+    top_right: "top_right",
+    bottom_left: "bottom_right",
+    bottom_right: "bottom_right",
+    center: "top_right",
+  },
+};
+
+export function alignCaptionToZone(
+  zone: string | undefined,
+  position: Cut["caption"]["position"]
+): Cut["caption"]["position"] {
+  if (typeof zone !== "string") return position;
+  const row = CAPTION_ZONE_MAP[zone];
+  if (!row) return position;
+  return row[position] ?? position;
+}
+
+function hasGeneratedImage(cut: Cut): boolean {
+  if (!isRecord(cut)) return false;
+  if (!("generated_image" in cut)) return false;
+  const value = (cut as unknown as Record<string, unknown>).generated_image;
+  return value !== null && value !== undefined;
+}
+
+function validReservedZone(value: unknown): value is Cut["reserved_zone"] {
+  return typeof value === "string" && VALID_DIRECTION.reserved_zone.includes(value);
+}
+
+function existingZoneOf(cut: Cut): Cut["reserved_zone"] | undefined {
+  if (!isRecord(cut) || !("reserved_zone" in cut)) return undefined;
+  const value = (cut as unknown as Record<string, unknown>).reserved_zone;
+  return validReservedZone(value) ? value : undefined;
+}
+
 export function applyCutDirections(
   cuts: Cut[],
   directions: unknown,
@@ -234,6 +295,23 @@ export function applyCutDirections(
     const dir = byIndex.get(cut.cut_index);
     if (!dir) return cut;
 
+    // spec-259a rev3 3절. 무효 enum 연출값은 위 현행 분기에서 버려진 뒤가 아니라
+    // 아래 유효성 판정으로 같은 효과를 낸다 — 현행 필드 적용 분기는 그대로 둔다.
+    const image = hasGeneratedImage(cut);
+    const dirZone = validReservedZone(dir.reserved_zone)
+      ? (dir.reserved_zone as Cut["reserved_zone"])
+      : undefined;
+    const dirPosition =
+      typeof dir.caption_position === "string" &&
+      VALID_DIRECTION.caption_position.includes(dir.caption_position)
+        ? (dir.caption_position as Cut["caption"]["position"])
+        : undefined;
+    const baseZone = existingZoneOf(cut);
+    // E8: 그림 있는 컷은 연출 zone을 받지 않는다. E5·E6도 기존 zone 키가 없어도
+    // 연출 zone이 유효하면 그 경로를 탄다. 최종 zone이 없으면 E9(매핑만 생략).
+    const finalZone = image ? baseZone : (dirZone ?? baseZone);
+    const candidate = dirPosition ?? cut.caption.position;
+
     let next = cut;
     if (typeof dir.shot_type === "string" && VALID_DIRECTION.shot_type.includes(dir.shot_type)) {
       next = { ...next, shot_type: dir.shot_type as Cut["shot_type"] };
@@ -250,19 +328,21 @@ export function applyCutDirections(
     ) {
       next = { ...next, time_of_day: dir.time_of_day as Cut["time_of_day"] };
     }
-    if (
-      typeof dir.reserved_zone === "string" &&
-      VALID_DIRECTION.reserved_zone.includes(dir.reserved_zone)
-    ) {
-      next = { ...next, reserved_zone: dir.reserved_zone as Cut["reserved_zone"] };
+    if (!image && dirZone !== undefined) {
+      next = { ...next, reserved_zone: dirZone };
     }
-    if (
-      typeof dir.caption_position === "string" &&
-      VALID_DIRECTION.caption_position.includes(dir.caption_position)
-    ) {
+    if (finalZone !== undefined) {
       next = {
         ...next,
-        caption: { ...next.caption, position: dir.caption_position as Cut["caption"]["position"] },
+        caption: {
+          ...next.caption,
+          position: alignCaptionToZone(finalZone, candidate),
+        },
+      };
+    } else if (dirPosition !== undefined) {
+      next = {
+        ...next,
+        caption: { ...next.caption, position: dirPosition },
       };
     }
     if (Array.isArray(dir.characters)) {
