@@ -13,7 +13,7 @@ import sharp from 'sharp'
 import vocabulary from '@/spec/vocabulary.json'
 import type { ImageProvider, GeneratedImageResult, ReservedZone } from './provider'
 import { readAsset, uploadAsset } from '../asset-store'
-import { imageQuality, imageSetting, logImageSetting, type ImageSetting } from './image-setting'
+import { elapsedSeconds, imageQuality, imageSetting, settingTag, timeImageCall, type ImageSetting } from './image-setting'
 import { generateWithComfyui } from './comfyui'
 import { projectForModel, type SubjectTag } from '../llm/subject-tags'
 
@@ -466,40 +466,43 @@ async function callImageGeneration(
   kind: 'cover_variant' | 'cut',
   previousResponseId?: string
 ): Promise<{ base64: string; responseId: string }> {
-  logImageSetting(kind, setting)
   // ComfyUI 는 시트를 reference 로 받지 않고 체이닝도 없다(comfyui.ts 머리말). 아래
   // reference 0장 차단은 유료 호출을 막는 장치라 여기서는 읽지 않는다.
-  if (setting === 'comfyui') return generateWithComfyui(prompt, OUTPUT_SIZE)
+  if (setting === 'comfyui') return timeImageCall(kind, settingTag(setting), () => generateWithComfyui(prompt, OUTPUT_SIZE))
 
+  // reference 읽기는 시간 측정 밖에 둔다 — 여기서 막히면 생성 호출이 나가지 않으므로
+  // "호출 1회 = 로그 1줄" 에 넣지 않는다(실패는 toInputImages 가 따로 로그를 남긴다).
   const inputImages = await toInputImages(referenceUris(referenceAssets, preset))
   const quality = imageQuality(setting)
 
-  // openai SDK(^7.5.0)의 Responses 타입이 image_generation 도구 옵션을 아직 못
-  // 따라와 as any로 우회한다 — 실제 호출로 요청/응답 모양을 검증했다 (#18).
-  const response = await client.responses.create({
-    model: RESPONSES_MODEL,
-    previous_response_id: previousResponseId,
-    input: [
-      {
-        role: 'user',
-        content: [{ type: 'input_text', text: prompt }, ...inputImages],
-      },
-    ],
-    tools: [{ type: 'image_generation', size: IMAGE_SIZE, ...(quality && { quality }) }],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any)
+  return timeImageCall(kind, settingTag(setting), async () => {
+    // openai SDK(^7.5.0)의 Responses 타입이 image_generation 도구 옵션을 아직 못
+    // 따라와 as any로 우회한다 — 실제 호출로 요청/응답 모양을 검증했다 (#18).
+    const response = await client.responses.create({
+      model: RESPONSES_MODEL,
+      previous_response_id: previousResponseId,
+      input: [
+        {
+          role: 'user',
+          content: [{ type: 'input_text', text: prompt }, ...inputImages],
+        },
+      ],
+      tools: [{ type: 'image_generation', size: IMAGE_SIZE, ...(quality && { quality }) }],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
 
-  const output = (response as { output?: unknown[] }).output ?? []
-  const imageCall = output.find(
-    (o): o is { type: string; result?: string } =>
-      typeof o === 'object' && o !== null && (o as { type?: unknown }).type === 'image_generation_call'
-  )
+    const output = (response as { output?: unknown[] }).output ?? []
+    const imageCall = output.find(
+      (o): o is { type: string; result?: string } =>
+        typeof o === 'object' && o !== null && (o as { type?: unknown }).type === 'image_generation_call'
+    )
 
-  if (!imageCall?.result) {
-    throw new Error('이미지 생성 응답에 image_generation_call 결과가 없음')
-  }
+    if (!imageCall?.result) {
+      throw new Error('이미지 생성 응답에 image_generation_call 결과가 없음')
+    }
 
-  return { base64: imageCall.result, responseId: (response as { id: string }).id }
+    return { base64: imageCall.result, responseId: (response as { id: string }).id }
+  })
 }
 
 // 모델이 요청한 size 와 다른 크기를 낼 때가 있다 — 같은 프롬프트가 1536x1024 /
@@ -637,6 +640,9 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   // 만들면 한쪽만 고쳐지는 일이 생긴다.
   const retry = retryEnabled()
   let attemptsLeft = retry ? input.count * 2 : input.count
+  // TASK-004: 묶음 요약 로그용. attempts 는 실제로 시도한 안 수(재시도 포함)다.
+  const startedAt = performance.now()
+  let attempts = 0
   // 조기 종료 원인을 남긴다. 루프를 빠져나오는 길이 둘이라(예산 소진 / 배치 전멸)
   // retry 불리언만으로는 아래 미달 로그의 원인 라벨이 갈리지 않는다.
   let abortedOnDeadBatch = false
@@ -645,6 +651,7 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
     const needed = input.count - variants.length
     const batch = Math.min(needed, attemptsLeft)
     attemptsLeft -= batch
+    attempts += batch
 
     // allSettled 인 이유: 각 안이 별도 유료 호출이다. Promise.all 이면 한 안이
     // 후처리(sharp·업로드)에서 실패할 때 이미 성공한 나머지 안까지 같이 버려져
@@ -675,6 +682,11 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
       break
     }
   }
+
+  // 재시도로 호출이 늘었는지 한눈에 보이게 묶음 끝에 1줄 남긴다(전부 실패해도 찍는다).
+  console.info(
+    `[image] cover_variants done ${variants.length}/${input.count} attempts=${attempts} ${elapsedSeconds(startedAt)}s`
+  )
 
   // 전부 실패면 던진다 — 빈 배열을 돌려주면 호출부가 "생성됐는데 0안"으로 읽어
   // 조용히 빈 선택 화면을 띄운다. route.ts 가 500 으로 바꾼다.

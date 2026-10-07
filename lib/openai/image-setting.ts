@@ -43,6 +43,55 @@ export function imageQuality(setting: ImageSetting): 'low' | undefined {
 }
 
 // 어느 설정으로 만든 이미지인지는 스키마를 건드리지 않고 서버 로그에만 남긴다(#190).
-export function logImageSetting(kind: 'character_sheet' | 'cover_variant' | 'cut', setting: ImageSetting): void {
-  console.info(`[image] ${kind} ${IMAGE_SETTING_ENV}=${setting}`)
+// TASK-004(#222 5번·#261): 설정에 더해 호출마다 걸린 시간·성공 여부도 남긴다. 리허설
+// 측정(이미지 호출 수·비용, 한 편 완성 시간)과 "생성 전 소요 시간 안내" 근거 숫자용이다.
+// 유료 호출 1회 = 로그 1줄이 되게 실제 생성 호출만 감싼다.
+//
+//   [image] cut IMAGE_PROVIDER=openai ok 41.3s
+//   [image] cover_variant IMAGE_PROVIDER=openai fail 0.8s 429 project_spend_limit_exceeded
+//
+// 실패 사유는 status·code 만 찍는다. 에러 메시지 전문에는 요청 파라미터·조직 정보가 섞일
+// 수 있어(route.ts 가 응답에 원문을 안 넣는 것과 같은 이유) 프롬프트·키·URL 과 함께 뺀다.
+// 에러는 그대로 다시 던진다 — 호출부의 실패 처리(allSettled·재시도)는 바뀌지 않는다.
+//
+// style_extract 는 이미지 생성이 아니라 레퍼런스 분석(gpt-4o) 호출이다. IMAGE_PROVIDER 와
+// 무관하게 OpenAI 로 가므로 설정 대신 모델 이름을 찍는다.
+export type ImageCallKind = 'character_sheet' | 'cover_variant' | 'cut' | 'style_extract'
+
+/** 로그에 찍을 설정 표기. 이미지 호출은 `IMAGE_PROVIDER=<값>`. */
+export function settingTag(setting: ImageSetting): string {
+  return `${IMAGE_SETTING_ENV}=${setting}`
+}
+
+/** 경과 초를 소수 1자리로. */
+export function elapsedSeconds(startedAt: number): string {
+  return ((performance.now() - startedAt) / 1000).toFixed(1)
+}
+
+// 식별자 모양(영문·숫자·_ . -)만 통과시킨다. code 자리에 다른 문자열이 와도 로그로 새지 않게.
+const SAFE_TOKEN = /^[\w.-]{1,64}$/
+
+export function failReason(err: unknown): string {
+  if (typeof err === 'object' && err !== null) {
+    const { status, code, name } = err as { status?: unknown; code?: unknown; name?: unknown }
+    const parts = [status, code]
+      .filter((v): v is string | number => typeof v === 'number' || typeof v === 'string')
+      .map(String)
+      .filter((v) => SAFE_TOKEN.test(v))
+    if (parts.length) return parts.join(' ')
+    if (typeof name === 'string' && SAFE_TOKEN.test(name)) return name
+  }
+  return 'error'
+}
+
+export async function timeImageCall<T>(kind: ImageCallKind, tag: string, fn: () => Promise<T>): Promise<T> {
+  const startedAt = performance.now()
+  try {
+    const result = await fn()
+    console.info(`[image] ${kind} ${tag} ok ${elapsedSeconds(startedAt)}s`)
+    return result
+  } catch (err) {
+    console.info(`[image] ${kind} ${tag} fail ${elapsedSeconds(startedAt)}s ${failReason(err)}`)
+    throw err
+  }
 }
