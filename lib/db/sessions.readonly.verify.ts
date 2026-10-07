@@ -4,6 +4,14 @@
 // 명령이 NODE_ENV를 설정하지 않으므로 client.ts 평가 전에 여기서 "test"로
 // 설정한다(process.env.NODE_ENV는 읽기 전용 선언이라 인덱스로 우회).
 (process.env as Record<string, string | undefined>).NODE_ENV = "test";
+// lib/render/export.ts → lib/asset-store.ts가 모듈 최상위에서 SUPABASE_URL·
+// SUPABASE_SERVICE_ROLE_KEY를 요구한다. 실키·실DB를 쓰지 않으므로(가짜 클라이언트 +
+// fetch stub) 더미 값으로 모듈 평가만 통과시킨다. 네트워크는 아래 stub이 막는다.
+{
+  const env = process.env as Record<string, string | undefined>;
+  env.SUPABASE_URL ??= "http://127.0.0.1:0";
+  env.SUPABASE_SERVICE_ROLE_KEY ??= "verify-dummy-key";
+}
 
 type Board = Record<string, unknown>;
 type Cut = Record<string, unknown>;
@@ -244,6 +252,11 @@ async function main(): Promise<void> {
 
   const db = new FakeDb();
   setTestDbClient(db as unknown as import("@supabase/supabase-js").SupabaseClient);
+  // 모듈 평가 시 asset-store의 드리프트 감시(getBucket 1회 — 위 stub이 차단하고
+  // 경고만 남김, 실네트워크 0)가 계수기에 먼저 찍힌다. 본문(GET·Export·저장) 측정을
+  // 위해 매크로태스크 1회로 적재된 호출을 비운 뒤 0으로 둔다.
+  await new Promise<void>((r) => setTimeout(r, 0));
+  fetchCalls = 0;
 
   async function getSession(
     id: string
@@ -282,19 +295,25 @@ async function main(): Promise<void> {
     const g = await getSession(sid);
     check(`RO-스냅샷GET200 ${sid.slice(0, 8)}`, g.status === 200, g);
     snapGet[sid] = g.json;
-    snapExport[sid] = await getExport(sid);
+    const e0 = await getExport(sid);
+    // 이미지 스텁(null)이라 Export는 409 "내보낼 이미지가 없습니다" 경로.
+    check(`RO-스냅샷Export409 ${sid.slice(0, 8)}`, e0.status === 409, {
+      status: e0.status,
+      body: e0.body.slice(0, 120),
+    });
+    snapExport[sid] = e0;
   }
 
   // S1에만 caption 정상 편집 저장 1회 (→ 200 version+1).
-  const s1v2 = cloneBoard(snapGet[S1] as Board);
+  // GET 응답은 { sessionId, projectId, presetId, version, storyboard } 형태라
+  // 편집·비교 대상 보드는 .storyboard에서 꺼낸다.
+  const s1base = (snapGet[S1] as Record<string, unknown>).storyboard as Board;
+  const s1v2 = cloneBoard(s1base);
   ((cutsOf(s1v2)[1].caption as Cut) as Cut).text = "S1고친대사";
-  // GET 응답에는 version이 붙으므로 저장용 보드에서 뺀다.
-  const { version: _dropped, ...s1v2board } = s1v2 as Board & { version?: unknown };
-  void _dropped;
   const saved = (await versionRoute.POST(
     new Request("http://localhost/api/session/version", {
       method: "POST",
-      body: JSON.stringify({ sessionId: S1, storyboard: s1v2board }),
+      body: JSON.stringify({ sessionId: S1, storyboard: s1v2 }),
     })
   )) as Response;
   const savedJson = (await saved.json()) as Record<string, unknown>;
@@ -309,7 +328,7 @@ async function main(): Promise<void> {
     "RO-저장후조회일치",
     s1after.status === 200 &&
       stable((s1after.json as Record<string, unknown>).storyboard) ===
-        stable(s1v2board),
+        stable(s1v2),
     { status: s1after.status }
   );
 
