@@ -367,3 +367,7 @@ main().catch((e) => {
   console.error(`FAIL driver — ${String(e).slice(0, 200)}`);
   process.exit(1);
 });
+
+// 모듈 스코프 선언 — 같은 디렉토리의 다른 *.verify.ts와 전역 타입 충돌 방지.
+// 런타임 영향 없음.
+export {};
