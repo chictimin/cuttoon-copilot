@@ -3,7 +3,7 @@ import sharp from "sharp";
 import { uploadAsset } from "../asset-store";
 import { OUTPUT_SIZE, activeMascot, ratioClause } from "./generate";
 import type { GeneratedImageResult } from "./provider";
-import { imageQuality, imageSetting, logImageSetting } from "./image-setting";
+import { imageQuality, imageSetting, settingTag, timeImageCall } from "./image-setting";
 import { generateWithComfyui } from "./comfyui";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -90,7 +90,8 @@ export async function extractStyle(refs: Buffer[]): Promise<StyleExtractionResul
     },
   }));
 
-  const response = await client.chat.completions.create({
+  // TASK-004: 레퍼런스 분석 호출도 같은 형식으로 시간을 남긴다(IMAGE_PROVIDER 와 무관하게 OpenAI).
+  const response = await timeImageCall("style_extract", "model=gpt-4o", () => client.chat.completions.create({
     model: "gpt-4o",
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
@@ -104,7 +105,7 @@ export async function extractStyle(refs: Buffer[]): Promise<StyleExtractionResul
     ],
     response_format: { type: "json_object" },
     max_tokens: 300,
-  });
+  }));
 
   const raw = response.choices[0].message.content ?? "{}";
   let parsed: unknown;
@@ -245,12 +246,12 @@ export async function generateCharacterSheet(
   // 시트만 기본 화질이면 저가 QA에서도 시트 비용은 그대로 나간다.
   const setting = imageSetting();
   const quality = imageQuality(setting);
-  logImageSetting("character_sheet", setting);
 
-  const b64 =
+  const b64 = await timeImageCall("character_sheet", settingTag(setting), async () =>
     setting === "comfyui"
       ? (await generateWithComfyui(prompt, OUTPUT_SIZE)).base64
-      : await generateSheetWithOpenAI(prompt, quality);
+      : await generateSheetWithOpenAI(prompt, quality)
+  );
 
   // #104: 여기까지 오면 유료 호출은 이미 성공한 뒤다 — 리사이즈가 실패해도
   // 결과를 버리지 않는다. resizeToOutput이 실패 시 원본 버퍼 + 실제 메타데이터를
