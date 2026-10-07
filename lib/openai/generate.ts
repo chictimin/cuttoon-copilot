@@ -640,7 +640,8 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   // 만들면 한쪽만 고쳐지는 일이 생긴다.
   const retry = retryEnabled()
   let attemptsLeft = retry ? input.count * 2 : input.count
-  // TASK-004: 묶음 요약 로그용. attempts 는 실제로 시도한 안 수(재시도 포함)다.
+  // TASK-004: 묶음 요약 로그용. attempts 는 표지 안 논리 시도 수(재시도 포함)다. openai SDK
+  // 내부 자동 재시도(429·5xx 최대 2회)는 세지 않음 — 실제 HTTP 요청 수·과금 호출 수와 다를 수 있다.
   const startedAt = performance.now()
   let attempts = 0
   // 조기 종료 원인을 남긴다. 루프를 빠져나오는 길이 둘이라(예산 소진 / 배치 전멸)

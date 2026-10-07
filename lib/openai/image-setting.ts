@@ -68,18 +68,65 @@ export function elapsedSeconds(startedAt: number): string {
   return ((performance.now() - startedAt) / 1000).toFixed(1)
 }
 
-// 식별자 모양(영문·숫자·_ . -)만 통과시킨다. code 자리에 다른 문자열이 와도 로그로 새지 않게.
-const SAFE_TOKEN = /^[\w.-]{1,64}$/
+// 실패 사유는 허용 목록으로만 찍는다(#274 리뷰). 처음엔 "식별자 모양"(영문·숫자·_ . -)이면
+// 통과시켰는데, sk-proj-… 같은 키도 그 모양이라 code 자리에 들어오면 그대로 새었다.
+// 그래서 로그에 나가는 것은 숫자 status 와 아래 목록의 고정 문자열뿐이다.
+//
+// code: OpenAI API 오류 응답의 error.code / error.type 으로 문서·실측에서 본 값이다
+// (429 지출 한도·크레딧 부족, 키 오류, 모델 없음, 안전 정책 거절, 서버 오류 등). 값이 있는데
+// 목록에 없으면 `code_other` 로만 남긴다 — 새 코드가 보이면 여기에 추가한다.
+const KNOWN_ERROR_CODES = new Set([
+  'insufficient_quota',
+  'project_spend_limit_exceeded',
+  'rate_limit_exceeded',
+  'billing_hard_limit_reached',
+  'invalid_api_key',
+  'model_not_found',
+  'content_policy_violation',
+  'moderation_blocked',
+  'server_error',
+  'timeout',
+  'invalid_request_error',
+  'context_length_exceeded',
+  'image_generation_user_error',
+])
+
+// name: status·code 가 둘 다 없을 때만 쓴다. openai SDK 오류 클래스 이름 + 기본 오류 이름.
+const KNOWN_ERROR_NAMES = new Set([
+  'APIError',
+  'APIConnectionError',
+  'APIConnectionTimeoutError',
+  'APIUserAbortError',
+  'AuthenticationError',
+  'BadRequestError',
+  'PermissionDeniedError',
+  'NotFoundError',
+  'ConflictError',
+  'UnprocessableEntityError',
+  'RateLimitError',
+  'InternalServerError',
+  'Error',
+  'TypeError',
+  'AbortError',
+])
+
+function safeStatus(value: unknown): string | undefined {
+  // 문자열이면 숫자로만 이뤄졌을 때 바꾼다("429" 허용, "429abc"·"sk-…" 버림).
+  const n = typeof value === 'number' ? value : typeof value === 'string' && /^\d{3}$/.test(value) ? Number(value) : NaN
+  return Number.isInteger(n) && n >= 100 && n <= 599 ? String(n) : undefined
+}
+
+function safeCode(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  return typeof value === 'string' && KNOWN_ERROR_CODES.has(value) ? value : 'code_other'
+}
 
 export function failReason(err: unknown): string {
   if (typeof err === 'object' && err !== null) {
     const { status, code, name } = err as { status?: unknown; code?: unknown; name?: unknown }
-    const parts = [status, code]
-      .filter((v): v is string | number => typeof v === 'number' || typeof v === 'string')
-      .map(String)
-      .filter((v) => SAFE_TOKEN.test(v))
+    const parts = [safeStatus(status), safeCode(code)].filter((v): v is string => v !== undefined)
     if (parts.length) return parts.join(' ')
-    if (typeof name === 'string' && SAFE_TOKEN.test(name)) return name
+    if (typeof name === 'string' && KNOWN_ERROR_NAMES.has(name)) return name
   }
   return 'error'
 }
