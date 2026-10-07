@@ -292,8 +292,10 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 - 크기: 박스 폭 안에서 글자 수에 맞춰 폰트 40→22px로 줄이며 줄바꿈(`fitText`), 높이 상한은 캔버스의 30%(`captionSvg`의 `fitText` 호출부 `maxHeight`).
 - 모양: `rounded`는 텍스트 박스보다 가로 1.12배·세로 1.28배 타원(`ellipseRadii`), `rect`·`cloud`는 사각형 기반. 몸통과 꼬리는 **하나의 폴리곤**으로 그린다(겹쳐 그리면 이음매가 보임). 불투명도 0.98.
 - 위 경계 보정: `rounded` 타원이 캔버스 위로 넘치면 넘친 만큼 아래로 민다(`captionSvg`의 rounded 윗넘침 보정).
-- 꼬리: 목표점(`HeadTarget`) 방향으로, 몸통 경계~목표점 거리의 40%, 최대 캔버스 높이의 12%(`resolveTail`의 `TAIL_REACH_RATIO`·`MAX_PROTRUDE_RATIO`, PR #163). `center` 자리도 목표점이 몸통 밖이면 그쪽으로 꼬리를 내고(길이 하한 = 고정 꼬리 길이), 목표점이 몸통 안이면 고정 방향·고정 길이의 짧은 꼬리로 폴백한다(`resolveTail`, `centerTail`, #192·#199). 기본 목표점은 늘 center 몸통 안이라 center는 고정 꼬리 폴백 그대로다. Export는 컷별 목표점 1개를 넘기는데 wide가 아니면 `undefined`라 기본 목표점을 쓴다(`headTargetForShot`, #273 — smartman 확인 필요).
-- 목표점: `composeCut(image, [caption], headTargets?)`은 컷별 목표점을 받는다. Export(`exportCuts`)는 컷마다 1개씩 넘긴다 — wide 컷은 가로 50%·세로 55%, 그 밖은 기본값(가로 50%·세로 42%, `DEFAULT_HEAD_TARGET`)이다(#273 — smartman 확인 필요). 인물이 한쪽에 있는 컷에서는 꼬리가 빈 곳을 가리킬 수 있다(9/30 골든패스 컷 3·4에서 관찰).
+- 아래 경계 보정: `bottom_*` 칸에만, 도형이 캔버스 아래로 넘치면 넘친 만큼 위로 올린다(몸통·글씨 같은 y, #276). `top`·`center`에는 걸지 않는다.
+- 좌우 경계 보정: 구석 자리 도형은 줄이 `OVERHANG_MAX_LINES`(3줄) 이하일 때만 살짝 걸치고, 그보다 많으면 도형 전체를 캔버스 안으로 당긴다. 글자는 늘 캔버스 안쪽 `TEXT_SAFE_MARGIN` 안에 둔다(#169).
+- 꼬리: 목표점(`HeadTarget`) 방향으로, 몸통 경계~목표점 거리의 40%, 최대 캔버스 높이의 12%(`resolveTail`의 `TAIL_REACH_RATIO`·`MAX_PROTRUDE_RATIO`, PR #163). `center` 자리도 목표점이 몸통 밖이면 그쪽으로 꼬리를 내고(길이 하한 = 고정 꼬리 길이), 목표점이 몸통 안이면 고정 방향·고정 길이의 짧은 꼬리로 폴백한다(`resolveTail`, `centerTail`, #192·#199). 기본 목표점은 늘 center 몸통 안이라 center는 고정 꼬리 폴백 그대로다. Export는 컷별 목표점 1개를 넘기는데 wide가 아니면 `undefined`라 기본 목표점을 쓴다(`headTargetForShot`, #273).
+- 목표점: `composeCut(image, [caption], headTargets?)`은 컷별 목표점을 받는다. Export(`exportCuts`)는 컷마다 1개씩 넘긴다 — wide 컷은 가로 50%·세로 55%, 그 밖은 기본값(가로 50%·세로 42%, `DEFAULT_HEAD_TARGET`)이다(#273). 인물이 한쪽에 있는 컷에서는 꼬리가 빈 곳을 가리킬 수 있다(9/30 골든패스 컷 3·4에서 관찰).
 
 **ZIP 구성**: 컷당 PNG 1장, 파일명 `cut_<cut_index>.png`. 파일명(ZIP 이름)은 `Content-Disposition`에서 subject 기반(한글은 `filename*`).
 
