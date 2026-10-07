@@ -124,6 +124,7 @@ function toRenderCuts(rawCuts: unknown): { cuts: Cut[]; malformed: number[] } {
       cut_index: cut.cut_index,
       caption: cut.caption,
       generated_image: typeof cut.generated_image === "string" ? cut.generated_image : null,
+      shot_type: typeof cut.shot_type === "string" ? cut.shot_type : null,
     });
   });
 

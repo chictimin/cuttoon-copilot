@@ -7,7 +7,7 @@
 // 실행: npx tsx lib/render/compose.demo.ts
 
 import sharp from "sharp";
-import { composeCut, resolveTail, type HeadTarget } from "./compose";
+import { composeCut, headTargetForShot, resolveTail, type HeadTarget } from "./compose";
 import type { Caption, Position } from "./types";
 
 async function blankImage(): Promise<Buffer> {
@@ -129,11 +129,51 @@ async function main() {
     console.error(`FAIL center 회귀 비교 — ${(err as Error).message}`);
   }
 
+  // #242 (나): shot_type별 목표점 — wide만 아래로, full·나머지·없음·이상값은 기본(undefined).
+  {
+    const wide = headTargetForShot("wide"), full = headTargetForShot("full");
+    const rest = ["full", "closeup", "bust", "waist", "", "constructor", "toString"].map((s) => headTargetForShot(s));
+    if (wide?.y === 0.55 && full === undefined && wide.x === 0.5 && rest.every((t) => t === undefined)
+        && headTargetForShot(null) === undefined && headTargetForShot(undefined) === undefined) {
+      console.log("ok   shot_type 목표점 — wide 0.55, full·나머지·없음·이상값은 기본");
+    } else {
+      failed++;
+      console.error(`FAIL shot_type 목표점 — wide=${JSON.stringify(wide)} full=${JSON.stringify(full)}`);
+    }
+  }
+
+  // #242 (나): 같은 top_left 말풍선에서 wide 목표점이 꼬리를 더 아래로 향하게 하는지(각도가 커짐).
+  {
+    const base = resolveTail("top_left", "ellipse", 250, 150, 200, 60, 1000, 1000, { x: 0.5, y: 0.42 });
+    const low = resolveTail("top_left", "ellipse", 250, 150, 200, 60, 1000, 1000, headTargetForShot("wide")!);
+    if (low.angle > base.angle) {
+      console.log(`ok   wide 꼬리 방향 — 기본 ${(base.angle * 180 / Math.PI).toFixed(1)}° → wide ${(low.angle * 180 / Math.PI).toFixed(1)}° (더 아래)`);
+    } else {
+      failed++;
+      console.error("FAIL wide 꼬리 방향 — 아래로 내려가지 않음");
+    }
+  }
+
+  // #242 (나): 목표점을 넘긴 합성이 기본과 다른 그림을 만들고 예외 없이 끝나는지.
+  try {
+    const caption: Caption = { text: "먼 거리 컷 꼬리", bubble_type: "rounded", position: "top_left" };
+    const [a, b] = await Promise.all([composeCut(img, [caption]), composeCut(img, [caption], [headTargetForShot("wide")])]);
+    if (Buffer.compare(a, b) !== 0) {
+      console.log("ok   wide 목표점 합성 — 기본 꼬리와 다른 결과");
+    } else {
+      failed++;
+      console.error("FAIL wide 목표점 합성 — 기본과 같은 결과");
+    }
+  } catch (err) {
+    failed++;
+    console.error(`FAIL wide 목표점 합성 — ${(err as Error).message}`);
+  }
+
   if (failed > 0) {
     console.error(`\n${failed}건 실패`);
     process.exit(1);
   }
-  console.log("\n15건 통과");
+  console.log("\n18건 통과");
 }
 
 main();

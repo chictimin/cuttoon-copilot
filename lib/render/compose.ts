@@ -133,6 +133,18 @@ export interface HeadTarget {
 
 const DEFAULT_HEAD_TARGET: HeadTarget = { x: 0.5, y: 0.42 };
 
+// #242 (나): wide 컷은 인물이 작고 아래쪽에 서 있어서 기본 목표점(세로 42%)이 머리 위
+// 허공을 가리킨다. 10-06 저장 세션 24컷 판독에서 wide 컷 머리는 세로 50~60%였다. full은
+// 팔을 든 자세 등으로 머리가 40~55%에 흩어져, 내려 보니 오히려 가슴을 가리키는 컷이 생겨
+// 넣지 않았다(10-07 실제 컷 4장 비교). 화자 위치(#242 가)가 정해지기 전까지는 wide만 세로를
+// 내린다. 그 밖의 값이나 값이 없으면 undefined → composeCut이 기본 목표점을 쓴다.
+const SHOT_HEAD_Y = new Map<string, number>([["wide", 0.55]]);
+
+export function headTargetForShot(shotType: string | null | undefined): HeadTarget | undefined {
+  const y = shotType ? SHOT_HEAD_Y.get(shotType) : undefined;
+  return y === undefined ? undefined : { x: DEFAULT_HEAD_TARGET.x, y };
+}
+
 // 꼬리 길이 — 처음엔 "중심→목표점 거리의 85%"로 잡았더니 구석 자리에서 지나치게
 // 길어졌고(팀 피드백), 그다음 "몸통 경계선에서 고정된 짧은 길이만 튀어나오게"
 // 바꿨더니 이번엔 반대로 목표점(대개 인물 머리)까지 못 미치고 허공에서 끝나
