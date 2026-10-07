@@ -592,7 +592,9 @@ async function runRealPath(): Promise<void> {
     check(
       "revert tags우선409",
       r.status === 409 &&
-        (r.json as Record<string, unknown>).code === "invalid_subject_tags",
+        (r.json as Record<string, unknown>).error ===
+          "되돌릴 버전의 소재 태그가 형식에 맞지 않습니다" &&
+        !("code" in (r.json as Record<string, unknown>)),
       r
     );
   }
