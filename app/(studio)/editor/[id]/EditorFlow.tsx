@@ -8,6 +8,7 @@ import {
   normalizeStoredSubjectTags,
   type StoredSubjectTag,
 } from "@/lib/llm/subject-tags";
+import { POSITION_BOX } from "@/lib/render/position-box";
 import { resolveImageUrl } from "../../asset-url";
 import { beatLabel } from "../../ui-labels";
 import { useProjectFont } from "./useProjectFont";
@@ -33,12 +34,16 @@ function stripSubjectTags(board: Board): Board {
   return copy;
 }
 
+// #278: 세로 자리는 Export(compose.ts)와 같은 비율 상수(POSITION_BOX.y)를 쓴다. 알약의 윗변을 그
+// 높이에 두므로 "어느 높이대인지"만 맞고 픽셀까지 같지는 않다(Export는 줄바꿈·경계 보정이 더 있다).
+// 가로(구석 8px·가운데)와 알약 모양은 그대로 둔다.
+const topAt = (position: CaptionPosition) => `${POSITION_BOX[position].y * 100}%`;
 const POSITION_STYLE: Record<CaptionPosition, React.CSSProperties> = {
-  top_left: { top: 8, left: 8 },
-  top_right: { top: 8, right: 8 },
-  bottom_left: { bottom: 8, left: 8 },
-  bottom_right: { bottom: 8, right: 8 },
-  center: { top: "50%", left: "50%", transform: "translate(-50%, -50%)" },
+  top_left: { top: topAt("top_left"), left: 8 },
+  top_right: { top: topAt("top_right"), right: 8 },
+  bottom_left: { top: topAt("bottom_left"), left: 8 },
+  bottom_right: { top: topAt("bottom_right"), right: 8 },
+  center: { top: topAt("center"), left: "50%", transform: "translateX(-50%)" },
 };
 
 // 말풍선 드래그는 연속 좌표(offset)가 아니라 storyboard.schema.json의 caption.position
