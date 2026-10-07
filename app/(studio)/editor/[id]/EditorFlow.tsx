@@ -17,6 +17,16 @@ import type { CaptionPosition, Storyboard } from "../../session/[id]/storyboard-
 // 손대지 않고 이 화면에서만 쓰는 별칭으로 subject_tags를 단다.
 type Board = Storyboard & { subject_tags?: StoredSubjectTag[] };
 
+// #259 7번: "완료"를 누르지 않은 입력칸의 글자를 반영한 사본. 대사가 같으면 원본을 그대로 돌려줘
+// 저장 여부(isDirty) 비교가 흔들리지 않는다.
+function withCaptionText(board: Board, index: number, text: string): Board {
+  if (board.cuts[index]?.caption.text === text) return board;
+  return {
+    ...board,
+    cuts: board.cuts.map((cut, i) => (i === index ? { ...cut, caption: { ...cut.caption, text } } : cut)),
+  };
+}
+
 function stripSubjectTags(board: Board): Board {
   const copy = { ...board };
   delete copy.subject_tags;
@@ -156,8 +166,10 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
 
   // #259: 저장하지 않은 수정이 있으면 새로고침·탭 닫기 때 브라우저 확인창을 띄운다.
   // 앱 안의 링크 이동은 막지 않는다.
+  // 입력칸이 열려 있으면 거기 쓴 글자까지 수정으로 본다(#259 7번).
+  const pendingBoard = draft && editingIndex !== null ? withCaptionText(draft, editingIndex, draftCaption) : draft;
   const hasUnsavedEdits =
-    phase === "ready" && !!draft && !!saved && JSON.stringify(draft) !== JSON.stringify(saved.storyboard);
+    phase === "ready" && !!pendingBoard && !!saved && JSON.stringify(pendingBoard) !== JSON.stringify(saved.storyboard);
   useEffect(() => {
     if (!hasUnsavedEdits) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
@@ -198,7 +210,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
     );
   }
 
-  const isDirty = JSON.stringify(draft) !== JSON.stringify(saved.storyboard);
+  const isDirty = JSON.stringify(pendingBoard) !== JSON.stringify(saved.storyboard);
   const canRevert = saved.version > 1;
 
   function updatePosition(index: number, position: CaptionPosition) {
@@ -227,11 +239,14 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
 
   // 저장이 끝까지 성공했을 때만 true. 내보내기 전 저장(#259)이 이 결과를 본다.
   async function handleSave(): Promise<boolean> {
-    if (!draft) return false;
+    if (!draft || !pendingBoard) return false;
+    // #259 7번: 열려 있는 대사 입력은 "완료"를 안 눌렀어도 먼저 확정해 그 글자로 저장한다.
+    // setDraft는 다음 렌더에야 반영되므로, 저장 본문과 저장본 갱신에는 이 지역 값을 쓴다.
+    const board = pendingBoard;
 
     try {
       // #205: 강도를 함께 넘겨야 none(CTA 컷 0개)이 기존 규칙(CTA 1개)에 막히지 않는다.
-      assertStoryboardRuntimeInvariants(draft.cuts, draft.cta_strength);
+      assertStoryboardRuntimeInvariants(board.cuts, board.cta_strength);
     } catch {
       setActionError("컷 구성에 문제가 있어요");
       return false;
@@ -240,6 +255,8 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
     // spec-a3 3-3: 동기 잠금 — 복구 버튼과 같은 플래그를 쓴다.
     if (saveLockRef.current) return false;
     saveLockRef.current = true;
+    if (board !== draft) setDraft(board);
+    setEditingIndex(null);
     setActionError(null);
     setSaveRecovery(false);
     setSaving(true);
@@ -247,7 +264,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
       const res = await fetch("/api/session/version", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, storyboard: draft }),
+        body: JSON.stringify({ sessionId, storyboard: board }),
       });
 
       if (!res.ok) {
@@ -265,7 +282,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
       }
 
       const data = await res.json();
-      setSaved({ version: data.version, storyboard: draft });
+      setSaved({ version: data.version, storyboard: board });
       setSaveNotice(null);
       setSavedAt(new Date().toLocaleTimeString());
       return true;
