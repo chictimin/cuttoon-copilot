@@ -440,7 +440,8 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   // 아래쪽 경계(#259-8 D). bottom_*를 0.70으로 내리면서 줄이 많은 대사는 도형이 캔버스
   // 아래로 나갈 수 있다 — 넘어간 만큼 위로 올린다(위 보정과 같은 방식, 몸통·글씨 모두 이 y를
   // 쓴다). rounded는 타원 아래 끝, rect·cloud는 박스 아래 끝(구름 장식은 위쪽에만 붙는다).
-  {
+  // bottom 칸에만 건다 — top·center는 예전 결과 그대로 둔다(chictimin 리뷰, #276).
+  if (position === "bottom_left" || position === "bottom_right") {
     const shapeBottom = bubbleType === "rounded" ? y + bubbleH / 2 + radii.ry : y + bubbleH;
     const overflowBottom = shapeBottom - (canvasH - STROKE_MARGIN);
     if (overflowBottom > 0) y -= overflowBottom;

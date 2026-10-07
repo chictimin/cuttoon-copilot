@@ -198,13 +198,26 @@ async function main() {
         console.error(`FAIL bottom ${bubble_type} — 짧은 위끝 ${short.top}, 긴 아래끝 ${long.bottom}`);
       }
     }
+
+    // 아래 경계 보정은 bottom 칸에만 — 캔버스를 넘칠 만큼 긴 대사여도 top·center 상자는
+    // 원래 자리(POSITION_BOX y)에서 시작해야 한다. rect는 상자 위 끝이 곧 y라 바로 잴 수 있다.
+    const huge = Array(15).fill(longText).join(" ");
+    for (const [position, boxY] of [["top_left", 0.07], ["top_right", 0.07], ["center", 0.38]] as const) {
+      const r = await whiteRows({ text: huge, bubble_type: "rect", position });
+      if (Math.abs(r.top - boxY * r.h) <= 4) {
+        console.log(`ok   ${position} 아주 긴 대사 — 아래 경계 보정 안 받음(위끝 ${r.top}px ≈ ${(boxY * r.h).toFixed(0)}px)`);
+      } else {
+        failed++;
+        console.error(`FAIL ${position} 아주 긴 대사 — 위끝 ${r.top}px, 원래 자리 ${(boxY * r.h).toFixed(0)}px에서 움직임`);
+      }
+    }
   }
 
   if (failed > 0) {
     console.error(`\n${failed}건 실패`);
     process.exit(1);
   }
-  console.log("\n21건 통과");
+  console.log("\n24건 통과");
 }
 
 main();
