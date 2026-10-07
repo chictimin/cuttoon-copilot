@@ -9,6 +9,7 @@ import {
   type StoredSubjectTag,
 } from "@/lib/llm/subject-tags";
 import { resolveImageUrl } from "../../asset-url";
+import { beatLabel } from "../../ui-labels";
 import { useProjectFont } from "./useProjectFont";
 import type { CaptionPosition, Storyboard } from "../../session/[id]/storyboard-types";
 
@@ -251,10 +252,14 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setActionError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
         // spec-a3 3-3: HTTP 400이고 error가 "subject_tags"로 시작할 때만 복구 버튼.
+        // #260: 이때 서버 메시지(영문 필드명 포함)는 화면에 보이지 않고 콘솔에만 남긴다.
         if (res.status === 400 && typeof body?.error === "string" && body.error.startsWith("subject_tags")) {
+          console.warn(body.error);
+          setActionError("소재 태그를 저장하지 못했어요");
           setSaveRecovery(true);
+        } else {
+          setActionError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
         }
         return false;
       }
@@ -398,6 +403,10 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         <p className="text-sm text-zinc-500">
           대사를 고치거나, 말풍선을 원하는 자리로 끌어다 놓으세요
         </p>
+        {/* #259 6번: 이 말풍선은 한 줄 알약 모양의 위치 확인용이다. 말풍선 종류·줄바꿈·꼬리는 Export에서만 그려진다. */}
+        <p className="text-xs text-zinc-400">
+          화면의 말풍선은 위치 확인용 미리보기예요. 실제 모양은 내보내기에서 확인하세요
+        </p>
       </div>
 
       {actionError && (
@@ -457,7 +466,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
                 <div className="h-full w-full animate-pulse bg-zinc-200" />
               )}
               <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
-                {cut.cut_index}컷 · {cut.narrative_beat}
+                {cut.cut_index}컷 · {beatLabel(cut.narrative_beat)}
               </span>
               <div
                 draggable
@@ -505,14 +514,14 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
         ))}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-center gap-3">
         <button
           type="button"
           onClick={handleRevert}
           disabled={!canRevert || saving || reverting}
           className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
         >
-          {reverting ? "되돌리는 중…" : "되돌리기"}
+          {reverting ? "되돌리는 중…" : "이전 저장본으로 되돌리기"}
         </button>
         <button
           type="button"

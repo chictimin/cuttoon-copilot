@@ -7,6 +7,7 @@ import { resolvePresetStyle } from "@/lib/llm/style-resolve";
 import { analyzeStyle, type StyleAnalysisResult } from "./style-analysis";
 import DetailsStep, { type DetailsFormValue } from "./DetailsStep";
 import MascotStep, { type MascotValue } from "./MascotStep";
+import { bubbleStyleLabel, characterRatioLabel, lineWeightLabel } from "../ui-labels";
 
 type Step = "upload" | "analyzing" | "result" | "details" | "mascot" | "confirmed";
 
@@ -328,7 +329,7 @@ export default function OnboardingFlow() {
       )}
       {step === "confirmed" && (
         <div className="flex flex-col items-center gap-4 text-center">
-          <h1 className="text-xl font-semibold">프리셋이 저장되었습니다</h1>
+          <h1 className="text-xl font-semibold">프로젝트 설정이 저장되었습니다</h1>
           <p className="text-sm text-zinc-500">
             &ldquo;{confirmedName}&rdquo; 프로젝트가 준비됐어요
           </p>
@@ -363,7 +364,7 @@ function UploadStep({
   return (
     <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
       <h1 className="text-xl font-semibold">
-        프로젝트 이름을 만들어볼까요?
+        컷툰 그림체를 알려주세요
       </h1>
       <p className="text-sm text-zinc-500">
         인스타에 올릴 컷툰 스타일이 될 거예요
@@ -414,7 +415,7 @@ function UploadStep({
         onClick={onSkip}
         className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
       >
-        레퍼런스 없이 진행
+        참고 그림 없이 진행
       </button>
     </div>
   );
@@ -508,7 +509,7 @@ function ResultStep({
   return (
     <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
       <h1 className="text-xl font-semibold">
-        {skipped ? "레퍼런스 없이 기본 그림체로 시작해요" : "이런 스타일로 만들었어요"}
+        {skipped ? "참고 그림 없이 기본 그림체로 시작해요" : "이런 스타일로 만들었어요"}
       </h1>
       {skipped && (
         <p className="text-sm text-zinc-500">
@@ -525,14 +526,14 @@ function ResultStep({
             // eslint-disable-next-line @next/next/no-img-element -- 사용자가 방금 올린 파일의 blob URL, next/image 불필요
             <img
               src={previewUrl}
-              alt="업로드한 레퍼런스"
+              alt="업로드한 참고 그림"
               className="aspect-square w-full rounded-lg object-cover"
             />
           ) : (
             <div className="aspect-square w-full rounded-lg bg-zinc-100" />
           )}
           <figcaption className="text-sm text-zinc-500">
-            업로드한 레퍼런스 · 캐릭터 시트는 다음 단계 확정 후 생성돼요
+            업로드한 참고 그림 · 캐릭터 시트는 다음 단계 확정 후 생성돼요
           </figcaption>
         </figure>
         )}
@@ -552,9 +553,9 @@ function ResultStep({
           <span className="text-sm text-zinc-600">
             {BACKGROUND_DENSITY_LABEL[style.background_density] ?? style.background_density}
           </span>
-          <span className="text-xs text-zinc-400">선 굵기: {style.line_weight}</span>
-          <span className="text-xs text-zinc-400">비율: {style.character_ratio}</span>
-          <span className="text-xs text-zinc-400">말풍선: {style.bubble_style}</span>
+          <span className="text-xs text-zinc-400">선 굵기: {lineWeightLabel(style.line_weight)}</span>
+          <span className="text-xs text-zinc-400">비율: {characterRatioLabel(style.character_ratio)}</span>
+          <span className="text-xs text-zinc-400">말풍선: {bubbleStyleLabel(style.bubble_style)}</span>
           <figcaption className="text-sm text-zinc-500">배경 톤</figcaption>
         </figure>
       </div>
@@ -578,8 +579,8 @@ function ResultStep({
         )}
         <p className="text-xs text-zinc-400">
           {skipped
-            ? "레퍼런스가 없을수록 그림체를 알려주는 단서예요. 느낌을 직접 적어주세요"
-            : "레퍼런스에서 못 뽑아낸 그림체 느낌을 직접 적어주세요. 위 분석 결과에 더해져요"}
+            ? "참고 그림이 없을수록 그림체를 알려주는 단서예요. 느낌을 직접 적어주세요"
+            : "참고 그림에서 못 뽑아낸 그림체 느낌을 직접 적어주세요. 위 분석 결과에 더해져요"}
         </p>
       </div>
 
@@ -589,7 +590,7 @@ function ResultStep({
           onClick={skipped ? onBackToUpload : onRetry}
           className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
         >
-          {skipped ? "레퍼런스 올리기" : "다시 뽑기"}
+          {skipped ? "참고 그림 올리기" : "다시 뽑기"}
         </button>
         <button
           type="button"
