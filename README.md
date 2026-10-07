@@ -24,6 +24,8 @@
    2. **Storage 버킷** — `assets` 버킷을 **public으로** 생성 (`lib/asset-store.ts`의 `getAssetUrl()`이 `getPublicUrl()`을 쓰기 때문이다)
 4. `npm run dev` → `http://localhost:3000` — 프로젝트 목록(첫 화면)이 뜨면 정상
 
+프로덕션 확인용 `npm start`는 `npm run build` 뒤에만 동작한다(빌드 산출물 실행). 평소 개발은 위 `npm run dev`를 쓴다.
+
 선택 변수는 `IMAGE_PROVIDER` — 비우면 `openai`, 개발·QA 비용 절감용 `openai-low`(#190), 로컬 ComfyUI로 그리는 개발 테스트 전용 `comfyui`(#226, `COMFYUI_*` 변수 필요).
 
 처음 실행이 끝나고 코드를 고치면 [브랜치·git 규칙](docs/operations.md#ops-git)을 따른다.
@@ -36,7 +38,7 @@
 
 화면 표기 대응: 문서의 레퍼런스 = 화면의 "참고 그림", 문서의 프리셋(저장) = 화면의 "프로젝트 설정"(#266).
 
-각 단계의 구현 상태는 [구현 현황](docs/operations.md#ops-status), 진행 중인 작업은 [2차 작업 표](docs/operations.md#ops-tasks). 제약·제외 기능·아키텍처 결정은 정본인 [PRD.md](./PRD.md)를 따른다.
+각 단계의 구현 상태는 [구현 현황](docs/operations.md#ops-status), 진행 중인 작업은 [2차 작업 표](docs/operations.md#ops-tasks). 상태 표기의 뜻은 — 완료(쓸 수 있음) · 부분(일부만 동작, 비고·관련 이슈 참고) · 미완. 제약·제외 기능·아키텍처 결정은 정본인 [PRD.md](./PRD.md)를 따른다.
 
 ## 비용·대기
 

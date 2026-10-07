@@ -4,7 +4,9 @@
 
 마지막 전체 대조: 2026-10-06 · `cf9feb7`. 그보다 오래된 절에만 절 기준을 남긴다.
 
-머지된 코드만 기준으로 한다. 열려 있는 PR·이슈의 계획은 넣지 않는다. 함수명이 주 식별자이고 file:line은 보조다 — 라인은 커밋마다 밀린다.
+머지된 코드만 기준으로 한다. 열려 있는 PR·이슈의 계획은 넣지 않는다. 함수명·파일명이 식별자다 — 라인 번호는 붙이지 않는다.
+
+상태 표기의 뜻은 `docs/operations.md` 구현 현황표와 같다 — 완료(쓸 수 있음) · 부분(일부만 동작, 비고·관련 이슈 참고) · 미완.
 
 5줄 요약: 온보딩(레퍼런스→스타일→마스코트→시트→저장) → 세션(소재→3턴→말투·대사→표지 3안→3컷→저장) → 에디터(수정·되돌리기→Export). 유료 호출은 시트 1 + 표지 3 + 컷 3. 저장은 세션 `POST /api/session`과 에디터 버전 저장 2곳. 대사는 Export 때만 그림에 굽는다.
 
@@ -121,7 +123,7 @@ return promptHint('character_ratio', v) ?? `${v} body proportions`
 
 **순서가 중요하다: 기본값을 먼저 적용한 뒤 힌트를 찾는다.** 반대로 하면 `character_ratio` 가 비었을 때 힌트를 건너뛰고 토큰으로 떨어진다. 그리고 라벨(`body proportions`)은 **힌트가 없을 때만** 붙인다 — 힌트 서술문은 그 자체로 완결된 구라서 뒤에 라벨을 또 붙이면 문장이 깨진다.
 
-`promptHint` 만 공유하고 이 세 줄을 각 파일에 복사해 뒀을 때 규칙이 갈라지는 사고가 두 번 났다(#126 에서 생기고 #129 에서 발견, PR #128·#130 으로 절 자체를 공유해 닫음). 스모크의 정적 검사가 `promptHint('character_ratio', …)` 가 **몇 곳에 나오는지** 세는 이유다.
+`promptHint`만 공유하고 이 세 줄을 각 파일에 복사해 두면 규칙이 갈라진다 — 그래서 절 자체를 공유한다(경위 #126·#129, PR #128·#130). 스모크의 정적 검사가 `promptHint('character_ratio', …)` 가 **몇 곳에 나오는지** 세는 이유다.
 
 `generateCharacterSheet` 는 이 파일이 아니라 `extract.ts`(추출·시트) 소유다 — `extractStyle` 과 결합도가 높아 #19 로 그렇게 정했다. `route.ts` 가 `kind:'character_sheet'` 를 그쪽으로 넘긴다.
 
@@ -129,7 +131,7 @@ return promptHint('character_ratio', v) ?? `${v} body proportions`
 
 `client.responses.create`(`generate.ts`), 모델 `gpt-5`(`RESPONSES_MODEL`), 이미지는 내장 도구 `tools: [{ type:'image_generation', size:'1024x1024' }]`로 만든다. 응답에서 `image_generation_call` 출력을 찾아 base64 를 꺼낸다.
 
-추출·시트 쪽의 `generateCharacterSheet` 는 `client.images.generate`(Images API)를 쓴다. **같은 이미지 모델을 부르는 두 경로가 공존한다** — 체이닝(`previous_response_id`)이 Responses API 에만 있어서 컷 쪽은 이 경로여야 한다. SDK(^7.5.0) 의 Responses 타입이 도구 옵션을 못 따라와 `as any` 로 우회하고 있다(`:383` 주석).
+추출·시트 쪽의 `generateCharacterSheet` 는 `client.images.generate`(Images API)를 쓴다. **같은 이미지 모델을 부르는 두 경로가 공존한다** — 체이닝(`previous_response_id`)이 Responses API 에만 있어서 컷 쪽은 이 경로여야 한다. SDK(^7.5.0) 의 Responses 타입이 도구 옵션을 못 따라와 `as any` 로 우회하고 있다(`generate.ts`의 Responses 호출부 우회 주석).
 
 **세션당 이미지 호출 횟수**
 
@@ -208,7 +210,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 **reference 주입 (캐릭터 동일성 방어선)**
 
-`referenceUris`(`:344`)가 호출부의 `referenceAssets` 에 `preset.assets.character_sheet` 를 합친다 — 호출부가 빼먹어도 시트가 들어간다. `toInputImages`(`:351`)가 `readAsset` 으로 읽고, **못 읽은 것은 로그에 남기고**, 결과가 0장이면 **유료 호출 전에 던진다.** 시트 없이 만든 이미지는 P0 게이트를 통과할 수 없어 생성비만 버리는 것이기 때문이다.
+`referenceUris`(`generate.ts`)가 호출부의 `referenceAssets` 에 `preset.assets.character_sheet` 를 합친다 — 호출부가 빼먹어도 시트가 들어간다. `toInputImages`(`generate.ts`)가 `readAsset` 으로 읽고, **못 읽은 것은 로그에 남기고**, 결과가 0장이면 **유료 호출 전에 던진다.** 시트 없이 만든 이미지는 P0 게이트를 통과할 수 없어 생성비만 버리는 것이기 때문이다.
 
 `style_refs` 는 일부러 넣지 않는다 — reference 이미지를 늘리면 시트의 비중이 묽어진다. 스타일은 프롬프트의 `Style:` 문장이 담당한다.
 
@@ -222,9 +224,9 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 **출력 크기**
 
-`resizeToOutput`(`:429`)이 `sharp` 로 `OUTPUT_SIZE` 를 강제한다. 모델이 요청한 `size` 와 다른 크기를 낼 때가 있고(실측 `1536x1024` · `1199x1312`), 그러면 계약 ④ 의 `width`/`height` 가 실제 픽셀과 어긋난다. 리사이즈가 실패하면 원본을 살리고 `sharp.metadata()` 로 실제 크기를 다시 읽어 반환한다 — 유료 결과를 버리지 않는다(#104).
+`resizeToOutput`(`generate.ts`)이 `sharp` 로 `OUTPUT_SIZE` 를 강제한다. 모델이 요청한 `size` 와 다른 크기를 낼 때가 있고(실측 `1536x1024` · `1199x1312`), 그러면 계약 ④ 의 `width`/`height` 가 실제 픽셀과 어긋난다. 리사이즈가 실패하면 원본을 살리고 `sharp.metadata()` 로 실제 크기를 다시 읽어 반환한다 — 유료 결과를 버리지 않는다(#104).
 
-`fit:'cover'` 의 crop position 은 `reserved_zone` 과 같은 쪽이다(`top`이면 위를 남기고 아래를 자름, `bottom`이면 반대) — `resizeToOutput`(`:430`)이 `reservedZone ?? 'centre'` 로 넘긴다. `reserved_zone` 이 없으면 기본값(`centre`)이다. 실측(위쪽 200px 여백, `1199x1312` → `1024x1024`): `centre` 122px 남음, 같은 쪽 171px, 반대쪽 74px (#105, PR #166).
+`fit:'cover'` 의 crop position 은 `reserved_zone` 과 같은 쪽이다(`top`이면 위를 남기고 아래를 자름, `bottom`이면 반대) — `resizeToOutput`(`generate.ts`)이 `reservedZone ?? 'centre'` 로 넘긴다. `reserved_zone` 이 없으면 기본값(`centre`)이다. 실측(위쪽 200px 여백, `1199x1312` → `1024x1024`): `centre` 122px 남음, 같은 쪽 171px, 반대쪽 74px (#105, PR #166).
 
 **1024×1024 인 이유**
 
@@ -234,7 +236,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 `app/api/generate/_smoke-test.mjs` — 표준 라이브러리만 쓰고 테스트 러너를 추가하지 않는다. 정적 배선 검사 4건은 **서버도 크레딧도 필요 없다.** 실제 생성 경로는 유료라 `RUN_REAL_GENERATION=1` 게이트 뒤에 있고, 읽을 수 있는 시트 URI 를 `SMOKE_SHEET_ASSET` 으로 받아야 돈다.
 
-정적 검사가 지키는 것은 과거에 실제로 났던 사고들이다 — `continueFrom` 배선 누락(#75), `Promise.all` 복귀(#104), reference 0장 미차단(#67), 시트·컷 스타일 필드 불일치(#126·#129).
+정적 검사가 지키는 항목은 — `continueFrom` 배선 누락(#75), `Promise.all` 복귀(#104), reference 0장 미차단(#67), 시트·컷 스타일 필드 불일치(#126·#129). 각 항목의 경위는 링크된 이슈·PR을 본다.
 
 프롬프트 문구 품질은 정적 검사로 잡히지 않는다. **codex 환경에서 같은 프롬프트를 4회씩 돌려 육안 판정**하는 방식으로 검증했고, 결과는 #121 · #146 · #113 에 기록돼 있다.
 
@@ -287,11 +289,11 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 - 대사는 **Export 시점에만** 이미지에 굽는다. 에디터 화면의 말풍선은 HTML 레이어라 합성과 별개다(PRD "텍스트 레이어" 원칙).
 - 자리: `caption.position` 5종을 `POSITION_BOX`(`lib/render/position-box.ts` — 에디터 미리보기도 쓸 수 있게 분리, #278)의 고정 비율 박스로 바꾼다. 구석 자리는 일부러 캔버스 경계를 살짝 넘는다(웹툰식 "반 걸침").
-- 크기: 박스 폭 안에서 글자 수에 맞춰 폰트 40→22px로 줄이며 줄바꿈(`fitText`), 높이 상한은 캔버스의 30%(`:339`).
-- 모양: `rounded`는 텍스트 박스보다 가로 1.12배·세로 1.28배 타원(`:288-289`), `rect`·`cloud`는 사각형 기반. 몸통과 꼬리는 **하나의 폴리곤**으로 그린다(겹쳐 그리면 이음매가 보임). 불투명도 0.98.
-- 위 경계 보정: `rounded` 타원이 캔버스 위로 넘치면 넘친 만큼 아래로 민다(`:390`).
-- 꼬리: 목표점(`HeadTarget`) 방향으로, 몸통 경계~목표점 거리의 40%, 최대 캔버스 높이의 12%(`:142-143`, PR #163). `center` 자리도 목표점이 몸통 밖이면 그쪽으로 꼬리를 내고(길이 하한 = 고정 꼬리 길이), 목표점이 몸통 안이면 고정 방향·고정 길이의 짧은 꼬리로 폴백한다(`resolveTail`, `centerTail`, #192·#199). 기본 목표점은 늘 center 몸통 안이라 `headTargets`를 넘기지 않는 지금의 Export는 고정 꼬리 그대로다.
-- 목표점: 호출자가 컷별로 넘길 수 있지만 **지금 Export는 넘기지 않아** 항상 기본값(화면 가로 50%, 세로 42%, `:130`)이다. 인물이 한쪽에 있는 컷에서는 꼬리가 빈 곳을 가리킬 수 있다(9/30 골든패스 컷 3·4에서 관찰).
+- 크기: 박스 폭 안에서 글자 수에 맞춰 폰트 40→22px로 줄이며 줄바꿈(`fitText`), 높이 상한은 캔버스의 30%(`captionSvg`의 `fitText` 호출부 `maxHeight`).
+- 모양: `rounded`는 텍스트 박스보다 가로 1.12배·세로 1.28배 타원(`ellipseRadii`), `rect`·`cloud`는 사각형 기반. 몸통과 꼬리는 **하나의 폴리곤**으로 그린다(겹쳐 그리면 이음매가 보임). 불투명도 0.98.
+- 위 경계 보정: `rounded` 타원이 캔버스 위로 넘치면 넘친 만큼 아래로 민다(`captionSvg`의 rounded 윗넘침 보정).
+- 꼬리: 목표점(`HeadTarget`) 방향으로, 몸통 경계~목표점 거리의 40%, 최대 캔버스 높이의 12%(`resolveTail`의 `TAIL_REACH_RATIO`·`MAX_PROTRUDE_RATIO`, PR #163). `center` 자리도 목표점이 몸통 밖이면 그쪽으로 꼬리를 내고(길이 하한 = 고정 꼬리 길이), 목표점이 몸통 안이면 고정 방향·고정 길이의 짧은 꼬리로 폴백한다(`resolveTail`, `centerTail`, #192·#199). 기본 목표점은 늘 center 몸통 안이라 center는 고정 꼬리 폴백 그대로다. Export는 컷별 목표점 1개를 넘기는데 wide가 아니면 `undefined`라 기본 목표점을 쓴다(`headTargetForShot`, #273 — smartman 확인 필요).
+- 목표점: `composeCut(image, [caption], headTargets?)`은 컷별 목표점을 받는다. Export(`exportCuts`)는 컷마다 1개씩 넘긴다 — wide 컷은 가로 50%·세로 55%, 그 밖은 기본값(가로 50%·세로 42%, `DEFAULT_HEAD_TARGET`)이다(#273 — smartman 확인 필요). 인물이 한쪽에 있는 컷에서는 꼬리가 빈 곳을 가리킬 수 있다(9/30 골든패스 컷 3·4에서 관찰).
 
 **ZIP 구성**: 컷당 PNG 1장, 파일명 `cut_<cut_index>.png`. 파일명(ZIP 이름)은 `Content-Disposition`에서 subject 기반(한글은 `filename*`).
 
@@ -299,7 +301,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 **알려진 한계**
 
-- 폰트가 `Malgun Gothic`/`Apple SD Gothic Neo` 시스템 폰트에 의존한다(`:13`). 한글 폰트가 없는 리눅스 서버에 배포하면 글자가 깨질 수 있어, 배포 전 폰트 포함이 필요하다.
+- 폰트가 `Malgun Gothic`/`Apple SD Gothic Neo` 시스템 폰트에 의존한다(`compose.ts`의 `FONT_FAMILY`). 한글 폰트가 없는 리눅스 서버에 배포하면 글자가 깨질 수 있어, 배포 전 폰트 포함이 필요하다.
 - 글자 폭은 실제 폰트 측정이 아니라 추정치(한글 = 폰트 크기, 영문·숫자 = 0.55배)다.
 - 아주 긴 대사 경계·`center` 덮음은 #192로 해결. `center` 꼬리 방향(화자 쪽)은 #199 후속.
 
