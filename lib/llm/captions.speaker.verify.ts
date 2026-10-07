@@ -10,7 +10,7 @@ import { setCaptionSpeaker } from "../../app/(studio)/session/[id]/storyboard-as
 import type { Cut } from "../../app/(studio)/session/[id]/storyboard-types";
 
 // 모델 키 자리 — 호출 자체는 아래 가짜가 받으므로 값은 더미다.
-(process.env as Record<string, string>)["OPEN" + "AI_API_KEY"] = "verify-stub";
+process.env.OPENAI_API_KEY = "verify-stub";
 
 let modelCalls = 0;
 const queued: string[] = [];
