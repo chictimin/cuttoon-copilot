@@ -379,6 +379,39 @@ async function main(): Promise<void> {
     checks.push(["failReason 객체 아님 → error", failReason("sk-proj-FAKE") === "error"]);
   }
 
+  // --- 8. #242 2인 컷 좌우 배치 (characters_in_frame[0] 왼쪽, [1] 오른쪽) ---
+  {
+    const sb = {
+      subject: "demo",
+      cast: [
+        { character_id: "protagonist", role: "protagonist", description: "50대 여성 직장인" },
+        { character_id: "supporting", role: "supporting", description: "젊은 남성 트레이너" },
+      ],
+    } as CutStoryboard;
+    const who = (ids: string[]) => ({
+      cut_index: 3,
+      characters_in_frame: ids.map((character_id) => ({ character_id, expression: "smile", pose: "stand" })),
+    });
+    const LEFT = "Character on the left side of the panel:";
+    const RIGHT = "Character on the right side of the panel:";
+    const count = (t: string, sub: string) => t.split(sub).length - 1;
+
+    const two = buildCutPrompt(sb, {}, who(["protagonist", "supporting"]));
+    checks.push(["2인 → 왼쪽·오른쪽 각 1회", count(two, LEFT) === 1 && count(two, RIGHT) === 1]);
+    checks.push(["2인 → [0] 왼쪽", two.includes(`${LEFT} 50대 여성 직장인.`)]);
+    checks.push(["2인 → [1] 오른쪽", two.includes(`${RIGHT} 젊은 남성 트레이너.`)]);
+    checks.push(["2인 → 왼쪽 문장이 오른쪽보다 앞", two.indexOf(LEFT) < two.indexOf(RIGHT)]);
+    const swapped = buildCutPrompt(sb, {}, who(["supporting", "protagonist"]));
+    checks.push(["2인 순서 바뀜 → 순서대로 왼쪽([0])", swapped.includes(`${LEFT} 젊은 남성 트레이너.`)]);
+
+    const one = buildCutPrompt(sb, {}, who(["protagonist"]));
+    checks.push(["1인 → 좌우 문장 없음", !one.includes("side of the panel:") && one.includes("Character: 50대 여성 직장인.")]);
+    const none = buildCutPrompt(sb, {}, who([]));
+    checks.push(["0인 → 좌우 문장 없음", !none.includes("side of the panel:")]);
+    const three = buildCutPrompt(sb, {}, who(["protagonist", "supporting", "protagonist"]));
+    checks.push(["3인 → 좌우 문장 없음", !three.includes("side of the panel:")]);
+  }
+
   let failed = 0;
   for (const [name, pass] of checks) {
     if (pass) {
