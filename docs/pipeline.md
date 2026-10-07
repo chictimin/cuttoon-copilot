@@ -149,6 +149,8 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 **판정·측정 때는 끄는 것을 권한다.** 재시도가 부족분을 채워버리면 "3안 중 2안" 이라는 수치가 보이지 않는다. 부족분이 생기면 원인이 세 갈래로 찍힌다 — `재시도 꺼짐` / `재시도 한도 소진` / `배치 전멸로 중단`.
 
+**호출 시간 로그** — 이미지 호출마다 `[image] <kind> <설정> ok|fail <초>s [사유]` 한 줄을 남긴다(`timeImageCall`, `lib/openai/image-setting.ts`). kind는 `character_sheet`·`cover_variant`·`cut`·`style_extract`다. 설정 표기는 `settingTag`(`IMAGE_PROVIDER=<값>`, `style_extract`는 모델명)다. 실패 사유는 숫자 status와 허용 목록 코드·이름만 찍는다 — 키·URL·메시지는 기록하지 않는다. 표지 묶음 끝에는 `cover_variants done x/3 attempts=n` 요약을 남긴다(attempts는 SDK 자동 재시도 미포함, #274).
+
 **호출 순서 (세션 1회, 재시도 없는 골든 패스)**
 
 화면 영역 소유 파일은 **함수명만 적는다** — 5-1b 절과 같은 이유다.
@@ -178,6 +180,8 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 | 8 | `reserved_zone` 지시 | 프레임 **안**을 비운다 — 흰 띠를 붙이는 것이 아니다 |
 | 9 | `rules.forbidden` → `Do not include:` | 사용자가 적은 금지 요소 |
 | 10 | 말풍선·글자 억제 | P0 게이트 2 |
+
+**2인 컷 좌우 배치** — `buildCutPrompt`는 `characters_in_frame`이 **정확히 2명**일 때만 인물 문장 머리를 `Character on the left/right side of the panel:`로 바꾼다([0] 왼쪽, [1] 오른쪽). `speaker_index`는 읽지 않고 조립 순서만 쓴다 — 순서는 `storyboard-assembly.ts` 한 곳에서 정해지고(주인공이 [0]) 이후 바뀌지 않는다. 1명·0명·3명 이상은 그대로 둔다. 표지 3안도 같은 함수를 타므로 첫 컷이 2인이면 표지에도 들어간다(#285, 유료 3장 3/3 확인).
 
 4번 소재 문장과 7번 `cast[].description`은 `projectForModel(text, subject, subject_tags)`로 투영해 넣는다 — 소재의 `[브랜드]` 원문 대신 category가 들어가고, `subject_tags`가 없거나 형태가 어긋나면 "제품"이다. 대괄호가 없는 소재는 그대로다(#206·#237). 캐릭터 시트는 소재를 받지 않아 해당되지 않는다.
 
@@ -239,6 +243,8 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 정적 검사가 지키는 항목은 — `continueFrom` 배선 누락(#75), `Promise.all` 복귀(#104), reference 0장 미차단(#67), 시트·컷 스타일 필드 불일치(#126·#129). 각 항목의 경위는 링크된 이슈·PR을 본다.
 
 프롬프트 문구 품질은 정적 검사로 잡히지 않는다. **codex 환경에서 같은 프롬프트를 4회씩 돌려 육안 판정**하는 방식으로 검증했고, 결과는 #121 · #146 · #113 에 기록돼 있다.
+
+**데모 캐시 만들기 도구** — `scripts/demo-cache-build.ts --session <id>`: 세션·`selections`·이미지를 읽기만 해서 `public/demo-cache/`에 PNG 6장(표지 3안 + 컷 2·3·4) + `manifest.json`을 쓴다. 이미지를 만들지 않는다(생성 호출 0). 점검(소재 #240 고정값·컷 4장·전 컷 1인·표지 후보 3안 및 선택 일치·1024×1024 PNG)이 하나라도 어긋나면 파일을 하나도 쓰지 않고 종료 코드 1로 끝난다. 표지 3안은 `selections`의 `candidate_assets`에서 읽으므로 **선택 기록이 없으면 만들 수 없다**(#286).
 
 ### 5-1b. 스타일 분석 · 캐릭터 시트 생성 (추출·시트)
 
