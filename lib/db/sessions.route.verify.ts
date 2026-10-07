@@ -1,4 +1,4 @@
-// spec-263 #8 실라우트 검증(verify-commands-263 rev9).
+// spec-263 #8 실라우트 검증(verify-commands-263 rev10).
 // 실행: npx tsx --conditions=react-server lib/db/sessions.route.verify.ts
 //
 // 명령이 NODE_ENV를 설정하지 않으므로 client.ts 평가 전에 여기서 "test"로
@@ -65,6 +65,16 @@ class FakeDb {
   sessionVersions: FakeRow[] = [];
   failNextVersionInsert: QueryError | null = null;
   nextId = 1;
+  // R6 실제 동시 경합용: 최신 조회 장벽 + 관찰 계수기. R6 블록에서만 세팅한다.
+  raceGate: {
+    needed: number;
+    arrived: number;
+    snapshot: FakeRow[] | null;
+    release: Promise<void>;
+    releaseFn: () => void;
+  } | null = null;
+  latestReadVersions: number[] = [];
+  versionInsertSuccess = 0;
 
   from(table: string): FakeQuery {
     return new FakeQuery(this, table);
@@ -135,6 +145,10 @@ class FakeQuery {
 
   private rows(): FakeRow[] {
     const all = this.table === "sessions" ? this.db.sessions : this.db.sessionVersions;
+    return this.rowsFrom(all);
+  }
+
+  private rowsFrom(all: FakeRow[]): FakeRow[] {
     let out = all.filter((r) => this.filters.every((f) => f(r)));
     if (this.orderCol !== null) {
       const col = this.orderCol;
@@ -181,6 +195,7 @@ class FakeQuery {
         created_at: "2026-10-06T00:00:00Z",
       }));
       this.db.sessionVersions.push(...made);
+      this.db.versionInsertSuccess++;
       return { data: made, error: null };
     }
     if (this.updateVals !== null) {
@@ -190,13 +205,49 @@ class FakeQuery {
     return { data: this.rows(), error: null };
   }
 
+  // R6 장벽 대상: 최신 버전 조회 1건(version 내림차순 limit 1).
+  private isLatestLookup(): boolean {
+    return (
+      this.table === "session_versions" &&
+      this.insertRows === null &&
+      this.updateVals === null &&
+      this.orderCol === "version" &&
+      this.orderAsc === false &&
+      this.limitN === 1
+    );
+  }
+
+  // 장벽 통과 최신 조회: 두 요청이 모두 도착해야 해제되고, 둘 다 장벽 시점의
+  // 같은 스냅샷을 본다. 읽은 baseline version을 기록한다.
+  private async gatedLatest(): Promise<QueryResult> {
+    const gate = this.db.raceGate!;
+    gate.arrived++;
+    if (gate.arrived >= gate.needed) {
+      gate.snapshot = this.db.sessionVersions.map((r) => ({ ...r }));
+      gate.releaseFn();
+    } else {
+      await gate.release;
+    }
+    const first = this.rowsFrom(gate.snapshot ?? [])[0] ?? null;
+    if (first !== null && typeof first.version === "number") {
+      this.db.latestReadVersions.push(first.version);
+    }
+    return { data: first, error: null };
+  }
+
+  private useGate(): boolean {
+    return this.db.raceGate !== null && this.isLatestLookup();
+  }
+
   async maybeSingle(): Promise<QueryResult> {
+    if (this.useGate()) return this.gatedLatest();
     const r = this.execute();
     const data = Array.isArray(r.data) ? (r.data[0] ?? null) : r.data;
     return { data, error: r.error };
   }
 
   async single(): Promise<QueryResult> {
+    if (this.useGate()) return this.gatedLatest();
     const r = this.execute();
     const data = Array.isArray(r.data) ? (r.data[0] ?? null) : r.data;
     if (r.error) return { data: null, error: r.error };
@@ -209,8 +260,17 @@ class FakeQuery {
     onfulfilled?: ((v: QueryResult) => TResult1) | null,
     onrejected?: ((e: unknown) => TResult2) | null
   ): Promise<TResult1 | TResult2> {
+    if (this.useGate()) return this.gatedLatest().then(onfulfilled, onrejected);
     return Promise.resolve(this.execute()).then(onfulfilled, onrejected);
   }
+}
+
+function makeRaceGate(needed: number): NonNullable<FakeDb["raceGate"]> {
+  let releaseFn: () => void = () => {};
+  const release = new Promise<void>((res) => {
+    releaseFn = res;
+  });
+  return { needed, arrived: 0, snapshot: null, release, releaseFn };
 }
 
 async function main(): Promise<void> {
@@ -278,7 +338,8 @@ async function main(): Promise<void> {
     check("R2 새위반400", r.status === 400 && j.code === "invalid_storyboard", r);
   }
 
-  // R3 경합 409 version_conflict
+  // R3 순차 매핑 409 version_conflict (순차 await + 강제 23505 주입 =
+  // 오류 매핑·재시도 없음 검사, 동시 경합 아님)
   {
     const db = new FakeDb();
     inject(db);
@@ -293,9 +354,46 @@ async function main(): Promise<void> {
     const r2 = await postVersion({ sessionId: SID, storyboard: vB });
     const j2 = r2.json as Record<string, unknown>;
     check(
-      "R3 경합409",
+      "R3 순차매핑409",
       r1.status === 200 && r2.status === 409 && j2.code === "version_conflict",
       { r1, r2 }
+    );
+  }
+
+  // R6 실제 동시 경합: 같은 baseline 장벽 + Promise.all 동시 POST.
+  // failNextVersionInsert 같은 강제 주입 없음 — 23505는 저장된 중복에서만 난다.
+  {
+    const db = new FakeDb();
+    inject(db);
+    db.seedSession(SID);
+    db.seedVersion(SID, 1, makeBoard());
+    db.raceGate = makeRaceGate(2);
+    const vA = makeBoard();
+    ((cutsOf(vA)[1].caption as Cut) as Cut).text = "A";
+    const vB = makeBoard();
+    ((cutsOf(vB)[1].caption as Cut) as Cut).text = "B";
+    const [rA, rB] = await Promise.all([
+      postVersion({ sessionId: SID, storyboard: vA }),
+      postVersion({ sessionId: SID, storyboard: vB }),
+    ]);
+    db.raceGate = null;
+    const jA = rA.json as Record<string, unknown>;
+    const jB = rB.json as Record<string, unknown>;
+    const okPair =
+      (rA.status === 200 && rB.status === 409 && jB.code === "version_conflict") ||
+      (rB.status === 200 && rA.status === 409 && jA.code === "version_conflict");
+    const maxVersion = db.sessionVersions.reduce(
+      (m, v) => Math.max(m, v.version as number),
+      0
+    );
+    check(
+      "R6 동시경합200+409",
+      okPair &&
+        db.latestReadVersions.length === 2 &&
+        db.latestReadVersions.every((v) => v === 1) &&
+        db.versionInsertSuccess === 1 &&
+        maxVersion === 2,
+      { rA, rB, reads: db.latestReadVersions, inserts: db.versionInsertSuccess }
     );
   }
 
