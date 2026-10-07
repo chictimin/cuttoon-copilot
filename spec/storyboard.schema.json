@@ -20,7 +20,7 @@
       "type": "array",
       "minItems": 1,
       "maxItems": 2,
-      "description": "타협 불가: 등장 캐릭터 1~2명, 그중 주인공(protagonist) 정확히 1명 — preset.schema.json이 '세션 단위이므로 storyboard에서 강제'라고 명시한 제약을 여기서 실제로 강제한다 (contains).",
+      "description": "타협 불가: 등장 캐릭터 1~2명, 그중 주인공(protagonist) 정확히 1명 (contains). preset.schema.json이 세션 단위이므로 storyboard에서 강제라고 명시한 제약이다. 서버 저장 검사(storyboardContractProblems)가 강제한다.",
       "items": { "$ref": "#/$defs/castMember" },
       "contains": { "properties": { "role": { "const": "protagonist" } } },
       "minContains": 1,
@@ -51,7 +51,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 30,
-            "description": "괄호 안 원문(30자 절단, 저장·표시용)."
+            "description": "괄호 안 원문(30자 절단, 저장·표시용). 길이는 유니코드 코드포인트 기준(JSON Schema maxLength와 같음, 사용자가 보는 글자 수와 다를 수 있음)."
           },
           "category": {
             "type": "string",
@@ -177,9 +177,12 @@
           "description": "narrative_beat=cta인 컷에서만 의미 있음. null이면 preset.rules.cta_format 기본값을 그대로 쓴다. null이 아니면 spec/data/cta_presets.json의 presets[].id 중 하나여야 한다 (preset.rules.cta_format과 동일 규약, issue #4)."
         },
         "generated_image": {
-          "type": ["string", "null"],
-          "pattern": "^asset://",
-          "description": "생성된 이미지 애셋 참조. preset.assets의 다른 필드들과 동일한 asset:// 규약을 따른다. 생성 전엔 null."
+          "anyOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^asset://.+" },
+            { "type": "string", "pattern": "^/demo-cache/.+" }
+          ],
+          "description": "생성된 이미지 애셋 참조. 생성 전엔 null. 형식은 스키마가 보고 목록 일치는 서버가 본다 — 캐시 값은 manifest에 있는 것만 유효(서버 정확 일치)."
         },
         "prompt_used": {
           "type": ["string", "null"],

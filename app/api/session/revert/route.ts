@@ -1,4 +1,5 @@
 import { revertSession } from "@/lib/db/sessions";
+import { buildStoryboardJudge, loadDemoCacheValues } from "../validate";
 
 /**
  * 되돌리기 1단계. body: { sessionId }
@@ -20,7 +21,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await revertSession(sessionId);
+    const result = await revertSession(
+      sessionId,
+      buildStoryboardJudge(await loadDemoCacheValues())
+    );
     if (!result.ok) {
       if (result.reason === "session_not_found") {
         return Response.json({ error: "없음" }, { status: 404 });
@@ -28,6 +32,15 @@ export async function POST(request: Request) {
       if (result.reason === "invalid_subject_tags") {
         return Response.json(
           { error: "되돌릴 버전의 소재 태그가 형식에 맞지 않습니다" },
+          { status: 409 }
+        );
+      }
+      if (result.reason === "invalid_storyboard") {
+        return Response.json(
+          {
+            error: "되돌릴 버전의 스토리보드가 계약에 맞지 않습니다",
+            code: "invalid_storyboard",
+          },
           { status: 409 }
         );
       }

@@ -14,7 +14,20 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // 자체가 실패한다. 키는 실행 시점에만 있으면 되므로 첫 호출까지 미룬다.
 let client: SupabaseClient | null = null;
 
+// 테스트 전용 주입점(spec-263 #8·#9 계약). 이름 고정: setTestDbClient.
+// 테스트 외 호출(NODE_ENV가 "test"가 아님)이면 throw하고, 주입하지 않으면
+// 기존 getDb 동작 그대로다. 검증이 끝나면 null로 되돌린다.
+let testClient: SupabaseClient | null = null;
+
+export function setTestDbClient(client: SupabaseClient | null): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("setTestDbClient는 테스트에서만 사용할 수 있습니다");
+  }
+  testClient = client;
+}
+
 export function getDb(): SupabaseClient {
+  if (testClient) return testClient;
   if (client) return client;
 
   const url = process.env.SUPABASE_URL;

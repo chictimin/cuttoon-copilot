@@ -1,10 +1,10 @@
-import { createSession, getSession, listSessions } from "@/lib/db/sessions";
+import { createSession, getSession, listSessions, StoryboardProtectionError } from "@/lib/db/sessions";
 import { insertSelections, type SelectionInsert } from "@/lib/db/selections";
 import {
   SELECTION_MAX_CANDIDATES,
   SELECTION_MAX_ROUNDS,
 } from "@/lib/session/selection-log";
-import { assertStoryboardShape } from "./validate";
+import { assertStoryboardShape, buildStoryboardJudge, loadDemoCacheValues } from "./validate";
 const ASSET_URI_PATTERN = /^asset:\/\//;
 
 /**
@@ -108,7 +108,8 @@ export interface SessionPostDeps {
  */
 export async function handleSessionPost(
   body: Record<string, unknown>,
-  deps: SessionPostDeps
+  deps: SessionPostDeps,
+  opts?: { demoCacheValues?: ReadonlySet<string> }
 ): Promise<Response> {
   const { projectId, presetId, storyboard } = body;
 
@@ -125,6 +126,20 @@ export async function handleSessionPost(
     );
   }
 
+  // 새 세션은 baseline이 없어 예외 없음 — 계약 위반이 하나라도 있으면 400.
+  const judge = buildStoryboardJudge(opts?.demoCacheValues);
+  const problems = judge(storyboard, null);
+  if (problems.length > 0) {
+    return Response.json(
+      {
+        error: `스토리보드 계약 위반 ${problems.length}건`,
+        code: "invalid_storyboard",
+        problems,
+      },
+      { status: 400 }
+    );
+  }
+
   // selections 키 유무가 응답 형태를 가른다. 키가 있을 때(빈 배열 포함)는
   // selectionsSaved를 true/false로 항상 넣어 화면이 비차단 토스트를 띄울 수 있게
   // 하고, 키 자체가 없으면 필드를 생략해 기존 응답 형태를 유지한다.
@@ -134,7 +149,10 @@ export async function handleSessionPost(
   // DB 실패는 요청 내용의 문제가 아니므로 400과 구분한다. 원문 메시지는 내부
   // 정보(테이블명·제약조건)를 담으므로 응답에 넣지 않고 로그로만 남긴다.
   try {
-    const saved = await deps.createSession({ projectId, presetId, storyboard });
+    const saved = await deps.createSession(
+      { projectId, presetId, storyboard },
+      judge
+    );
     const payload: Record<string, unknown> = {
       sessionId: saved.sessionId,
       version: saved.version,
@@ -152,6 +170,16 @@ export async function handleSessionPost(
     }
     return Response.json(payload);
   } catch (e) {
+    if (e instanceof StoryboardProtectionError) {
+      return Response.json(
+        {
+          error: e.message,
+          code: "invalid_storyboard",
+          problems: e.problems,
+        },
+        { status: 400 }
+      );
+    }
     console.error("[POST /api/session] 저장 실패:", e);
     return Response.json({ error: "세션 저장에 실패했습니다" }, { status: 500 });
   }
@@ -169,6 +197,8 @@ export async function POST(request: Request) {
   return handleSessionPost((body ?? {}) as Record<string, unknown>, {
     createSession,
     insertSelections,
+  }, {
+    demoCacheValues: await loadDemoCacheValues(),
   });
 }
 

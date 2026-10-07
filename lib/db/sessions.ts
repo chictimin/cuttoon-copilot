@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { StoryboardCut } from "@/lib/llm/storyboard-guard";
+import type { ContractProblem, StoryboardCut } from "@/lib/llm/storyboard-guard";
 import { subjectTagsProblem } from "@/lib/llm/subject-tags";
 import { getDb } from "./client";
 
@@ -25,6 +25,31 @@ export interface SavedSession {
   storyboard: Storyboard;
 }
 
+/**
+ * 저장 판정 콜백(spec-263 3-3). 새 스토리보드와 같은 조회로 읽은 baseline을
+ * 받아 위반 목록을 돌려준다. 빈 배열이면 통과. baseline이 null이면 새 세션
+ * (예외 없음). 구현은 호출부(validate.ts)가 들고, 여기서는 판정 baseline과
+ * insert version 결정을 같은 조회 결과에 묶기 위해 호출만 한다.
+ * 라우트가 DB helper를 판정 없이 직접 부르는 경로를 만들지 않기 위해
+ * create·version·revert 세 helper의 시그니처에 judge가 필수다.
+ */
+export type StoryboardJudge = (
+  newStoryboard: unknown,
+  baseline: Storyboard | null
+) => ContractProblem[];
+
+/** 보호 비교 거부 — 라우트가 400(/version)·409(revert)로 받는다. */
+export class StoryboardProtectionError extends Error {
+  problems: ContractProblem[];
+  constructor(problems: ContractProblem[]) {
+    super(`스토리보드 계약 위반 ${problems.length}건`);
+    this.problems = problems;
+  }
+}
+
+/** unique (session_id, version) 충돌 — 재시도·재판정 없이 409. */
+export class SessionVersionConflictError extends Error {}
+
 /** session_versions에서 꺼낸 storyboard의 subject를 sessions.subject로 덮어쓴다. */
 function withCanonicalSubject(storyboard: Storyboard, subject: string): Storyboard {
   return { ...storyboard, subject };
@@ -37,12 +62,19 @@ function withCanonicalSubject(storyboard: Storyboard, subject: string): Storyboa
  * 정본인 것과 같은 이유다(issue #7). storyboard JSON 안의 subject는 읽을 때 컬럼
  * 값으로 덮어써서 내려보내므로, 소재를 고칠 때 jsonb를 다시 쓰지 않아도 된다.
  */
-export async function createSession(params: {
-  projectId: string;
-  presetId: string;
-  storyboard: Storyboard;
-}): Promise<SavedSession> {
+export async function createSession(
+  params: {
+    projectId: string;
+    presetId: string;
+    storyboard: Storyboard;
+  },
+  judge: StoryboardJudge
+): Promise<SavedSession> {
   const { projectId, presetId, storyboard } = params;
+
+  // 새 세션은 baseline이 없어 예외 없음 — 위반이 하나라도 있으면 저장하지 않는다.
+  const problems = judge(storyboard, null);
+  if (problems.length > 0) throw new StoryboardProtectionError(problems);
 
   const { data: session, error: sessionError } = await getDb()
     .from("sessions")
@@ -238,7 +270,8 @@ export async function listSessions(params?: { projectId?: string }): Promise<Ses
  */
 export async function saveSessionVersion(
   sessionId: string,
-  storyboard: Storyboard
+  storyboard: Storyboard,
+  judge: StoryboardJudge
 ): Promise<SavedSession | null> {
   const { data: session, error: sessionError } = await getDb()
     .from("sessions")
@@ -252,13 +285,25 @@ export async function saveSessionVersion(
   const latest = await getLatestVersion(sessionId);
   if (!latest) return null;
 
+  // 같은 조회 결과로 판정한다 — 조회와 insert 사이에 낀 다른 저장은 아래
+  // unique 충돌로 409가 되며, 판정 없이 번호만 올려 저장하지 않는다.
+  const problems = judge(storyboard, latest.storyboard);
+  if (problems.length > 0) throw new StoryboardProtectionError(problems);
+
   const nextVersion = latest.version + 1;
 
   const { error: insertError } = await getDb()
     .from("session_versions")
     .insert({ session_id: sessionId, version: nextVersion, storyboard });
 
-  if (insertError) throw new Error(`버전 저장 실패: ${insertError.message}`);
+  if (insertError) {
+    if (insertError.code === "23505") {
+      throw new SessionVersionConflictError(
+        `버전 충돌: 세션 ${sessionId} v${nextVersion}가 이미 있음`
+      );
+    }
+    throw new Error(`버전 저장 실패: ${insertError.message}`);
+  }
 
   // subject의 정본은 컬럼이므로 스토리보드가 바뀌면 컬럼도 따라 갱신한다.
   // 이 갱신이 실패해도 스토리보드 자체는 저장됐으므로 요청을 실패시키지 않는다.
@@ -290,7 +335,8 @@ export async function saveSessionVersion(
  */
 export type RevertResult =
   | { ok: true; session: SavedSession }
-  | { ok: false; reason: "session_not_found" | "no_previous_version" | "invalid_subject_tags" };
+  | { ok: false; reason: "session_not_found" | "no_previous_version" | "invalid_subject_tags" }
+  | { ok: false; reason: "invalid_storyboard"; problems: ContractProblem[] };
 
 /**
  * 되돌리기 1단계. 직전 버전의 내용을 새 버전으로 복사한다 — 행을 지우지 않으므로
@@ -302,7 +348,10 @@ export type RevertResult =
  * 누르면 두 내용을 오가는 토글이 된다. PRD.md 3절이 버전 목록·diff UI를 제외했고
  * 되돌리기 1단계만 요구하므로 이 동작으로 충분하다.
  */
-export async function revertSession(sessionId: string): Promise<RevertResult> {
+export async function revertSession(
+  sessionId: string,
+  judge: StoryboardJudge
+): Promise<RevertResult> {
   const { data: session, error: sessionError } = await getDb()
     .from("sessions")
     .select("id, project_id, preset_id")
@@ -329,6 +378,12 @@ export async function revertSession(sessionId: string): Promise<RevertResult> {
     .subject_tags;
   if (previousTags !== undefined && subjectTagsProblem(previousTags) !== null) {
     return { ok: false, reason: "invalid_subject_tags" };
+  }
+  // 되돌릴 내용이 계약 위반이면 새 버전·subject 쓰기 없이 거부한다.
+  // subject_tags가 먼저 걸리면 그 코드를 유지한다(우선순위: subject_tags → storyboard).
+  const problems = judge(previous.storyboard, current.storyboard);
+  if (problems.length > 0) {
+    return { ok: false, reason: "invalid_storyboard", problems };
   }
   const nextVersion = current.version + 1;
 

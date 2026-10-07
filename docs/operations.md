@@ -101,7 +101,8 @@ npm run dev              # 개발 서버
 npm run build            # 머지 전 빌드 확인
 npm start                # 프로덕션 실행
 npm run lint             # 린트
-npm run spec:sync-check  # 스키마 · 데이터 정합 검사
+npm run spec:sync-check  # 어휘·힌트 동기화 — 저장값 검증 아님
+npm run spec:docs        # 문서 생성 — 검사 아님
 ```
 
 위 블록은 순서가 아니다 — 처음 실행 순서는 [README](../README.md#readme-first-run) 참고. `npm start`는 `build` 산출물이 있어야 동작한다(단독 실행 불가).
