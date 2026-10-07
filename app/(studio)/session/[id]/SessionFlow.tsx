@@ -29,6 +29,7 @@ import { getCtaPresetById, resolveCandidates, type CtaPreset } from "@/lib/llm/c
 import {
   assembleStoryboard,
   applyCutDirections,
+  setCaptionSpeaker,
   FLOW_OPTIONS,
   type BrainstormAnswers,
 } from "./storyboard-assembly";
@@ -571,6 +572,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     fallback: CaptionsResponse["fallbackCutIndexes"]
   ) {
     const valid = new Map<number, string>();
+    const validSpeakerIndex = new Map<number, unknown>(); // setCaptionSpeaker speaker source per cut
     if (Array.isArray(list)) {
       for (const entry of list) {
         if (typeof entry !== "object" || entry === null) continue;
@@ -584,6 +586,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           text.trim().length > 0
         ) {
           valid.set(cut_index, text);
+          validSpeakerIndex.set(cut_index, (entry as Record<string, unknown>).speaker); // setCaptionSpeaker
         }
       }
     }
@@ -593,7 +596,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         ...prev,
         cuts: prev.cuts.map((cut) =>
           valid.has(cut.cut_index)
-            ? { ...cut, caption: { ...cut.caption, text: valid.get(cut.cut_index) as string } }
+            ? setCaptionSpeaker({ ...cut, caption: { ...cut.caption, text: valid.get(cut.cut_index) as string } }, typeof validSpeakerIndex.get(cut.cut_index) === "string" ? (validSpeakerIndex.get(cut.cut_index) as string) : undefined) // setCaptionSpeaker speaker_index
             : cut
         ),
       };
@@ -666,7 +669,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       setStoryboard((prev) => {
         if (!prev) return prev;
         const withCaption = prev.cuts.map((cut) =>
-          cut.cut_index === cutIndex ? { ...cut, caption: { ...cut.caption, text } } : cut
+          cut.cut_index === cutIndex ? setCaptionSpeaker({ ...cut, caption: { ...cut.caption, text } }, typeof (entry as Record<string, unknown>).speaker === "string" ? ((entry as Record<string, unknown>).speaker as string) : undefined) : cut // setCaptionSpeaker speaker_index
         );
         return { ...prev, cuts: applyCutDirections(withCaption, directions, directionFallback) };
       });

@@ -325,6 +325,24 @@ for (const supporting of [false, true]) {
   g1.subject_tags = [{ raw: "태그" }];
   expectProblems("A11 태그", g1, "A11");
 
+  // spec-242 SPK·ANC (A-5·B) — 2인 컷(조연 있음, 3번 컷) 정상 + 위반
+  const spkOk = demoBoard(FLOW_BEATS[0], "clear", true);
+  (cutsOf(spkOk)[2].caption as Cut).speaker_index = 1;
+  (cutsOf(spkOk)[2].caption as Cut).anchor = { x: 0.5, y: 0.5 };
+  expectProblems("SPK·ANC 정상(2인 컷)", spkOk, null);
+  const spkSolo = demoBoard(FLOW_BEATS[0], "clear", false);
+  (cutsOf(spkSolo)[0].caption as Cut).speaker_index = 0;
+  expectProblems("SPK 1인 컷 키 있음", spkSolo, "SPK");
+  const spkEnum = demoBoard(FLOW_BEATS[0], "clear", true);
+  (cutsOf(spkEnum)[2].caption as Cut).speaker_index = 2;
+  expectProblems("SPK 범위 밖", spkEnum, "SPK");
+  const ancRange = demoBoard(FLOW_BEATS[0], "clear", false);
+  (cutsOf(ancRange)[0].caption as Cut).anchor = { x: 1.5, y: 0.5 };
+  expectProblems("ANC 범위 밖", ancRange, "ANC");
+  const ancExtra = demoBoard(FLOW_BEATS[0], "clear", false);
+  (cutsOf(ancExtra)[0].caption as Cut).anchor = { x: 0.5, y: 0.5, z: 1 };
+  expectProblems("ANC 추가 키", ancExtra, "ANC");
+
   // frame locator 회귀(spec-263 rev5 3-1 "frame" 줄) — 인물에 묶인 식별자
   const f1 = demoBoard(FLOW_BEATS[0], "clear", false);
   ((cutsOf(f1)[0].characters_in_frame as Cut[])[0] as Cut).expression = "smil";
