@@ -299,12 +299,13 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
   // subject_tags 키를 뺀 사본이고 화면 상태는 아직 바꾸지 않는다. 실패하면 원본
   // 유지·에러 표시·버튼 재사용, 성공할 때만 사본으로 교체한다.
   async function handleRecoverSave() {
-    if (!draft || saveLockRef.current) return;
+    if (!draft || !pendingBoard || saveLockRef.current) return;
     saveLockRef.current = true;
     setRecovering(true);
     setActionError(null);
     try {
-      const stripped = stripSubjectTags(draft);
+      // #259 7번: 실패 뒤 새로 쓰던 입력칸 글자도 같이 저장한다(handleSave와 같은 pendingBoard).
+      const stripped = stripSubjectTags(pendingBoard);
       const res = await fetch("/api/session/version", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -320,6 +321,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
       const data = await res.json();
       setSaved({ version: data.version, storyboard: stripped });
       setDraft(clone(stripped));
+      setEditingIndex(null);
       setSaveRecovery(false);
       setSaveNotice("소재 태그 매핑 없이 저장했어요");
       setSavedAt(new Date().toLocaleTimeString());
