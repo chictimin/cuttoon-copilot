@@ -169,11 +169,42 @@ async function main() {
     console.error(`FAIL wide 목표점 합성 — ${(err as Error).message}`);
   }
 
+  // #259-8 D: bottom_* 말풍선은 화면 아래(0.70 근처)에 그려지고, 긴 대사도 캔버스 아래로
+  // 나가지 않는다. 검은 1024 캔버스에 합성한 뒤 흰 픽셀(말풍선 몸통)이 있는 행 범위를 잰다.
+  {
+    const black = await sharp({ create: { width: 1024, height: 1024, channels: 3, background: { r: 0, g: 0, b: 0 } } })
+      .png()
+      .toBuffer();
+    const whiteRows = async (caption: Caption) => {
+      const { data, info } = await sharp(await composeCut(black, [caption])).raw().toBuffer({ resolveWithObject: true });
+      const rows: number[] = [];
+      for (let yy = 0; yy < info.height; yy++) {
+        for (let xx = 0; xx < info.width; xx++) {
+          const i = (yy * info.width + xx) * info.channels;
+          if (data[i] > 200 && data[i + 1] > 200 && data[i + 2] > 200) { rows.push(yy); break; }
+        }
+      }
+      return { top: Math.min(...rows), bottom: Math.max(...rows), h: info.height };
+    };
+    const longText = "아침마다 무릎이 뻣뻣해서 계단을 내려갈 때마다 조심하게 되는데 퇴근 후 10분씩 스트레칭을 하면 정말 좀 나아질까 궁금해서 친구에게 물어봤어요";
+    for (const bubble_type of ["rounded", "rect", "cloud"] as const) {
+      const short = await whiteRows({ text: "무릎이 한결 가벼워졌어!", bubble_type, position: "bottom_left" });
+      const long = await whiteRows({ text: longText, bubble_type, position: "bottom_right" });
+      const ok = short.top >= short.h * 0.6 && long.bottom < long.h - 1;
+      if (ok) {
+        console.log(`ok   bottom ${bubble_type} — 짧은 대사 위끝 ${(short.top / short.h * 100).toFixed(0)}%, 긴 대사 아래끝 ${long.bottom}px(<${long.h - 1})`);
+      } else {
+        failed++;
+        console.error(`FAIL bottom ${bubble_type} — 짧은 위끝 ${short.top}, 긴 아래끝 ${long.bottom}`);
+      }
+    }
+  }
+
   if (failed > 0) {
     console.error(`\n${failed}건 실패`);
     process.exit(1);
   }
-  console.log("\n18건 통과");
+  console.log("\n21건 통과");
 }
 
 main();
