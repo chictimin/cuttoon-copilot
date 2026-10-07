@@ -55,6 +55,8 @@ export interface Caption {
   text: string;
   bubble_type: BubbleType;
   position: CaptionPosition;
+  speaker_index?: 0 | 1;
+  anchor?: { x: number; y: number };
 }
 
 export interface Cut {

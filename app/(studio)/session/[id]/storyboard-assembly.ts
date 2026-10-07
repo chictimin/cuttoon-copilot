@@ -376,3 +376,23 @@ export function applyCutDirections(
     return next;
   });
 }
+
+// spec-242 A-2. 대사 텍스트를 교체한 컷에만 호출한다. 2인 컷이고 speakerId가
+// frame의 character_id 중 하나면 caption.speaker_index에 그 순번(0|1)을,
+// 그 외(무효·없음·1인 컷)면 speaker_index 키를 삭제한다. 인물 배열 순서·
+// 다른 필드는 바꾸지 않는다. 입력은 고치지 않고 새 컷을 돌려준다.
+export function setCaptionSpeaker(cut: Cut, speakerId: string | undefined): Cut {
+  const frame = cut.characters_in_frame;
+  const index =
+    typeof speakerId === "string" ? frame.findIndex((c) => c.character_id === speakerId) : -1;
+  if (frame.length === 2 && index === 0) {
+    return { ...cut, caption: { ...cut.caption, speaker_index: 0 } };
+  }
+  if (frame.length === 2 && index === 1) {
+    return { ...cut, caption: { ...cut.caption, speaker_index: 1 } };
+  }
+  if (!("speaker_index" in cut.caption)) return cut;
+  const nextCaption = { ...cut.caption };
+  delete nextCaption.speaker_index;
+  return { ...cut, caption: nextCaption };
+}

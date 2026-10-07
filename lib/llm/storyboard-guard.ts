@@ -596,6 +596,56 @@ function collectProblems(sb: unknown, demoCacheValues?: ReadonlySet<string>): Co
         }
         checkRequiredEnumField(cr, "bubble_type", VALID.bubble_type, "A5", "A6", cloc, problems);
         checkRequiredEnumField(cr, "position", VALID.position, "A5", "A6", cloc, problems);
+
+        // SPK captions.speaker_index (spec-242 A-5). frame 0명·3명 이상·비배열은
+        // SPK 판정 안 함(기존 A5가 잡음).
+        if (Array.isArray(fr) && (fr.length === 1 || fr.length === 2)) {
+          const speakerLoc = `${cloc}.speaker_index`;
+          if (fr.length === 1) {
+            if ("speaker_index" in cr) {
+              problems.push({
+                rule: "SPK",
+                locator: speakerLoc,
+                kind: "relation",
+                cause: { value: cr.speaker_index, frameLength: 1 },
+              });
+            }
+          } else if ("speaker_index" in cr) {
+            const speaker = cr.speaker_index;
+            if (typeof speaker !== "number" || !Number.isInteger(speaker)) {
+              problems.push({ rule: "SPK", locator: speakerLoc, kind: "type", cause: speaker });
+            } else if (speaker !== 0 && speaker !== 1) {
+              problems.push({ rule: "SPK", locator: speakerLoc, kind: "enum", cause: speaker });
+            }
+          }
+        }
+
+        // ANC captions.anchor (spec-242 B). 키가 없을 때만 통과, 있으면 아래 표대로.
+        if ("anchor" in cr) {
+          const anchorLoc = `${cloc}.anchor`;
+          const anchor = cr.anchor;
+          if (!isRecord(anchor)) {
+            problems.push({ rule: "ANC", locator: anchorLoc, kind: "type", cause: anchor });
+          } else {
+            for (const axis of ["x", "y"] as const) {
+              const axisLoc = `${anchorLoc}.${axis}`;
+              if (!(axis in anchor)) {
+                problems.push({ rule: "ANC", locator: axisLoc, kind: "missing", cause: undefined });
+              } else {
+                const value = anchor[axis];
+                if (typeof value !== "number" || !Number.isFinite(value)) {
+                  problems.push({ rule: "ANC", locator: axisLoc, kind: "type", cause: value });
+                } else if (value < 0 || value > 1) {
+                  problems.push({ rule: "ANC", locator: axisLoc, kind: "format", cause: value });
+                }
+              }
+            }
+            const extra = Object.keys(anchor).filter((k) => k !== "x" && k !== "y");
+            if (extra.length > 0) {
+              problems.push({ rule: "ANC", locator: anchorLoc, kind: "format", cause: extra });
+            }
+          }
+        }
       }
 
       // CTA override id (cta 컷에서만 의미 — null이면 기본값 사용)

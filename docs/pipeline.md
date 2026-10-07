@@ -78,6 +78,10 @@ flowchart TD
 | 11 | `handleSelectCover` | `SessionFlow.tsx` | `generateChainedCuts`(`generate-client.ts`, 화면) → `POST /api/generate { kind:'cut', ... }` × 3 — 이미지 생성 경계 |
 | 12 | `handleSave` | `SessionFlow.tsx` | `POST /api/session` (백엔드·저장, `lib/db/sessions.ts`에 저장) + `selections` 동봉(#207 — 표지 표시 때 `recordRound`·선택 때 `markSelected`, 저장 때 `toPayload`, 기록 실패 시 `selectionsSaved:false` 토스트) |
 
+### 대사 화자·말풍선 좌표 (#242)
+
+대사 생성(`POST /api/session/captions`, `generateCutCaptions`)이 2인 컷 대사 항목에 화자 id(`speaker`)를 싣고, 화면(`SessionFlow.tsx` `applyCaptions`·`regenCutCaption`)이 `setCaptionSpeaker`로 `caption.speaker_index`(0|1, `characters_in_frame` 순번)로 바꿔 저장한다. 저장 검사(`storyboardContractProblems` SPK·ANC 규칙)가 1인 컷 키 금지·범위·좌표 형식을 보고, Export는 화자·좌표가 없어도 `position` 기본 위치로 그린다(관대 읽기). 인물 배열 순서·구성은 컷 다시 뽑기(그림 재생성)로만 바꾼다 — 저장된 순서가 그림 좌우와 같다는 보장은 이 변경에서 두지 않는다(공개 한계).
+
 ### 표지 선택 기록 저장 계약 (#207)
 
 `selections` 테이블에 "보여 준 후보 묶음(라운드)" 단위로 쌓는다 — 한 행 = 화면에 보여준 후보 한 묶음. `variant_index`는 고른 위치(다시 뽑기로 버린 라운드면 null), `(session_id, cut_index, round)`은 유일하다. 화면이 모아 두었다가 `handleSave` → `POST /api/session`의 `selections`로 함께 보내면, `createSession` 성공 뒤에 `insertSelections`(`lib/db/selections.ts`)가 저장한다. 일시적 DB 오류에만 전체 예산 3초 안에서 재시도하고(시도별 최대 1초·백오프 200·400ms·남은 예산 300ms 미만이면 포기), 그래도 실패하면 세션 저장은 200 + `selectionsSaved: false`로 응답한다(사용자 작업 보존 우선). 화면 쪽 기록 헬퍼 4개는 `lib/session/selection-log.ts`다 — `createSelectionLog`, `recordRound`, `markRegenerated`, `markSelected`, 전송용으로 바꾸는 `toPayload`. 화면 연결(#213): 표지 표시 때마다 `recordRound`, 선택 때 `markSelected`, 저장 때 `toPayload`로 동봉하고, `selectionsSaved:false`면 실패 토스트(비차단). 읽는 쪽(프로젝트별 선호·프리셋 승격 규칙)은 이번에 만들지 않고, 나중에 `sessions.preset_id`로 묶어 읽는다(#202).
