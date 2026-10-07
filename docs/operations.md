@@ -59,6 +59,9 @@ cuttoon-copilot/
 │  ├─ openai/
 │  │   ├─ generate.ts          컷 생성 (멀티턴 세션 관리)      joniverse-ai
 │  │   ├─ extract.ts           레퍼런스 VLM 추출 · 시트 생성   joniverse-ai
+│  │   ├─ image-setting.ts     이미지 설정 선택 (#196)         joniverse-ai
+│  │   ├─ comfyui.ts           로컬 ComfyUI (#226)             joniverse-ai
+│  │   ├─ prompt.demo.ts       프롬프트 검사 demo              joniverse-ai
 │  │   └─ provider.ts          ImageProvider 인터페이스        joniverse-ai
 │  ├─ render/                  텍스트 레이어 합성 · ZIP        smartman3514-commits
 │  │   └─ font.ts                프로젝트 폰트 읽기             smartman3514-commits
@@ -80,7 +83,7 @@ cuttoon-copilot/
 | joniverse-ai | `lib/openai/`, `app/api/generate/`, `app/api/extract/` | 이미지 생성 · 추출 · 캐릭터 시트 |
 | smartman3514-commits | `lib/render/` | 렌더링 버그 수정(#105, #169, #170) + QA 검증 |
 
-1차에는 A①~B③ 6파트 체제였다. `pipeline.md`는 각자 자기 영역 절을 고친다. `public/demo-cache/`는 아직 만들어지지 않았고 담당도 미정이다.
+1차에는 A①~B③ 6파트 체제였다. `pipeline.md`는 각자 자기 영역 절을 고친다. `public/demo-cache/`는 아직 만들어지지 않았고 담당은 joniverse-ai(10-10 생성 예정)이다.
 
 <a id="ops-git"></a>
 ## 브랜치 · git 규칙
@@ -149,17 +152,17 @@ npm run spec:docs        # 문서 생성 — 검사 아님
 | 6 | 기능 | 브레인스토밍 흐름 턴 LLM 선택 (**완료** — 3종 유지로 종료) | 품질 | 10-04 | chictimin | #157, #201 |
 | 7 | 버그 | 숫자 소재가 이미지에 글자로 박힘 (수정 머지됨, 9/30 재실행 통과 — 근거 PR #165 머지됨) | 발표 필수 | 10-06 | joniverse-ai | #146 |
 | 8 | 버그 | 긴 대사에서 말풍선 꼬리 미노출 (**해결** — main에서 재현 안 됨, 9/30 QA. 꼬리 길이 조정은 PR #163 머지) | 발표 필수 | 10-06 | smartman3514-commits | PR #163 |
-| 9 | 버그 | 크롭이 말풍선 여백을 깎을 수 있음 | 품질 | 10-08 | smartman3514-commits | #105 |
+| 9 | 버그 | 크롭이 말풍선 여백을 깎을 수 있음 (**완료** — PR #166 머지, #105 닫힘) | 품질 | 10-08 | smartman3514-commits | #105 |
 | 10 | 버그 | 생성 결과 유실 방지 잔여분 (`generateChainedCuts`) (**완료** — PR #177 머지, #104 닫힘) | 품질 | 10-08 | JEON-DAEJIN | #104 |
 | 11 | 버그 | **완료**(PR #192 머지) — 아주 긴 대사 말풍선이 그림 오른쪽 밖으로 잘림 (`top_right`) | 품질 | 10-08 | smartman3514-commits | #169 |
 | 12 | 버그 | **완료**(PR #192 머지) — 아주 긴 대사 center 말풍선이 인물을 덮어 꼬리가 사라짐 | 품질 | 10-08 | smartman3514-commits | #170 |
-| 13 | 버그 | center 말풍선 꼬리를 화자 방향으로 (PR #235 머지로 함수 완료, #199 닫음 — 실제 결과물 반영은 #242, 동결 후) | 품질 | 미정 | smartman3514-commits | #242 |
+| 13 | 버그 | center 말풍선 꼬리를 화자 방향으로 (PR #235 머지로 함수 완료, #199 닫음 — 실제 결과물 반영은 #242: wide 컷 목표점 보정 완료(#273, full 제외) · 화자 필드 확정 공지 10-07 chictimin, 스키마·저장 검사 반영은 #263 머지 후 · 2인 컷 좌우 프롬프트 10-09 joniverse-ai · Export 화자 연결은 필드 반영 다음 날 smartman3514-commits) | 품질 | 10-09 | smartman3514-commits · chictimin · joniverse-ai | #242 |
 | 14 | 기능 | CTA를 세션 단위로 — 마무리 강도 3단계 + 이번 편 목적 (**완료** — 1단 PR #223 · 2단 온보딩 기본 강도 PR #229 머지. "이번 편에 알릴 내용"은 #206에서 이어서 검토) | 품질 | 미정 | chictimin · JEON-DAEJIN | #205 |
 | 15 | 기능 | 소재 [브랜드·제품명] 표기 (서버 PR #231 · 이미지 투영 PR #237 · 태그 저장 검사 PR #244 · 화면 배선 PR #251 · 복원 표식 PR #256 머지, #247 닫힘 — 남은 것: #206 잔여) | 품질 | 미정 | chictimin | #206 |
 | 16 | 기능 | 표지 선택 기록 (**완료** — 서버 PR #210 · 화면 PR #213 머지, #207 · #216 닫힘) | 품질 | 미정 | chictimin · JEON-DAEJIN | #207 |
 | 17 | 기능 | 미매핑 단어 안내 (**완료** — PR #255 · #257 머지: 한 줄 안내 + 확정 시 확인 팝업(다시 보지 않기)) | 품질 | 미정 | JEON-DAEJIN | #238 |
-| 18 | 기능 | 데모 캐시 (발표용 고정 결과물) | 발표 필수 | 미정 | 4인 공동 | #239 |
-| 19 | 기능 | 골든 패스 2분 리허설 (P4, 10-13 사전 · 10-14 최종) | 발표 필수 | 미정 | 4인 공동 | #240 |
+| 18 | 기능 | 데모 캐시 (발표용 고정 결과물 — 캐시 생성 joniverse-ai 10-10 · Export 읽기 smartman3514-commits(#265) · 화면 연결 JEON-DAEJIN 10-12) | 발표 필수 | 10-10 | joniverse-ai · smartman3514-commits · JEON-DAEJIN | #239 |
+| 19 | 기능 | 골든 패스 2분 리허설 (P4, 10-13 사전 · 10-14 최종) | 발표 필수 | 10-13 사전 · 10-14 최종 | smartman3514-commits · joniverse-ai | #240 |
 | 20 | 버그 | 브레인스토밍 선택지 0개 턴에서 "알아서 해줘" 숨김 — 타이핑 강제 (**완료** — PR #251 머지, #247 닫힘) | 발표 필수 | 10-13 | chictimin | #247 |
 | 21 | 기능 | 프로젝트 폰트 에셋화 (스키마 PR #241 · 합성·Export PR #236 · 확인 API PR #245 · 온보딩 입력 PR #250 · 에디터 PR #246 머지 — 남은 것: #209 잔여) | 품질 | 미정 | chictimin · smartman3514-commits · JEON-DAEJIN | #209 |
 | 22 | 기타 | 2차 골든패스 점검 — 기능 누락·확인 필요 항목 묶음 (항목별 진행 여부 판단 중) | 품질 | 미정 | 4인 공동 | #249 |
