@@ -364,7 +364,8 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   // #79: 폴백된 값을 한 번만 정하고 이후(box·shape·tail) 전부 그 값을 써야 한다 —
   // box만 폴백하고 tailSvg()엔 원본을 넘기면 몸통은 center인데 꼬리는 안 그려져야
   // 할 자리에 그려지는 식으로 서로 어긋난다.
-  const position: Position = caption.position in POSITION_BOX ? caption.position : "center";
+  // `in`은 프로토타입까지 보므로 "toString" 같은 값도 통과해 box가 함수가 된다 — 자기 키만 본다(#277 리뷰).
+  const position: Position = Object.hasOwn(POSITION_BOX, caption.position) ? caption.position : "center";
   if (position !== caption.position) {
     console.warn(`[compose] 알 수 없는 caption.position "${caption.position}" — center로 폴백`);
   }

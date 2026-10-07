@@ -46,6 +46,24 @@ async function main() {
     console.error(`FAIL enum 밖 position — 크래시함: ${(err as Error).message}`);
   }
 
+  // 프로토타입 키("toString"·"constructor"·"__proto__")도 enum 밖 값이다 — `in` 검사로는 통과해서
+  // box가 함수/객체가 되고 좌표가 NaN이 됐다(#277 리뷰). 명시적 center와 같은 그림이어야 한다.
+  try {
+    const center = await composeCut(img, [{ text: "프로토타입 키", bubble_type: "rounded", position: "center" }]);
+    for (const key of ["toString", "constructor", "__proto__"]) {
+      const out = await composeCut(img, [{ text: "프로토타입 키", bubble_type: "rounded", position: key as unknown as Position }]);
+      if (Buffer.compare(center, out) === 0) {
+        console.log(`ok   position "${key}" — center로 폴백`);
+      } else {
+        failed++;
+        console.error(`FAIL position "${key}" — center와 다르게 그려짐`);
+      }
+    }
+  } catch (err) {
+    failed++;
+    console.error(`FAIL 프로토타입 키 position — ${(err as Error).message}`);
+  }
+
   // #79: box만 center로 폴백하고 tailSvg()엔 원본을 그대로 넘기면, 몸통은 center
   // 자리인데 꼬리는 (center가 아니라서) 그려지는 불일치가 생긴다. position="center"로
   // 명시한 것과 enum 밖 값으로 center에 떨어진 것의 렌더링 결과가 완전히 같아야
@@ -217,7 +235,7 @@ async function main() {
     console.error(`\n${failed}건 실패`);
     process.exit(1);
   }
-  console.log("\n24건 통과");
+  console.log("\n27건 통과");
 }
 
 main();
