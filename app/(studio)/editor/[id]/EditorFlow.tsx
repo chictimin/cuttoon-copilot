@@ -177,8 +177,8 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
   if (phase === "not_found") {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-3 p-8 text-center">
-        <h1 className="text-xl font-semibold">아직 완성된 스토리보드가 없어요</h1>
-        <p className="text-sm text-zinc-500">세션 화면에서 4컷을 먼저 완성해주세요</p>
+        <h1 className="text-xl font-semibold">아직 완성된 컷툰이 없어요</h1>
+        <p className="text-sm text-zinc-500">컷툰 만들기 화면에서 4컷을 먼저 완성해주세요</p>
         <Link href="/" className="text-sm font-medium text-zinc-600 underline hover:text-zinc-900">
           목록으로
         </Link>
@@ -233,7 +233,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
       // #205: 강도를 함께 넘겨야 none(CTA 컷 0개)이 기존 규칙(CTA 1개)에 막히지 않는다.
       assertStoryboardRuntimeInvariants(draft.cuts, draft.cta_strength);
     } catch {
-      setActionError("스토리보드에 문제가 있어요");
+      setActionError("컷 구성에 문제가 있어요");
       return false;
     }
 
