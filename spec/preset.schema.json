@@ -50,8 +50,8 @@
           "required": ["family", "url", "kind"],
           "additionalProperties": false,
           "properties": {
-            "family": { "type": "string", "minLength": 1, "maxLength": 60 },
-            "url": { "type": "string", "pattern": "^https://", "maxLength": 2048 },
+            "family": { "type": "string", "minLength": 1, "maxLength": 60, "description": "길이는 유니코드 코드포인트 기준(JSON Schema maxLength와 같음)" },
+            "url": { "type": "string", "pattern": "^https://", "maxLength": 2048, "description": "길이는 유니코드 코드포인트 기준(JSON Schema maxLength와 같음)" },
             "kind": { "type": "string", "enum": ["css", "file"] }
           }
         }

@@ -15,11 +15,20 @@ const ALLOWED_TYPES = ["image/jpeg", "image/png"];
 const MAX_FILES = 5;
 
 // DetailsStep.tsx의 industry·forbidden 등과 같은 관례(쉼표 구분 자유 텍스트).
+// K1: trim 뒤 글자 그대로 비교(대소문자 구분)해 중복을 제거한다. 첫 등장 순서 유지.
 function parseTags(text: string): string[] {
-  return text
+  const seen = new Set();
+  const out = [];
+  for (const tag of text
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean);
+    .filter(Boolean)) {
+    if (!seen.has(tag)) {
+      seen.add(tag);
+      out.push(tag);
+    }
+  }
+  return out;
 }
 
 // #238: 영문 사전에 없어 입력하신 그대로 전달되는 그림체 키워드. enum으로 이미 적용된 단어는

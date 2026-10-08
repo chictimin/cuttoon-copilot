@@ -1,4 +1,4 @@
-import { assertValidPreset, type Preset } from "@/lib/llm/preset-guard";
+import { assertValidPreset, dedupePresetArrays, type Preset } from "@/lib/llm/preset-guard";
 import {
   archiveProject,
   getPreset,
@@ -25,10 +25,20 @@ export async function POST(request: Request) {
     );
   }
 
+  // R1-a (K2): 저장 직전에 중복만 지우고 저장한다(400 거부 아님).
+  // 공개: 프리셋 저장 시 배열의 중복 값은 첫 등장만 남기고 지운다 —
+  // 저장 값이 보낸 값과 다를 수 있다(중복만). 응답 형태는 그대로(제거 정보 필드 없음).
+  const deduped = dedupePresetArrays(body as Preset);
+  if (deduped.removed.length > 0) {
+    console.warn(
+      `[preset] 중복 제거 ${deduped.removed.map((r) => `${r.path}:${r.count}`).join(", ")}`
+    );
+  }
+
   // CTA 강도 기본값 (issue #205): 생성 시에만 기록한다. 화면이 값을 보내지
   // 않으면 "soft"를 기록하고, 읽을 때 필드가 없으면 "clear"로 해석한다
   // (기존 프로젝트 회귀 없음). PATCH·기존 데이터는 건드리지 않는다.
-  const preset = body as Preset;
+  const preset = deduped.preset as Preset;
   if (preset.rules.cta_strength === undefined) {
     preset.rules.cta_strength = "soft";
   }
@@ -36,7 +46,7 @@ export async function POST(request: Request) {
   // DB 실패는 요청 내용의 문제가 아니므로 400과 구분한다. 원문 메시지는
   // 내부 정보(테이블명·제약조건)를 담으므로 응답에 넣지 않고 로그로만 남긴다.
   try {
-    const saved = await savePreset(body);
+    const saved = await savePreset(preset);
     return Response.json({ presetId: saved.presetId, projectId: saved.projectId });
   } catch (e) {
     console.error("[POST /api/preset] 저장 실패:", e);
@@ -144,8 +154,17 @@ export async function PATCH(request: Request) {
       );
     }
 
+    // R1-a (K2): PATCH 병합 결과가 중복을 만들면 저장 직전에 지운다(공개 문구는 POST와 같음).
+    const dedupedMerged = dedupePresetArrays(merged);
+    if (dedupedMerged.removed.length > 0) {
+      console.warn(
+        `[preset] 중복 제거 ${dedupedMerged.removed.map((r) => `${r.path}:${r.count}`).join(", ")}`
+      );
+    }
+    const deduped = dedupedMerged.preset as Preset & { mascot?: unknown };
+
     try {
-      await updatePresetData(id, merged);
+      await updatePresetData(id, deduped);
     } catch (e) {
       const message = e instanceof Error ? e.message : "프리셋 갱신 실패";
       console.error("[PATCH /api/preset] mascot 갱신 실패:", e);
@@ -155,7 +174,7 @@ export async function PATCH(request: Request) {
       );
     }
     result.presetId = id;
-    result.mascot = merged.mascot ?? null;
+    result.mascot = deduped.mascot ?? null;
   }
 
   return Response.json(result);

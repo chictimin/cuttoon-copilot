@@ -222,11 +222,11 @@ Must be one of:
 | **Required**              | No          |
 | **Additional properties** | Not allowed |
 
-| Property                         | Pattern | Type             | Deprecated | Definition | Title/Description |
-| -------------------------------- | ------- | ---------------- | ---------- | ---------- | ----------------- |
-| + [family](#assets_font_family ) | No      | string           | No         | -          | -                 |
-| + [url](#assets_font_url )       | No      | string           | No         | -          | -                 |
-| + [kind](#assets_font_kind )     | No      | enum (of string) | No         | -          | -                 |
+| Property                         | Pattern | Type             | Deprecated | Definition | Title/Description                            |
+| -------------------------------- | ------- | ---------------- | ---------- | ---------- | -------------------------------------------- |
+| + [family](#assets_font_family ) | No      | string           | No         | -          | 길이는 유니코드 코드포인트 기준(JSON Schema maxLength와 같음) |
+| + [url](#assets_font_url )       | No      | string           | No         | -          | 길이는 유니코드 코드포인트 기준(JSON Schema maxLength와 같음) |
+| + [kind](#assets_font_kind )     | No      | enum (of string) | No         | -          | -                                            |
 
 #### <a name="assets_font_family"></a>3.5.1. Property `Preset > assets > font > family`
 
@@ -234,6 +234,8 @@ Must be one of:
 | ------------ | -------- |
 | **Type**     | `string` |
 | **Required** | Yes      |
+
+**Description:** 길이는 유니코드 코드포인트 기준(JSON Schema maxLength와 같음)
 
 | Restrictions   |    |
 | -------------- | -- |
@@ -246,6 +248,8 @@ Must be one of:
 | ------------ | -------- |
 | **Type**     | `string` |
 | **Required** | Yes      |
+
+**Description:** 길이는 유니코드 코드포인트 기준(JSON Schema maxLength와 같음)
 
 | Restrictions                      |                                                                       |
 | --------------------------------- | --------------------------------------------------------------------- |
@@ -789,4 +793,4 @@ Must be one of:
 | **Min length** | 1 |
 
 ----------------------------------------------------------------------------------------------------------------------------
-Generated using [json-schema-for-humans](https://github.com/coveooss/json-schema-for-humans) on 2026-10-06 at 11:19:20 +0900
+Generated using [json-schema-for-humans](https://github.com/coveooss/json-schema-for-humans) on 2026-10-08 at 10:24:11 +0900

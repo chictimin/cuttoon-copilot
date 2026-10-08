@@ -82,10 +82,19 @@ export interface DetailsFormValue {
 }
 
 function parseTags(text: string): string[] {
-  return text
+  // K1: trim 뒤 글자 그대로 비교(대소문자 구분)해 중복을 제거한다. 첫 등장 순서 유지.
+  const seen = new Set();
+  const out = [];
+  for (const tag of text
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean);
+    .filter(Boolean)) {
+    if (!seen.has(tag)) {
+      seen.add(tag);
+      out.push(tag);
+    }
+  }
+  return out;
 }
 
 function CheckboxGroup<T extends string>({
