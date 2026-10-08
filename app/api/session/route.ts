@@ -157,15 +157,40 @@ export async function handleSessionPost(
       sessionId: saved.sessionId,
       version: saved.version,
     };
+    // D4: 탈락 요약 1줄(저장 성공 후, 세션 id 앞 8자 포함). 값·원문·후보 목록은
+    // 출력하지 않는다(경로·건수만). 기존 라운드별 로그(validateSelectionRounds
+    // 안의 20개 초과·무효·중복)는 문구·순번 그대로 유지.
+    if (hasSelections) {
+      const sessionShort = String(saved.sessionId).slice(0, 8);
+      if (!Array.isArray(body.selections)) {
+        console.warn(`[POST /api/session] 선택 기록 형식 아님(배열 아님) (세션 ${sessionShort})`);
+      } else {
+        const dropped = body.selections.length - (selections?.length ?? 0);
+        if (dropped >= 1) {
+          console.warn(
+            `[POST /api/session] 선택 기록 검증 탈락 ${dropped}/${body.selections.length} (세션 ${sessionShort})`
+          );
+        }
+      }
+    }
     if (selections !== null) {
       // createSession 성공 뒤에 저장한다. 끝내 실패해도 세션 저장은 200으로
-      // 응답한다 — 사용자 작업 보존 우선. valid가 비었으면 저장할 게 없으므로 성공이다.
-      try {
-        await deps.insertSelections(saved.sessionId, selections);
-        payload.selectionsSaved = true;
-      } catch (e) {
-        console.error("[POST /api/session] 선택 기록 저장 실패:", e);
+      // 응답한다 — 사용자 작업 보존 우선. D3: selections 키가 있는데 저장할
+      // 유효 라운드가 0개(빈 배열·전 라운드 탈락·비배열)이면 insertSelections를
+      // 부르지 않고 selectionsSaved = false.
+      // 공개: false는 저장 실패와 유효 라운드 0개를 합칠 뿐 구분하지 않는다.
+      // 둘을 구분하려면 사유 코드(D5)가 필요하나 이번 범위 아님. selectionsSaved는
+      // 응답 전용 값이라 저장되지 않으므로 과거 세션 소급 판정 수단이 아님.
+      if (selections.length === 0) {
         payload.selectionsSaved = false;
+      } else {
+        try {
+          await deps.insertSelections(saved.sessionId, selections);
+          payload.selectionsSaved = true;
+        } catch (e) {
+          console.error("[POST /api/session] 선택 기록 저장 실패:", e);
+          payload.selectionsSaved = false;
+        }
       }
     }
     return Response.json(payload);
