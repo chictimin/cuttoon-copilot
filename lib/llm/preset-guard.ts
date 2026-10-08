@@ -5,8 +5,9 @@
 // 참고. 이 파일의 타입도 그 스크립트 점검 대상에 넣는 걸 고려할 것.)
 //
 // 검증 범위: 최상위 6개 키의 additionalProperties만 재현한다. assets/style/rules/context
-// 서브객체 4곳에도 스키마엔 additionalProperties:false가 걸려 있지만 여기선 안 잡는다(예:
-// style.line_width처럼 오타난 필드가 이 가드는 통과함). uniqueItems(스키마 9곳)도 미검증.
+// 서브객체 4곳의 추가 키는 R1-b `assertNoPresetExtraKeys`(POST 저장 전용)가 맡는다 —
+// `assertValidPreset`은 읽기 경로 보호를 위해 그대로 둔다(캡틴 ①, spec-263-r1 8-2).
+// uniqueItems(스키마 9곳)는 R1-a `dedupePresetArrays`(저장 전용 보정)가 맡는다.
 // 가드의 목적이 LLM 출력의 큰 형태 오류를 잡는 것이라 오타 필드까지는 지금 급하지 않다고 판단.
 //
 // 검사하는 규칙 / 하지 않는 규칙 (spec-263 P3 문구):
@@ -470,6 +471,55 @@ function getSchemaPropsAt(pathParts: string[]): string[] {
   return Object.keys(node.properties);
 }
 
+/**
+ * R1-b (8-2): assets·style·rules·context 4곳의 스키마 밖 키를 `{ obj, key }`
+ * 1건씩 모아 돌려준다. `presetContractProbe` B15 블록과
+ * `assertNoPresetExtraKeys`가 공유한다(허용 키 계산 복제 금지).
+ * B15 출력 보존: obj 순서(assets→style→rules→context)·각 obj 안 Object.keys
+ * 순서를 그대로 돌려준다 — 거부 메시지용 정렬은 `assertNoPresetExtraKeys`
+ * 쪽에서만 한다. 외부 export 금지(QA 고정).
+ */
+function presetExtraKeyProblems(data: unknown): { obj: string; key: string }[] {
+  const out: { obj: string; key: string }[] = [];
+  if (!isRecord(data)) return out;
+  for (const obj of ["assets", "style", "rules", "context"]) {
+    const node: unknown = (data as Record<string, unknown>)[obj];
+    if (!isRecord(node)) continue;
+    const allowed = getSchemaPropsAt(["properties", obj]);
+    if (allowed.length === 0) continue;
+    for (const key of Object.keys(node)) {
+      if (!allowed.includes(key)) out.push({ obj, key });
+    }
+  }
+  return out;
+}
+
+/**
+ * R1-b (8-2): 프리셋 저장 전용 추가 키 검사 — POST에서만 호출한다(PATCH는
+ * 13절 S1으로 이월, 캡틴 ①). R1-a `dedupePresetArrays`(보정)와 한 함수에
+ * 넣지 않는다 — 추가 키는 거부다. 4곳에 스키마 밖 키가 있으면 throw(키는
+ * 1건씩 모아 메시지 1개 — `<obj>에 허용되지 않은 필드: <키>` 이어 붙임).
+ * `assertValidPreset`에는 넣지 않는다(읽기 경로 보호 — K2와 같은 이유).
+ */
+export function assertNoPresetExtraKeys(data: unknown): void {
+  const found = presetExtraKeyProblems(data);
+  if (found.length === 0) return;
+  const byObj = new Map<string, string[]>();
+  for (const { obj, key } of found) {
+    const list = byObj.get(obj) ?? [];
+    list.push(key);
+    byObj.set(obj, list);
+  }
+  const parts: string[] = [];
+  for (const obj of ["assets", "style", "rules", "context"]) {
+    const keys = byObj.get(obj);
+    if (!keys) continue;
+    keys.sort();
+    for (const key of keys) parts.push(`${obj}에 허용되지 않은 필드: ${key}`);
+  }
+  fail(parts.join("; "));
+}
+
 function readCharacterPoolPattern(): RegExp {
   let node: unknown = presetSchema;
   for (const part of ["properties", "assets", "properties", "character_pool", "items", "pattern"]) {
@@ -528,16 +578,8 @@ export function presetContractProbe(data: unknown): PresetProbeProblem[] {
     }
   }
 
-  for (const obj of ["assets", "style", "rules", "context"]) {
-    const node = at([obj]);
-    if (!isRecord(node)) continue;
-    const allowed = getSchemaPropsAt(["properties", obj]);
-    if (allowed.length === 0) continue;
-    for (const key of Object.keys(node)) {
-      if (!allowed.includes(key)) {
-        out.push({ rule: "B15", locator: `${obj}.${key}`, kind: "extra-key", cause: key });
-      }
-    }
+  for (const { obj, key } of presetExtraKeyProblems(data)) {
+    out.push({ rule: "B15", locator: `${obj}.${key}`, kind: "extra-key", cause: key });
   }
 
   const pool = at(["assets", "character_pool"]);

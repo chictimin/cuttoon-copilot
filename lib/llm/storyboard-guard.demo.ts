@@ -343,6 +343,41 @@ for (const supporting of [false, true]) {
   (cutsOf(ancExtra)[0].caption as Cut).anchor = { x: 0.5, y: 0.5, z: 1 };
   expectProblems("ANC 추가 키", ancExtra, "ANC");
 
+  // spec-263-r1 R1-b XK — 추가 키 6곳 키별 1건 + anchor는 ANC 1건·XK 0건
+  const xkTop = demoBoard(FLOW_BEATS[0], "clear", false);
+  (xkTop as Board).zzz = 1;
+  expectProblems("XK 최상위", xkTop, "XK");
+  const xkCut = demoBoard(FLOW_BEATS[0], "clear", false);
+  (cutsOf(xkCut)[0] as Cut).zzz = 1;
+  expectProblems("XK cut", xkCut, "XK");
+  const xkCast = demoBoard(FLOW_BEATS[0], "clear", false);
+  ((xkCast as Board).cast as Cut[])[0].zzz = 1;
+  expectProblems("XK cast", xkCast, "XK");
+  const xkFrame = demoBoard(FLOW_BEATS[0], "clear", false);
+  ((cutsOf(xkFrame)[0].characters_in_frame as Cut[])[0] as Cut).zzz = 1;
+  expectProblems("XK frame", xkFrame, "XK");
+  const xkCap = demoBoard(FLOW_BEATS[0], "clear", false);
+  (cutsOf(xkCap)[0].caption as Cut).zzz = 1;
+  expectProblems("XK caption", xkCap, "XK");
+  const xkTag = demoBoard(FLOW_BEATS[0], "clear", false);
+  (xkTag as Board).subject_tags = [{ raw: "a", category: "b", zzz: 1 }];
+  expectProblems("XK subject_tags", xkTag, "XK");
+  const xkCap2 = demoBoard(FLOW_BEATS[0], "clear", false);
+  Object.assign(cutsOf(xkCap2)[0].caption as Cut, { zeta: 1, alpha: 2 });
+  {
+    const found = storyboardContractProblems(xkCap2)
+      .filter((p) => p.rule === "XK")
+      .map((p) => p.locator);
+    if (JSON.stringify(found) === JSON.stringify(["cut#1.caption.alpha", "cut#1.caption.zeta"])) {
+      console.log("ok   XK caption 2키 순서");
+    } else {
+      failed++;
+      console.error(`FAIL XK caption 2키 순서 — ${JSON.stringify(found)}`);
+    }
+  }
+  expectProblems("XK anchor는 ANC만", ancExtra, "ANC");
+  expectNoRule("XK anchor 제외", ancExtra, {}, "XK");
+
   // frame locator 회귀(spec-263 rev5 3-1 "frame" 줄) — 인물에 묶인 식별자
   const f1 = demoBoard(FLOW_BEATS[0], "clear", false);
   ((cutsOf(f1)[0].characters_in_frame as Cut[])[0] as Cut).expression = "smil";

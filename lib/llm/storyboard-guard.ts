@@ -16,6 +16,12 @@
 // - A9 characters_in_frame[].character_id ↔ cast[].character_id 일치
 // - A10 cta_strength enum(없으면 clear 취급)
 // - A11 subject_tags(subjectTagsProblem 그대로)
+// - XK 추가 키 6곳(spec-263-r1 R1-b 8-1): 최상위·subject_tags 원소·castMember·
+//   cut·characters_in_frame 원소·caption. caption.anchor는 ANC가 이미 검사하므로
+//   XK 대상 제외. 허용 키는 스키마 properties에서 읽는다(목록 복제 금지).
+//   위반 단위 = 추가 키 1개당 problem 1개(kind format, cause 키 이름,
+//   locator <대상 locator>.<키 이름>). 전체 출력은 결정적 순서(대상 순회 →
+//   키 이름 정렬). subject_tags 원소는 subject_tags[<순번>](안정 표시).
 // - A12 castMember 필수(character_id·role)·role enum·description 타입
 // - A14 time_of_day·reserved_zone(있을 때만 enum)
 // - CTA 비트 개수·위치(cta_strength none이면 0개·override 전부 null, 그 외면
@@ -24,7 +30,7 @@
 // - enum 값 목록은 스토리보드 스키마에서 읽는다(값 목록 복제 없음 —
 //   preset-guard.ts의 VALID 패턴 이식)
 // 하지 않는 규칙:
-// - 추가 키 거부(A12·B15 — R 범위, 모르는 키는 읽는 쪽이 무시)
+// - caption.anchor 추가 키의 XK 중복 집계(ANC 1건만 — R1-b 8-1)
 // - 중복 금지(B4·B5·B10·B16 — R 범위, preset 쪽)
 // - preset PATCH 보호 비교·B6 character_pool(읽는 코드 없음 — R 범위)
 // - cta_override 키 자체의 유무(cta 컷 키 없음은 기존 동작대로 null 취급 — R에서 다룸)
@@ -179,6 +185,20 @@ for (const [key, values] of Object.entries(VALID)) {
   if (values.length === 0) {
     throw new Error(`storyboard.schema.json에서 ${key} enum을 못 읽음 — 스키마 경로 확인 필요`);
   }
+}
+
+// 스키마 properties 키 목록 읽기(XK 허용 키용 — 값 목록 복제 금지와 같은 취지).
+// 경로를 못 찾으면 []를 반환하고, 호출 쪽(B15와 같은 관례)은 그 대상을 건너뛴다.
+function getSchemaPropsAt(pathParts: string[]): string[] {
+  let node: unknown = storyboardSchema;
+  for (const part of pathParts) {
+    if (!isRecord(node)) return [];
+    node = (node as Record<string, unknown>)[part];
+  }
+  if (!isRecord(node)) return [];
+  const props = (node as Record<string, unknown>).properties;
+  if (!isRecord(props)) return [];
+  return Object.keys(props);
 }
 
 const ASSET_PATTERN = /^asset:\/\/.+/;
@@ -381,6 +401,85 @@ function checkOptionalEnumField(
 function subjectTagsKind(message: string): ContractProblemKind {
   if (message.includes("최대")) return "cardinality";
   return "type";
+}
+
+// XK 추가 키 수집(spec-263-r1 R1-b 8-1). 6곳(최상위·subject_tags 원소·
+// castMember·cut·characters_in_frame 원소·caption) — caption.anchor는 ANC가
+// 이미 검사하므로 XK에서 제외한다(anchor 키 자체는 caption 허용 키).
+// 추가 키 1개당 problem 1개(kind format, cause 키 이름). 대상 순회 순서 →
+// 키 이름 정렬로 결정적 순서를 만든다. subject_tags 원소 locator는 순번
+// `subject_tags[<i>]`(안정 표시 — 앞 원소 삭제 시 순번이 밀려 기존 추가 키도
+// 새 위반이 되는 엄격 동작을 기대값으로 고정, validate.ts 변경 없음).
+function collectExtraKeyProblems(
+  rec: Record<string, unknown>,
+  problems: ContractProblem[]
+): void {
+  const extraOf = (node: Record<string, unknown>, allowed: string[]): string[] => {
+    if (allowed.length === 0) return [];
+    return Object.keys(node)
+      .filter((k) => !allowed.includes(k))
+      .sort();
+  };
+  const push = (locator: string, key: string): void => {
+    problems.push({ rule: "XK", locator, kind: "format", cause: key });
+  };
+
+  const topAllowed = getSchemaPropsAt([]);
+  for (const key of extraOf(rec, topAllowed)) {
+    push(`storyboard.${key}`, key);
+  }
+
+  const castAllowed = getSchemaPropsAt(["$defs", "castMember"]);
+  const cast = rec.cast;
+  if (Array.isArray(cast)) {
+    cast.forEach((m, i) => {
+      if (!isRecord(m)) return;
+      for (const key of extraOf(m as Record<string, unknown>, castAllowed)) {
+        push(`${castLocator(cast, i)}.${key}`, key);
+      }
+    });
+  }
+
+  const cutAllowed = getSchemaPropsAt(["$defs", "cut"]);
+  const frameAllowed = getSchemaPropsAt(["$defs", "cut", "properties", "characters_in_frame", "items"]);
+  const captionAllowed = getSchemaPropsAt(["$defs", "cut", "properties", "caption"]);
+  const cuts = rec.cuts;
+  if (Array.isArray(cuts)) {
+    cuts.forEach((c, i) => {
+      if (!isRecord(c)) return;
+      const r = c as Record<string, unknown>;
+      const loc = cutLocator(cuts, i);
+      for (const key of extraOf(r, cutAllowed)) {
+        push(`${loc}.${key}`, key);
+      }
+      const fr = r.characters_in_frame;
+      if (Array.isArray(fr)) {
+        fr.forEach((e, j) => {
+          if (!isRecord(e)) return;
+          for (const key of extraOf(e as Record<string, unknown>, frameAllowed)) {
+            push(`${frameLocator(fr, j, loc)}.${key}`, key);
+          }
+        });
+      }
+      const cap = r.caption;
+      if (isRecord(cap)) {
+        for (const key of extraOf(cap as Record<string, unknown>, captionAllowed)) {
+          push(`${loc}.caption.${key}`, key);
+        }
+      }
+    });
+  }
+
+  const tagAllowed = getSchemaPropsAt(["properties", "subject_tags", "items"]);
+  const tags = rec.subject_tags;
+  if (Array.isArray(tags)) {
+    tags.forEach((t, i) => {
+      if (!isRecord(t)) return;
+      for (const key of extraOf(t as Record<string, unknown>, tagAllowed)) {
+        push(`subject_tags[${i}].${key}`, key);
+      }
+    });
+  }
 }
 
 function collectProblems(sb: unknown, demoCacheValues?: ReadonlySet<string>): ContractProblem[] {
@@ -755,6 +854,9 @@ function collectProblems(sb: unknown, demoCacheValues?: ReadonlySet<string>): Co
       });
     }
   }
+
+  // XK 추가 키 6곳 — 저장 경로만 영향(배선 코드 변경 0). 읽기 경로·GET·Export 변경 없음.
+  collectExtraKeyProblems(rec, problems);
 
   return problems;
 }

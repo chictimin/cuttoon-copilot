@@ -1,4 +1,4 @@
-import { assertValidPreset, dedupePresetArrays, type Preset } from "@/lib/llm/preset-guard";
+import { assertNoPresetExtraKeys, assertValidPreset, dedupePresetArrays, type Preset } from "@/lib/llm/preset-guard";
 import {
   archiveProject,
   getPreset,
@@ -18,6 +18,18 @@ export async function POST(request: Request) {
 
   try {
     assertValidPreset(body);
+  } catch (e) {
+    return Response.json(
+      { error: e instanceof Error ? e.message : "프리셋 검증 실패" },
+      { status: 400 }
+    );
+  }
+
+  // R1-b (8-2, 캡틴 ①): POST만 추가 키 거부 — assert 뒤·dedupe 앞. 거부가
+  // 보정보다 먼저라 거부 입력에 중복 제거 로그가 남지 않는다. PATCH는 이번에
+  // 거부하지 않는다(13절 S1 이월 — 이전 저장본의 mascot 변경이 영구 400이 됨).
+  try {
+    assertNoPresetExtraKeys(body);
   } catch (e) {
     return Response.json(
       { error: e instanceof Error ? e.message : "프리셋 검증 실패" },
