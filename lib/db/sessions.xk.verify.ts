@@ -64,10 +64,6 @@ function cloneBoard(b: Board): Board {
   return JSON.parse(JSON.stringify(b)) as Board;
 }
 
-function clonePreset<T>(p: T): T {
-  return JSON.parse(JSON.stringify(p)) as T;
-}
-
 // --- EditorFlow spread 의미 미러 ---
 // updateAnchor(:235): caption을 spread한 뒤 anchor set/delete — 기존 caption의
 // 키를 그대로 이어받는다(깨끗한 caption엔 추가 키를 만들지 않으나 과거 caption의
@@ -713,7 +709,10 @@ async function main(): Promise<void> {
     const db = new FakeDb();
     db.seedProject("p1", "프로젝트");
     const stored = makePreset();
+    ((stored as Board).assets as Cut).legacy_ref = "옛값";
     ((stored as Board).style as Cut).legacy_hint = "옛값";
+    ((stored as Board).rules as Cut).legacy_rule = "옛값";
+    ((stored as Board).context as Cut).legacy_ctx = "옛값";
     db.seedPreset("pr1", "p1", "프로젝트", stored);
     const r = await patchPreset(db, { id: "pr1", mascot: { label: "M", description: "D" } });
     check("XKPOST-patch-extra-200", r.status === 200, r);
