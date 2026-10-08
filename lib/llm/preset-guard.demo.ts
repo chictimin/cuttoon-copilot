@@ -1,6 +1,6 @@
 // checkUnmappedWordsPolicy(#15)의 매핑/근접치환/미매핑 세 경로를 확인하는 스크립트.
 // 실행: npx tsx lib/llm/preset-guard.demo.ts
-import { assertValidPreset, checkUnmappedWordsPolicy } from "./preset-guard";
+import { assertNoPresetExtraKeys, assertValidPreset, checkUnmappedWordsPolicy } from "./preset-guard";
 
 const result = checkUnmappedWordsPolicy({
   style: { keywords: ["귀여운", "몽환적인우주감성"] },
@@ -100,3 +100,37 @@ if (fontFailed > 0) {
   process.exit(1);
 }
 console.log(`\nfont ${fontCases.length}건 통과`);
+
+// spec-263-r1 R1-b (8-2): POST 저장 전용 추가 키 검사. 허용 키만 → 무throw,
+// 4곳 추가 키 → throw(메시지는 `<obj>에 허용되지 않은 필드: <키>` 이어 붙임).
+const extraCases: [string, unknown, string | null][] = [
+  ["허용 키만 → 통과", { ...basePreset }, null],
+  ["assets 추가 키 → 거부", { ...basePreset, assets: { ...basePreset.assets, extra: 1 } }, "assets에 허용되지 않은 필드: extra"],
+  ["style 추가 키 → 거부", { ...basePreset, style: { ...basePreset.style, extra: 1 } }, "style에 허용되지 않은 필드: extra"],
+  ["rules 추가 키 → 거부", { ...basePreset, rules: { ...basePreset.rules, extra: 1 } }, "rules에 허용되지 않은 필드: extra"],
+  ["context 추가 키 → 거부", { ...basePreset, context: { ...basePreset.context, extra: 1 } }, "context에 허용되지 않은 필드: extra"],
+];
+
+let extraFailed = 0;
+for (const [name, preset, expectMessage] of extraCases) {
+  let message: string | null = null;
+  try {
+    assertNoPresetExtraKeys(structuredClone(preset));
+  } catch (e) {
+    message = e instanceof Error ? e.message : String(e);
+  }
+  const pass =
+    expectMessage === null ? message === null : message !== null && message.includes(expectMessage);
+  if (pass) {
+    console.log(`ok   ${name}`);
+  } else {
+    extraFailed++;
+    console.error(`FAIL ${name} (받은 메시지: ${message})`);
+  }
+}
+
+if (extraFailed > 0) {
+  console.error(`\nextra ${extraFailed}건 실패`);
+  process.exit(1);
+}
+console.log(`\nextra ${extraCases.length}건 통과`);
