@@ -7,29 +7,13 @@ import { resolvePresetStyle } from "@/lib/llm/style-resolve";
 import { analyzeStyle, type StyleAnalysisResult } from "./style-analysis";
 import DetailsStep, { type DetailsFormValue } from "./DetailsStep";
 import MascotStep, { type MascotValue } from "./MascotStep";
+import { parseTags } from "./parse-tags";
 import { bubbleStyleLabel, characterRatioLabel, lineWeightLabel } from "../ui-labels";
 
 type Step = "upload" | "analyzing" | "result" | "details" | "mascot" | "confirmed";
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png"];
 const MAX_FILES = 5;
-
-// DetailsStep.tsx의 industry·forbidden 등과 같은 관례(쉼표 구분 자유 텍스트).
-// K1: trim 뒤 글자 그대로 비교(대소문자 구분)해 중복을 제거한다. 첫 등장 순서 유지.
-function parseTags(text: string): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const tag of text
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)) {
-    if (!seen.has(tag)) {
-      seen.add(tag);
-      out.push(tag);
-    }
-  }
-  return out;
-}
 
 // #238: 영문 사전에 없어 입력하신 그대로 전달되는 그림체 키워드. enum으로 이미 적용된 단어는
 // resolvePresetStyle이 enum_applied로 따로 표시하므로(#255) unmapped만 모은다. 같은 단어는 한 번만.
