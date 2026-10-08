@@ -14,6 +14,8 @@ import { beatLabel } from "../../ui-labels";
 import { useProjectFont } from "./useProjectFont";
 import type { CaptionPosition, Storyboard } from "../../session/[id]/storyboard-types";
 
+type Anchor = { x: number; y: number };
+
 // spec-a3 3-2(e): 에디터도 로드 시 저장본을 정규화한다. 화면 타입은 A① 소유라
 // 손대지 않고 이 화면에서만 쓰는 별칭으로 subject_tags를 단다.
 type Board = Storyboard & { subject_tags?: StoredSubjectTag[] };
@@ -46,18 +48,27 @@ const POSITION_STYLE: Record<CaptionPosition, React.CSSProperties> = {
   center: { top: topAt("center"), left: "50%", transform: "translateX(-50%)" },
 };
 
-// 말풍선 드래그는 연속 좌표(offset)가 아니라 storyboard.schema.json의 caption.position
-// enum 5개로 스냅한다 — 스키마에 없는 offset 필드를 화면에서 임의로 만들지 않기 위함
-// (PRD.md 6절의 "위치만 허용" 원칙은 유지하되, 데이터 계약은 A①의 확정 없이 건드리지 않는다).
-function snapPosition(relX: number, relY: number): CaptionPosition {
-  const inCenterBand = relX > 0.35 && relX < 0.65 && relY > 0.35 && relY < 0.65;
-  if (inCenterBand) return "center";
-  const isTop = relY < 0.5;
-  const isLeft = relX < 0.5;
-  if (isTop && isLeft) return "top_left";
-  if (isTop && !isLeft) return "top_right";
-  if (!isTop && isLeft) return "bottom_left";
-  return "bottom_right";
+// #242: 말풍선 드래그는 caption.anchor(말풍선 몸통 중심, 원본 이미지 기준 0~1·좌상단 원점)로 저장한다.
+// 좌표가 있으면 칸 이름(position)은 좌표가 없을 때의 기본값일 뿐이라 드래그로 바꾸지 않는다.
+// 미리보기는 정사각형(aspect-square)이라 화면 좌표와 원본 비율 좌표가 1:1이다(역변환 없음).
+const DRAG_START_PX = 3; // 이보다 덜 움직이면 클릭으로 보고 좌표를 만들지 않는다.
+// 좌표가 있을 때 몸통 폭은 구석 칸과 같은 0.44다(#242 결정). 그래서 가로 중심이 0.22~0.78 밖이면
+// 몸통이 그림 밖으로 걸친다. 세로는 대사 줄 수로 정해져 한 줄 기준의 대략값만 쓴다(rounded 타원
+// 반높이 ≈ 64px/1024 = 0.0625에 여유를 둔 값, 줄이 늘면 더 커진다). 사용자가 놓은 좌표는 보정하지 않고
+// 알리기만 한다.
+const ANCHOR_HALF_W = POSITION_BOX.top_left.w / 2;
+const ANCHOR_EDGE_Y = 0.07;
+
+function clamp01(n: number): number {
+  return Math.min(1, Math.max(0, n));
+}
+
+function round4(n: number): number {
+  return Math.round(n * 1e4) / 1e4;
+}
+
+function anchorMayBeCut(a: Anchor): boolean {
+  return a.x < ANCHOR_HALF_W || a.x > 1 - ANCHOR_HALF_W || a.y < ANCHOR_EDGE_Y || a.y > 1 - ANCHOR_EDGE_Y;
 }
 
 function clone(storyboard: Storyboard): Storyboard {
@@ -123,6 +134,8 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
   const [saveRecovery, setSaveRecovery] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const saveLockRef = useRef(false);
+  // #242: 진행 중인 말풍선 드래그. offset은 잡은 지점과 말풍선 중심의 차이(px)라 놓을 때 튀지 않는다.
+  const dragRef = useRef<{ index: number; startX: number; startY: number; offsetX: number; offsetY: number; moved: boolean } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -218,14 +231,19 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
   const isDirty = JSON.stringify(pendingBoard) !== JSON.stringify(saved.storyboard);
   const canRevert = saved.version > 1;
 
-  function updatePosition(index: number, position: CaptionPosition) {
+  // anchor가 null이면 좌표를 지워 칸 이름(position)의 기본 자리로 돌아간다.
+  function updateAnchor(index: number, anchor: Anchor | null) {
     setDraft((prev) => {
       if (!prev) return prev;
       return {
         ...prev,
-        cuts: prev.cuts.map((cut, i) =>
-          i === index ? { ...cut, caption: { ...cut.caption, position } } : cut
-        ),
+        cuts: prev.cuts.map((cut, i) => {
+          if (i !== index) return cut;
+          const caption = { ...cut.caption };
+          if (anchor) caption.anchor = anchor;
+          else delete caption.anchor;
+          return { ...cut, caption };
+        }),
       };
     });
   }
@@ -468,17 +486,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
       <div className="grid w-full max-w-4xl grid-cols-1 gap-4 sm:grid-cols-2">
         {draft.cuts.map((cut, i) => (
           <div key={cut.cut_index} className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
-            <div
-              className="relative aspect-square w-full overflow-hidden rounded-md bg-zinc-100"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const rect = e.currentTarget.getBoundingClientRect();
-                const relX = (e.clientX - rect.left) / rect.width;
-                const relY = (e.clientY - rect.top) / rect.height;
-                updatePosition(i, snapPosition(relX, relY));
-              }}
-            >
+            <div className="relative aspect-square w-full overflow-hidden rounded-md bg-zinc-100">
               {imageUrls[cut.cut_index] ? (
                 // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
                 <img
@@ -493,15 +501,71 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
                 {cut.cut_index}컷 · {beatLabel(cut.narrative_beat)}
               </span>
               <div
-                draggable
-                onDragStart={(e) => e.dataTransfer.setData("text/plain", String(i))}
-                className="absolute max-w-[70%] cursor-move truncate rounded-full bg-white px-3 py-1 text-xs font-medium shadow"
-                style={{ ...POSITION_STYLE[cut.caption.position], fontFamily: captionFontFamily }}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  const r = e.currentTarget.getBoundingClientRect();
+                  dragRef.current = {
+                    index: i,
+                    startX: e.clientX,
+                    startY: e.clientY,
+                    offsetX: e.clientX - (r.left + r.width / 2),
+                    offsetY: e.clientY - (r.top + r.height / 2),
+                    moved: false,
+                  };
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                }}
+                onPointerMove={(e) => {
+                  const d = dragRef.current;
+                  if (!d || d.index !== i) return;
+                  if (!d.moved && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_START_PX) return;
+                  d.moved = true;
+                  const box = e.currentTarget.parentElement?.getBoundingClientRect();
+                  if (!box || box.width === 0 || box.height === 0) return;
+                  updateAnchor(i, {
+                    x: round4(clamp01((e.clientX - d.offsetX - box.left) / box.width)),
+                    y: round4(clamp01((e.clientY - d.offsetY - box.top) / box.height)),
+                  });
+                }}
+                onPointerUp={() => {
+                  dragRef.current = null;
+                }}
+                onPointerCancel={() => {
+                  dragRef.current = null;
+                }}
+                className="absolute max-w-[70%] cursor-move touch-none select-none truncate rounded-full bg-white px-3 py-1 text-xs font-medium shadow"
+                style={{
+                  ...(cut.caption.anchor
+                    ? {
+                        left: `${cut.caption.anchor.x * 100}%`,
+                        top: `${cut.caption.anchor.y * 100}%`,
+                        transform: "translate(-50%, -50%)",
+                        maxWidth: `${POSITION_BOX.top_left.w * 100}%`,
+                      }
+                    : POSITION_STYLE[cut.caption.position]),
+                  fontFamily: captionFontFamily,
+                }}
                 title="끌어서 말풍선 위치를 옮길 수 있어요"
               >
                 {cut.caption.text}
               </div>
             </div>
+
+            {cut.caption.anchor && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => updateAnchor(i, null)}
+                  className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-50"
+                >
+                  기본 자리로
+                </button>
+                {anchorMayBeCut(cut.caption.anchor) && (
+                  <span className="text-xs text-amber-700">
+                    이 자리는 말풍선이 그림 밖으로 잘릴 수 있어요. 안쪽으로 옮기면 덜 잘려요
+                  </span>
+                )}
+              </div>
+            )}
 
             {editingIndex === i ? (
               <div className="flex gap-2">
