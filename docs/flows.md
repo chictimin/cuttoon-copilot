@@ -15,7 +15,8 @@ flowchart TD
   L2["온보딩 (app/(studio)/onboarding/OnboardingFlow.tsx): 레퍼런스·상세 입력·마스코트·캐릭터 시트"]
   L3["새 컷툰 만들기 → /session/uuid (sessionStorage에 project-id·preset-id 기록)"]
   S0["세션 (app/(studio)/session/[id]/SessionFlow.tsx): 소재·3턴 대화·말투·표지 3안 선택·컷 생성"]
-  S1["생성 실패·부분 실패 → generateChainedCuts 이어서 만들기 (app/(studio)/session/[id]/generate-client.ts)"]
+  S1a["표지 생성 실패 → 다시 시도·다시 뽑기 → loadCoverVariants (step cover 유지)"]
+  S1b["나머지 컷 생성 실패 → 이어서 만들기 → runChainedCuts chainRef (step generating 유지)"]
   S2["저장 handleSave → POST /api/session (+selections 동봉)"]
   S3["저장 실패: 400 subject_tags 전용 복구 버튼 / 그 외 error 문구 · selectionsSaved=false면 비차단 토스트"]
   S4["saved 단계 → /editor/id"]
@@ -24,19 +25,20 @@ flowchart TD
   E0["에디터 (app/(studio)/editor/[id]/EditorFlow.tsx): 대사 편집·말풍선 드래그·되돌리기"]
   E1["미완성 id 접근: 아직 완성된 컷툰이 없어요 + 목록 링크"]
   E2["Export: 미저장 수정이 있으면 먼저 저장, 실패하면 내보내지 않음 → GET /api/session/export → ZIP"]
-  W0["새로고침 경고 beforeunload: 세션 생성중·미저장 cuts + 에디터 미저장 수정 (온보딩 시트 생성중은 없음 #297)"]
+  W0["새로고침 경고 beforeunload: generating(나머지 컷 생성)·미저장 cuts + 에디터 미저장 수정 (cover·온보딩 시트 생성중에는 없음 #297)"]
   W1["브라우저 뒤로가기 실동작 미확인"]
 
   L0 --> L1 --> L2 --> L3 --> S0
-  S0 --> S1
+  S0 --> S1a
+  S0 --> S1b
   S0 --> S2
   S2 --> S3
   S2 --> S4 --> E0 --> E2
-  S0 -.-> R0 -.-> E0
+  S0 -- "저장된 id 재방문" --> R0 -- "에디터에서 수정하기" --> E0
   L0 --> R1 --> E0
-  E0 -.-> E1
-  S0 -.-> W0
-  E0 -.-> W0
+  E0 -- "미완성 id" --> E1
+  S0 -- "generating·미저장 cuts" --> W0
+  E0 -- "미저장 수정" --> W0
   S0 -. "미확인" .-> W1
   E0 -. "미확인" .-> W1
 ```
@@ -47,12 +49,13 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  subgraph UI["화면 — JEON-DAEJIN (app/(studio)/)"]
+  subgraph UI["화면 — JEON-DAEJIN (app/(studio)/, 단 storyboard-assembly.ts는 제외)"]
     U_ON["OnboardingFlow + style-analysis.ts uploadReference"]
-    U_SESS["SessionFlow + generate-client.ts + storyboard-assembly.ts"]
+    U_SESS["SessionFlow + generate-client.ts"]
     U_ED["EditorFlow + resolveImages"]
   end
   subgraph SRV["서버·DB·스키마 — chictimin"]
+    A_SEMB["storyboard-assembly.ts assembleStoryboard (소유 예외: chictimin)"]
     S_UP["POST /api/upload → lib/asset-store.ts uploadAsset"]
     S_BRAIN["POST /api/brainstorm/route.ts → lib/llm/brainstorm.ts"]
     S_CAP["POST /api/session/captions/route.ts (대사 생성)"]
@@ -78,6 +81,7 @@ flowchart TD
 
   U_ON --> S_UP
   U_ON --> S_EX --> G_EXT
+  U_SESS --> A_SEMB
   U_ON --> S_GENR --> G_EXT
   S_GENR --> G_GEN
   U_SESS --> S_BRAIN
