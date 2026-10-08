@@ -125,6 +125,8 @@ function toRenderCuts(rawCuts: unknown): { cuts: Cut[]; malformed: number[] } {
       caption: cut.caption,
       generated_image: typeof cut.generated_image === "string" ? cut.generated_image : null,
       shot_type: typeof cut.shot_type === "string" ? cut.shot_type : null,
+      // #242: 화자 목표점은 인물 수(2인 컷인지)만 본다. caption.speaker_index는 caption째 넘어간다.
+      characters_in_frame: Array.isArray(cut.characters_in_frame) ? cut.characters_in_frame : null,
     });
   });
 

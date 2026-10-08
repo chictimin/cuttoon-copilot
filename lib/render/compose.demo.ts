@@ -3,11 +3,12 @@
 // storyboard.schema.json enum 밖의 값은 저장 시점 검증을 뚫고 들어올 수 있으므로
 // (app/api/session/validate.ts, #70/#79 이슈 참고) 타입을 `as Position`으로 우회해 재현한다.
 // #199: center 꼬리가 화자 방향을 향하는지, 기본 목표점(몸통 안)에서는 예전 고정 꼬리 그대로인지도 본다.
+// #242 (가): 2인 컷 화자(speaker_index) 목표점과, Export 경로에서 화자별로 꼬리가 달라지는지도 본다.
 //
 // 실행: npx tsx lib/render/compose.demo.ts
 
 import sharp from "sharp";
-import { composeCut, headTargetForShot, resolveTail, type HeadTarget } from "./compose";
+import { composeCut, headTargetForCut, headTargetForShot, resolveTail, type HeadTarget } from "./compose";
 import type { Caption, Position } from "./types";
 
 async function blankImage(): Promise<Buffer> {
@@ -187,6 +188,64 @@ async function main() {
     console.error(`FAIL wide 목표점 합성 — ${(err as Error).message}`);
   }
 
+  // #242 (가): 2인 컷 화자 목표점 — 0은 왼쪽(30%), 1은 오른쪽(70%), 세로는 shot_type 보정 그대로.
+  // 1인 컷·화자 없음·0/1이 아닌 값(과거 저장본·저장 검사 밖 값)은 headTargetForShot()과 같아야 한다.
+  {
+    const two = [{}, {}], one = [{}];
+    const cap = (s?: unknown): Caption => ({ text: "화자", bubble_type: "rounded", position: "top_right", ...(s === undefined ? {} : { speaker_index: s as number }) });
+    const t = (s: unknown, frame: unknown[] | null, shot: string | null = "bust") => headTargetForCut({ caption: cap(s), shot_type: shot, characters_in_frame: frame });
+    const same = (a: HeadTarget | undefined, b: HeadTarget | undefined) => JSON.stringify(a) === JSON.stringify(b);
+    const cases: [string, boolean][] = [
+      ["2인 0 → 왼쪽 0.3", same(t(0, two), { x: 0.3, y: 0.42 })],
+      ["2인 1 → 오른쪽 0.7", same(t(1, two), { x: 0.7, y: 0.42 })],
+      ["wide 2인 1 → 0.7·0.55", same(t(1, two, "wide"), { x: 0.7, y: 0.55 })],
+      ["1인 0 → 무시", same(t(0, one), undefined)],
+      ["wide 1인 0 → wide 보정만", same(t(0, one, "wide"), headTargetForShot("wide"))],
+      ["2인 화자 없음 → 기본", same(t(undefined, two), undefined)],
+      ["2인 2·-1·1.5·'1'·null → 기본", [2, -1, 1.5, "1", null].every((s) => same(t(s, two), undefined))],
+      ["인물 정보 없음 → 기본", same(t(0, null), undefined)],
+    ];
+    const bad = cases.filter(([, ok]) => !ok).map(([nm]) => nm);
+    if (bad.length === 0) {
+      console.log(`ok   화자 목표점 — ${cases.length}가지 경우 모두 기대대로`);
+    } else {
+      failed++;
+      console.error(`FAIL 화자 목표점 — ${bad.join(", ")}`);
+    }
+  }
+
+  // #242 (가): 같은 top_right 말풍선에서 화자 0(왼쪽)의 꼬리가 화자 1(오른쪽)보다 더 왼쪽을 향하는지.
+  {
+    const left = resolveTail("top_right", "ellipse", 810, 150, 200, 60, 1000, 1000, { x: 0.3, y: 0.42 });
+    const right = resolveTail("top_right", "ellipse", 810, 150, 200, 60, 1000, 1000, { x: 0.7, y: 0.42 });
+    if (Math.cos(left.angle) < Math.cos(right.angle)) {
+      console.log(`ok   화자 꼬리 방향 — 화자 0 ${(left.angle * 180 / Math.PI).toFixed(1)}° / 화자 1 ${(right.angle * 180 / Math.PI).toFixed(1)}° (0이 더 왼쪽)`);
+    } else {
+      failed++;
+      console.error("FAIL 화자 꼬리 방향 — 화자 0이 더 왼쪽을 향하지 않음");
+    }
+  }
+
+  // #242 (가): Export 경로(headTargetForCut → composeCut)에서 2인 컷 화자 0과 1의 그림이 서로 다르고,
+  // 1인 컷에 남은 speaker_index는 그림을 바꾸지 않는지(화자 없는 1인 컷과 같은 그림).
+  try {
+    const base: Caption = { text: "둘 중 누가 말할까", bubble_type: "rounded", position: "bottom_left" };
+    const draw = (c: Caption, frame: unknown[]) => composeCut(img, [c], [headTargetForCut({ caption: c, shot_type: "bust", characters_in_frame: frame })]);
+    const [s0, s1, one0, one] = await Promise.all([
+      draw({ ...base, speaker_index: 0 }, [{}, {}]), draw({ ...base, speaker_index: 1 }, [{}, {}]),
+      draw({ ...base, speaker_index: 0 }, [{}]), draw(base, [{}]),
+    ]);
+    if (Buffer.compare(s0, s1) !== 0 && Buffer.compare(one0, one) === 0) {
+      console.log("ok   화자 합성 — 2인 컷 화자 0·1 그림이 다르고, 1인 컷 speaker_index는 무시");
+    } else {
+      failed++;
+      console.error("FAIL 화자 합성 — 2인 컷 화자별 차이 없음 또는 1인 컷에서 그림이 바뀜");
+    }
+  } catch (err) {
+    failed++;
+    console.error(`FAIL 화자 합성 — ${(err as Error).message}`);
+  }
+
   // #259-8 D: bottom_* 말풍선은 화면 아래(0.70 근처)에 그려지고, 긴 대사도 캔버스 아래로
   // 나가지 않는다. 검은 1024 캔버스에 합성한 뒤 흰 픽셀(말풍선 몸통)이 있는 행 범위를 잰다.
   {
@@ -235,7 +294,7 @@ async function main() {
     console.error(`\n${failed}건 실패`);
     process.exit(1);
   }
-  console.log("\n27건 통과");
+  console.log("\n30건 통과");
 }
 
 main();
