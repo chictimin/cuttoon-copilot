@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "subject": "[리브라이블리 앱]으로 퇴근 후 10분 무릎 스트레칭",
+  "cover_pick": 1,
+  "covers": [
+    "/demo-cache/cover-1.png",
+    "/demo-cache/cover-2.png",
+    "/demo-cache/cover-3.png"
+  ],
+  "cuts": {
+    "2": "/demo-cache/cut-2.png",
+    "3": "/demo-cache/cut-3.png",
+    "4": "/demo-cache/cut-4.png"
+  },
+  "generated": {
+    "date": "2026-10-08",
+    "image_provider": "openai",
+    "commit": "73395e2",
+    "session_id": "a82223d7-cd86-4344-a571-1cf18f6b88fc",
+    "project_id": "493d34f0-a47a-4085-a27a-fd92088e5b85",
+    "subject_tags": [
+      {
+        "raw": "리브라이블리 앱",
+        "category": "운동 앱"
+      }
+    ]
+  }
+}
