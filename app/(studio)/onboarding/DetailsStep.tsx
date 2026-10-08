@@ -9,6 +9,7 @@ import {
 } from "@/lib/llm/cta-presets";
 import type { CtaStrength } from "@/lib/llm/narrative-flow";
 import { CTA_STRENGTHS } from "../cta-strength-options";
+import { parseTags } from "./parse-tags";
 
 // PRD.md 4절 "딸깍 UX 판정 기준": enum 다중선택은 체크박스로 받는 게 허용된다.
 // 아래 세 목록은 preset.schema.json의 context.interests/age_band/life_stage enum 값이다.
@@ -79,22 +80,6 @@ export interface DetailsFormValue {
   ctaStrength: CtaStrength;
   /** 확인을 통과한 프로젝트 폰트. 비웠으면 null(시스템 폰트). */
   font: PresetFont | null;
-}
-
-function parseTags(text: string): string[] {
-  // K1: trim 뒤 글자 그대로 비교(대소문자 구분)해 중복을 제거한다. 첫 등장 순서 유지.
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const tag of text
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)) {
-    if (!seen.has(tag)) {
-      seen.add(tag);
-      out.push(tag);
-    }
-  }
-  return out;
 }
 
 function CheckboxGroup<T extends string>({
