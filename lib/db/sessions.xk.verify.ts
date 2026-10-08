@@ -68,6 +68,10 @@ function cloneBoard(b: Board): Board {
 // updateAnchor(:235): caption을 spread한 뒤 anchor set/delete — 기존 caption의
 // 키를 그대로 이어받는다(깨끗한 caption엔 추가 키를 만들지 않으나 과거 caption의
 // 추가 키는 유지). updateCaptionText(:251): caption spread + text 덮기.
+// rev4 정적 source pin(QA 리드 kola 판정 #57830): 두 함수는 컴포넌트 내부
+// 클로저(setDraft 종속)라 tsx import 실행이 불가 — 아래 EMIT-mirror-pin 행이
+// EditorFlow.tsx 실물에서 6종 문구를 indexOf로 단언한다. 화면이 바뀌어 pin이
+// 깨지면 미러 PASS라도 소용없다. 화면 수정·helper export·jsdom·new Function 금지.
 function anchorSpread(caption: Cut, anchor: { x: number; y: number } | null): Cut {
   const next = { ...caption };
   if (anchor) next.anchor = anchor;
@@ -569,6 +573,23 @@ async function main(): Promise<void> {
       mascot: { label: "손 마스코트", description: "손 설명" },
     });
     check("EMIT-mascot-hand", r.status === 200, r);
+  }
+
+  // --- EMIT-mirror-pin (rev4): EditorFlow.tsx 실물 정적 source pin 6종 ---
+  // 미러(anchorSpread·captionTextSpread)와 함께 실행한다. 1개라도 없으면 FAIL.
+  {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("app/(studio)/editor/[id]/EditorFlow.tsx", "utf8");
+    const pins = [
+      "function updateAnchor(index: number, anchor: Anchor | null) {",
+      "const caption = { ...cut.caption };",
+      "if (anchor) caption.anchor = anchor;",
+      "else delete caption.anchor;",
+      "function updateCaptionText(index: number, text: string) {",
+      "{ ...cut.caption, text }",
+    ];
+    const missing = pins.filter((p) => src.indexOf(p) < 0);
+    check("EMIT-mirror-pin", missing.length === 0, missing);
   }
 
   // --- EMIT-session-new-vs-version: 신규 세션 저장과 기존 version 저장 구분 ---
