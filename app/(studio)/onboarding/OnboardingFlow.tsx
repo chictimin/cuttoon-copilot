@@ -17,8 +17,8 @@ const MAX_FILES = 5;
 // DetailsStep.tsx의 industry·forbidden 등과 같은 관례(쉼표 구분 자유 텍스트).
 // K1: trim 뒤 글자 그대로 비교(대소문자 구분)해 중복을 제거한다. 첫 등장 순서 유지.
 function parseTags(text: string): string[] {
-  const seen = new Set();
-  const out = [];
+  const seen = new Set<string>();
+  const out: string[] = [];
   for (const tag of text
     .split(",")
     .map((s) => s.trim())
