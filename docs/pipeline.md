@@ -90,6 +90,8 @@ flowchart TD
 
 `selections` 테이블에 "보여 준 후보 묶음(라운드)" 단위로 쌓는다 — 한 행 = 화면에 보여준 후보 한 묶음. `variant_index`는 고른 위치(다시 뽑기로 버린 라운드면 null), `(session_id, cut_index, round)`은 유일하다. 화면이 모아 두었다가 `handleSave` → `POST /api/session`의 `selections`로 함께 보내면, `createSession` 성공 뒤에 `insertSelections`(`lib/db/selections.ts`)가 저장한다. 일시적 DB 오류에만 전체 예산 3초 안에서 재시도하고(시도별 최대 1초·백오프 200·400ms·남은 예산 300ms 미만이면 포기), 그래도 실패하면 세션 저장은 200 + `selectionsSaved: false`로 응답한다(사용자 작업 보존 우선). 화면 쪽 기록 헬퍼 4개는 `lib/session/selection-log.ts`다 — `createSelectionLog`, `recordRound`, `markRegenerated`, `markSelected`, 전송용으로 바꾸는 `toPayload`. 화면 연결(#213): 표지 표시 때마다 `recordRound`, 선택 때 `markSelected`, 저장 때 `toPayload`로 동봉하고, `selectionsSaved:false`면 실패 토스트(비차단). 읽는 쪽(프로젝트별 선호·프리셋 승격 규칙)은 이번에 만들지 않고, 나중에 `sessions.preset_id`로 묶어 읽는다(#202).
 
+**선택 기록 0행의 판정 한계** — 세션이 완성(4컷 `generated_image` 모두 값)인데 `selections`가 0행이면, 직접 POST인지 저장 실패(당시 토스트)인지 D3 이전 전 라운드 탈락인지 저장본만으로는 구분할 수 없다. D3 이후 생성분도 응답값(`selectionsSaved`)이 저장되지 않으므로 같은 한계다. 데모 캐시 도구(`scripts/demo-cache-build.ts`)는 선택 기록이 필요하므로 이 경우를 만날 수 있다(도구 코드 분기는 하지 않음).
+
 <a id="pipe-editor"></a>
 ## 4. 에디터 (화면)
 
