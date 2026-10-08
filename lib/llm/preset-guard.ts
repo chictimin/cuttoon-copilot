@@ -565,3 +565,64 @@ export function presetContractProbe(data: unknown): PresetProbeProblem[] {
 
   return out;
 }
+
+/**
+ * R1-a (K2): 프리셋 저장 경로(`/api/preset` POST·PATCH) 전용 중복 제거.
+ * 대상은 스키마에서 uniqueItems가 걸린 문자열 배열을 읽어 정한다(경로 목록
+ * 복제 금지). B6 character_pool은 읽는 코드가 없어 제외한다(명시 목록 1개).
+ * 규칙: 배열 안 정확히 같은 값(===)의 두 번째 이후를 제거, 첫 등장 순서 유지.
+ * 대소문자 구분, trim 등 정규화 없음(정확 일치만). 입력을 바꾸지 않고 새 객체를
+ * 반환한다(순수). removed에는 경로·건수만 담는다(값 원문 없음).
+ * 공개: 프리셋 저장 시 배열의 중복 값은 첫 등장만 남기고 지운다 —
+ * 저장 값이 보낸 값과 다를 수 있다(중복만).
+ */
+const DEDUPE_EXCLUDED_PATHS = new Set(["assets.character_pool"]);
+
+function uniqueStringArrayPaths(): string[][] {
+  const out: string[][] = [];
+  const schemaRec = presetSchema as unknown as Record<string, unknown>;
+  const root: Record<string, unknown> = isRecord(schemaRec.properties)
+    ? schemaRec.properties
+    : {};
+  for (const section of Object.keys(root)) {
+    const def: unknown = root[section];
+    if (!isRecord(def) || !isRecord(def.properties)) continue;
+    for (const key of Object.keys(def.properties)) {
+      const field: unknown = def.properties[key];
+      if (!isRecord(field) || field.type !== "array" || field.uniqueItems !== true) continue;
+      const items: unknown = field.items;
+      if (!isRecord(items) || items.type !== "string") continue;
+      if (DEDUPE_EXCLUDED_PATHS.has(`${section}.${key}`)) continue;
+      out.push([section, key]);
+    }
+  }
+  return out;
+}
+
+export interface DedupeRemoved {
+  path: string;
+  count: number;
+}
+
+export function dedupePresetArrays<T>(preset: T): { preset: T; removed: DedupeRemoved[] } {
+  const removed: DedupeRemoved[] = [];
+  if (!isRecord(preset)) return { preset, removed };
+  const next: Record<string, unknown> = { ...(preset as Record<string, unknown>) };
+  for (const [section, key] of uniqueStringArrayPaths()) {
+    const node = next[section];
+    if (!isRecord(node)) continue;
+    const arr: unknown = node[key];
+    if (!Array.isArray(arr)) continue;
+    const kept: unknown[] = [];
+    let count = 0;
+    for (const v of arr) {
+      if (kept.indexOf(v) < 0) kept.push(v);
+      else count += 1;
+    }
+    if (count > 0) {
+      next[section] = { ...node, [key]: kept };
+      removed.push({ path: `${section}.${key}`, count });
+    }
+  }
+  return { preset: next as T, removed };
+}

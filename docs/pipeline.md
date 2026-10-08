@@ -62,6 +62,8 @@ flowchart TD
 | 6 | 프로젝트 이름 변경 (#161) | — (화면 호출자 없음) | `PATCH /api/preset`(`app/api/preset/route.ts`) → `renameProject`(`lib/db/presets.ts`) |
 | 7 | 프로젝트 비활성화 (#161) | — (화면 호출자 없음) | `DELETE /api/preset`(`app/api/preset/route.ts`) → `archiveProject`(`lib/db/presets.ts`). 하드 삭제가 아니라 `projects.archived_at` 소프트 삭제라 세션·컷 데이터는 남고 목록에서만 빠진다 |
 
+**프리셋 저장 시 중복 제거 (#263)** — `POST`·`PATCH /api/preset`은 검증(`assertValidPreset`) 뒤 저장 직전에 `dedupePresetArrays`(`lib/llm/preset-guard.ts`)로 스키마 `uniqueItems` 문자열 배열(`assets.character_pool` 제외)의 중복 값을 첫 등장만 남기고 지운다. 정확히 같은 값만(대소문자 구분, 정규화 없음) 지우며 거부(400)하지 않는다 — 저장 값이 보낸 값과 다를 수 있다(중복만). 응답 형태는 그대로다.
+
 <a id="pipe-session"></a>
 ## 3. 세션 (화면)
 
