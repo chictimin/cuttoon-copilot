@@ -300,6 +300,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 **합성 방식 (`compose.ts`)**
 
 - 대사는 **Export 시점에만** 이미지에 굽는다. 에디터 화면의 말풍선은 HTML 레이어라 합성과 별개다(PRD "텍스트 레이어" 원칙).
+- 좌표(#242·#302): `caption.anchor`(몸통 중심, 원본 이미지 비율 0~1)가 있으면 칸 이름 대신 그 좌표에 그린다 — 폭은 구석 칸과 같은 0.44로 고정(center 폭 넓히기 없음), 좌우·위·아래 경계 보정은 하지 않는다(사용자가 놓은 자리 그대로, 잘림은 에디터가 안내). 꼬리는 center 방식(목표점이 몸통 밖이면 그쪽, 몸통 안이면 고정 꼬리). 0~1 유한수가 아닌 값은 무시하고 칸 이름 자리로 그린다(`validAnchor`). 비정사각 원본(#104 폴백)은 원본 비율 좌표 그대로라 에디터의 `object-cover` 화면과 조금 어긋날 수 있다.
 - 자리: `caption.position` 5종을 `POSITION_BOX`(`lib/render/position-box.ts` — 에디터 미리보기도 쓸 수 있게 분리, #278)의 고정 비율 박스로 바꾼다. 구석 자리는 일부러 캔버스 경계를 살짝 넘는다(웹툰식 "반 걸침").
 - 크기: 박스 폭 안에서 글자 수에 맞춰 폰트 40→22px로 줄이며 줄바꿈(`fitText`), 높이 상한은 캔버스의 30%(`captionSvg`의 `fitText` 호출부 `maxHeight`).
 - 모양: `rounded`는 텍스트 박스보다 가로 1.12배·세로 1.28배 타원(`ellipseRadii`), `rect`·`cloud`는 사각형 기반. 몸통과 꼬리는 **하나의 폴리곤**으로 그린다(겹쳐 그리면 이음매가 보임). 불투명도 0.98.
@@ -307,7 +308,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 - 아래 경계 보정: `bottom_*` 칸에만, 도형이 캔버스 아래로 넘치면 넘친 만큼 위로 올린다(몸통·글씨 같은 y, #276). `top`·`center`에는 걸지 않는다.
 - 좌우 경계 보정: 구석 자리 도형은 줄이 `OVERHANG_MAX_LINES`(3줄) 이하일 때만 살짝 걸치고, 그보다 많으면 도형 전체를 캔버스 안으로 당긴다. 글자는 늘 캔버스 안쪽 `TEXT_SAFE_MARGIN` 안에 둔다(#169).
 - 꼬리: 목표점(`HeadTarget`) 방향으로, 몸통 경계~목표점 거리의 40%, 최대 캔버스 높이의 12%(`resolveTail`의 `TAIL_REACH_RATIO`·`MAX_PROTRUDE_RATIO`, PR #163). `center` 자리도 목표점이 몸통 밖이면 그쪽으로 꼬리를 내고(길이 하한 = 고정 꼬리 길이), 목표점이 몸통 안이면 고정 방향·고정 길이의 짧은 꼬리로 폴백한다(`resolveTail`, `centerTail`, #192·#199). 기본 목표점은 늘 center 몸통 안이라 center는 고정 꼬리 폴백 그대로다. Export는 컷별 목표점 1개를 넘기는데 2인 컷 화자도 wide도 아니면 `undefined`라 기본 목표점을 쓴다(`headTargetForCut`, #273·#242).
-- 목표점: `composeCut(image, [caption], headTargets?)`은 컷별 목표점을 받는다. Export(`exportCuts`)는 컷마다 1개씩 넘긴다(`headTargetForCut`) — 2인 컷에 `caption.speaker_index`가 0/1이면 가로 30%/70%(그림의 [0] 왼쪽·[1] 오른쪽, #285)에 세로는 shot_type 보정 그대로, 그 밖에는 wide 컷 가로 50%·세로 55%, 나머지 기본값(가로 50%·세로 42%, `DEFAULT_HEAD_TARGET`)이다(#273·#242). 1인 컷·0/1 밖 값은 무시한다. center 칸은 화자 목표점이 몸통 안이면 고정 꼬리로 폴백하고, `caption.anchor`는 아직 읽지 않는다. 1인 컷에서 인물이 한쪽에 있으면 꼬리가 빈 곳을 가리킬 수 있다(9/30 골든패스 컷 3·4에서 관찰).
+- 목표점: `composeCut(image, [caption], headTargets?)`은 컷별 목표점을 받는다. Export(`exportCuts`)는 컷마다 1개씩 넘긴다(`headTargetForCut`) — 2인 컷에 `caption.speaker_index`가 0/1이면 가로 30%/70%(그림의 [0] 왼쪽·[1] 오른쪽, #285)에 세로는 shot_type 보정 그대로, 그 밖에는 wide 컷 가로 50%·세로 55%, 나머지 기본값(가로 50%·세로 42%, `DEFAULT_HEAD_TARGET`)이다(#273·#242). 1인 컷·0/1 밖 값은 무시한다. center 칸과 좌표(`anchor`)로 그린 말풍선은 화자 목표점이 몸통 안이면 고정 꼬리로 폴백한다. 1인 컷에서 인물이 한쪽에 있으면 꼬리가 빈 곳을 가리킬 수 있다(9/30 골든패스 컷 3·4에서 관찰).
 
 **ZIP 구성**: 컷당 PNG 1장, 파일명 `cut_<cut_index>.png`. 파일명(ZIP 이름)은 `Content-Disposition`에서 subject 기반(한글은 `filename*`).
 

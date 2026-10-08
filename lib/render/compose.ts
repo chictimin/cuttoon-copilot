@@ -352,6 +352,18 @@ const STROKE_MARGIN = 2;
 
 const VALID_BUBBLE_TYPES: BubbleType[] = ["rounded", "rect", "cloud"];
 
+// #242: 에디터에서 끌어 놓은 말풍선 좌표(caption.anchor = 몸통 중심, 원본 이미지 비율 0~1). 저장 검사(#295)를
+// 거친 값이지만 과거 저장본·검사 밖 값도 들어올 수 있어, x·y가 0~1 유한수일 때만 쓰고 아니면 칸 이름 자리로 그린다.
+// 몸통 폭은 에디터(#302)와 같은 구석 칸 폭(0.44)으로 고정한다.
+const ANCHOR_W = POSITION_BOX.top_left.w;
+
+export function validAnchor(anchor: unknown): { x: number; y: number } | null {
+  if (typeof anchor !== "object" || anchor === null) return null;
+  const { x, y } = anchor as { x?: unknown; y?: unknown };
+  const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+  return ok(x) && ok(y) ? { x, y } : null;
+}
+
 function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarget: HeadTarget, font: LoadedFont | null = null): string {
   // storyboard.schema.json의 enum 밖의 값이 저장 시점 검증을 뚫고 들어올 수 있다
   // (app/api/session/validate.ts는 아직 필드별 enum까지는 안 봄, #70). lib/render/는
@@ -378,9 +390,14 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   const useFont = font && coversText(font, caption.text) ? font : null;
   const measure: Measure = useFont ? (t, size) => useFont.getAdvanceWidth(t, size) : textWidth;
 
+  const anchor = validAnchor(caption.anchor);
+  if (caption.anchor !== undefined && !anchor) {
+    console.warn("[compose] caption.anchor 값이 올바르지 않음 — 칸 이름(position) 자리로 그림");
+  }
+
   const box = POSITION_BOX[position];
-  let x = box.x * canvasW;
-  let maxWidth = box.w * canvasW;
+  let maxWidth = (anchor ? ANCHOR_W : box.w) * canvasW;
+  let x = anchor ? anchor.x * canvasW - maxWidth / 2 : box.x * canvasW;
   const maxHeight = canvasH * 0.3;
 
   // rounded는 글자를 박스 폭보다 조금 좁게 감싼다 — 줄 양 끝이 타원 곡선에 덜 걸려서
@@ -389,7 +406,7 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
 
   let { fontSize, lines } = fitText(caption.text, wrapWidth(maxWidth), maxHeight, FONT_MAX, measure);
 
-  if (position === "center") {
+  if (position === "center" && !anchor) {
     // 줄이 OVERHANG_MAX_LINES를 넘으면 가운데를 기준으로 폭을 넓혀 줄 수를 줄인다(#170).
     // 글자 크기는 원래 폭에서 정해진 값을 넘지 않게 묶는다 — 안 묶으면 폭이 넓어진
     // 만큼 fitText가 글자를 키워 버려서 줄 수(=높이)가 그대로다(9/30 테스트에서 확인).
@@ -407,11 +424,13 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   const bubbleH = textH + PADDING * 2;
   const widestLine = Math.max(...lines.map((l) => measure(l, fontSize)));
   const radii = ellipseRadii(maxWidth, bubbleH, widestLine, textH);
-  let y = box.y * canvasH;
+  // 좌표가 있으면 몸통 중심이 좌표에 오도록(몸통 높이의 절반만큼 위에서 시작) — 아래의 경계 보정은
+  // 모두 건너뛴다. 사용자가 놓은 자리는 보정하지 않고(#242 결정), 잘릴 위치면 에디터가 안내한다(#302).
+  let y = anchor ? anchor.y * canvasH - bubbleH / 2 : box.y * canvasH;
 
   // 좌우 경계(#169). 도형은 짧은 대사에서만 살짝 걸치게 두고, 줄이 많으면 도형 전체를
   // 캔버스 안으로 당긴다. 어느 경우든 글자는 TEXT_SAFE_MARGIN 안쪽에 둔다.
-  {
+  if (!anchor) {
     const cx = x + maxWidth / 2;
     const shapeHalf = bubbleType === "rounded" ? radii.rx : maxWidth / 2;
     const keepHalf = lines.length > OVERHANG_MAX_LINES ? shapeHalf : widestLine / 2;
@@ -429,7 +448,7 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   // 밀어서 온전한 타원 모양을 유지한다 — 이 보정된 y를 몸통(bubbleShapeSvg)과 글씨
   // (firstLineY) 양쪽에 다 써야 서로 어긋나지 않는다(전에는 몸통만 보정하고 글씨는
   // 원래 y를 써서 "글씨가 위에 떠있는" 결함이 있었다).
-  if (bubbleType === "rounded") {
+  if (bubbleType === "rounded" && !anchor) {
     const cy = y + bubbleH / 2;
     const overflowTop = radii.ry - cy;
     if (overflowTop > 0) y += overflowTop;
@@ -439,7 +458,7 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   // 아래로 나갈 수 있다 — 넘어간 만큼 위로 올린다(위 보정과 같은 방식, 몸통·글씨 모두 이 y를
   // 쓴다). rounded는 타원 아래 끝, rect·cloud는 박스 아래 끝(구름 장식은 위쪽에만 붙는다).
   // bottom 칸에만 건다 — top·center는 예전 결과 그대로 둔다(chictimin 리뷰, #276).
-  if (position === "bottom_left" || position === "bottom_right") {
+  if (!anchor && (position === "bottom_left" || position === "bottom_right")) {
     const shapeBottom = bubbleType === "rounded" ? y + bubbleH / 2 + radii.ry : y + bubbleH;
     const overflowBottom = shapeBottom - (canvasH - STROKE_MARGIN);
     if (overflowBottom > 0) y -= overflowBottom;
@@ -448,7 +467,9 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   // #79/#92 fallback을 여기서도 그대로 이어받는다 — bubbleShapeSvg에 원본 caption.*을
   // 넘기면 몸통/꼬리 계산에 유효하지 않은 enum이 들어가 버리므로, 위에서 이미
   // center/rounded로 정리한 position/bubbleType을 넘긴다.
-  const shape = bubbleShapeSvg(bubbleType, x, y, maxWidth, bubbleH, position, canvasW, canvasH, headTarget, radii);
+  // 좌표가 있으면 꼬리는 center 방식으로 정한다 — 목표점(화자)이 몸통 밖이면 그쪽으로, 아무 데나 놓인 몸통이
+  // 목표점을 덮으면 고정 꼬리로 폴백한다(resolveTail). 칸 이름의 구석 방식은 몸통이 구석에 있을 때만 맞다.
+  const shape = bubbleShapeSvg(bubbleType, x, y, maxWidth, bubbleH, anchor ? "center" : position, canvasW, canvasH, headTarget, radii);
 
   const cx = x + maxWidth / 2;
   const firstLineY = y + PADDING + fontSize * 0.85;

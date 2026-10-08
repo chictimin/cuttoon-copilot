@@ -12,8 +12,8 @@ export interface Caption {
   // #242: 2인 컷에서 대사를 말하는 인물의 characters_in_frame 순번(0|1). 저장 검사(#295)를 거친
   // 값이지만 과거 저장본·범위 밖 값도 들어올 수 있어 headTargetForCut()이 0/1만 쓴다.
   speaker_index?: number;
-  // #242: 사용자가 드래그한 말풍선 몸통 중심(원본 이미지 비율 0~1). 스키마에는 들어왔지만
-  // Export는 아직 읽지 않는다 — 에디터 드래그(#242 JEON) 이후 반영.
+  // #242: 사용자가 에디터에서 끌어 놓은 말풍선 몸통 중심(원본 이미지 비율 0~1, #302). 있으면 Export가
+  // position 대신 이 좌표에 그린다(폭 0.44 고정, 경계 보정 없음). 0~1 유한수가 아니면 무시한다(compose.ts validAnchor).
   anchor?: { x: number; y: number };
 }
 
