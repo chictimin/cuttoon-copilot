@@ -10,7 +10,7 @@
 import sharp from "sharp";
 import { coversText, type LoadedFont } from "./font";
 import { POSITION_BOX } from "./position-box";
-import type { BubbleType, Caption, Position } from "./types";
+import type { BubbleType, Caption, Cut, Position } from "./types";
 
 const FONT_FAMILY = "'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif";
 const PADDING = 24;
@@ -125,6 +125,24 @@ const SHOT_HEAD_Y = new Map<string, number>([["wide", 0.55]]);
 export function headTargetForShot(shotType: string | null | undefined): HeadTarget | undefined {
   const y = shotType ? SHOT_HEAD_Y.get(shotType) : undefined;
   return y === undefined ? undefined : { x: DEFAULT_HEAD_TARGET.x, y };
+}
+
+// #242 (가): 2인 컷 화자 쪽으로 꼬리를 낸다. 2인 컷 그림은 characters_in_frame [0]을 왼쪽,
+// [1]을 오른쪽에 그리므로(#285) speaker_index 0/1을 가로 30%/70%로 바꾼다. 세로는 위 shot_type
+// 보정(wide 0.55, 그 밖 0.42)을 그대로 쓴다. 1인 컷·화자 없음·0/1이 아닌 값(과거 저장본 포함)은
+// headTargetForShot()과 같은 결과다.
+// 한계: center 칸은 몸통이 가로 22~78%를 덮어 목표점이 몸통 안에 들어오면 고정 꼬리로 폴백한다
+// (resolveTail). #285 이전에 그린 2인 컷은 좌우 지시 없이 생성돼 꼬리가 화자를 향한다는 보장이 없다.
+const SPEAKER_X = [0.3, 0.7] as const;
+
+export function headTargetForCut(cut: Pick<Cut, "caption" | "shot_type" | "characters_in_frame">): HeadTarget | undefined {
+  const shot = headTargetForShot(cut.shot_type);
+  const speaker = cut.caption.speaker_index;
+  const frame = cut.characters_in_frame;
+  if (Array.isArray(frame) && frame.length === 2 && (speaker === 0 || speaker === 1)) {
+    return { x: SPEAKER_X[speaker], y: (shot ?? DEFAULT_HEAD_TARGET).y };
+  }
+  return shot;
 }
 
 // 꼬리 길이 — 처음엔 "중심→목표점 거리의 85%"로 잡았더니 구석 자리에서 지나치게

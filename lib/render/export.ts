@@ -4,7 +4,7 @@
 // 조용히 빠뜨리지 않기 위함.
 
 import { readAsset } from "../asset-store";
-import { composeCut, headTargetForShot } from "./compose";
+import { composeCut, headTargetForCut } from "./compose";
 import { isDemoCacheRef, readDemoCacheImage } from "./demo-cache";
 import { loadFont, type PresetFont } from "./font";
 import { buildZip } from "./zip";
@@ -41,8 +41,8 @@ export async function exportCuts(
       skipped.push(cut.cut_index);
       continue;
     }
-    // #242 (나): wide 컷은 꼬리 목표점을 아래로. 그 밖에는 기본 목표점.
-    const composed = await composeCut(imageBuffer, [cut.caption], [headTargetForShot(cut.shot_type)], font);
+    // #242: 2인 컷은 화자 쪽(가로 30%/70%), wide 컷은 꼬리 목표점을 아래로. 그 밖에는 기본 목표점.
+    const composed = await composeCut(imageBuffer, [cut.caption], [headTargetForCut(cut)], font);
     entries.push({ name: `cut_${cut.cut_index}.png`, data: composed });
     included.push(cut.cut_index);
   }
