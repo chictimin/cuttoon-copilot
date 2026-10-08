@@ -11,6 +11,7 @@
 | `docs/operations.md` (이 문서) | 팀 운영 · 일정 · 소유권 · 현황 · 작업 표 | chictimin 승인 |
 | `spec/*.schema.json` | 데이터 계약(필드·enum) | chictimin 승인 |
 | [`pipeline.md`](./pipeline.md) | 온보딩→세션→에디터 호출 순서 · 소유 경계 · 파이프라인 사실 정리 | chictimin 승인 |
+| [`flows.md`](./flows.md) | 사용자 흐름 · 프로세스 흐름 다이어그램 | chictimin 승인 |
 | [`gate-evidence/`](./gate-evidence/) | P0 게이트(캐릭터 동일성 · 말풍선 억제) 판정 근거 이미지 | chictimin 승인 |
 | `spec/data/*.json`(`cta_presets.json`·`narrative-flow.json`·`style-vocabulary.json`) | 값 목록 데이터 파일(CTA 문구 · 서사 흐름 템플릿 · 스타일 키워드 매핑) | chictimin 승인 |
 | `spec/vocabulary.json` | enum별 프롬프트 힌트(영문 서술) | chictimin 승인 |

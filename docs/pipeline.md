@@ -49,6 +49,8 @@ flowchart TD
   온보딩 --> 세션 --> 에디터
 ```
 
+사용자·프로세스 흐름(첫 진입→Export·소유자별 레인) 다이어그램은 `docs/flows.md`를 본다.
+
 <a id="pipe-onboarding"></a>
 ## 2. 온보딩 (화면)
 
