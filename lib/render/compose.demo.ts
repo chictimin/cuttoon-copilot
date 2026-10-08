@@ -4,6 +4,7 @@
 // (app/api/session/validate.ts, #70/#79 이슈 참고) 타입을 `as Position`으로 우회해 재현한다.
 // #199: center 꼬리가 화자 방향을 향하는지, 기본 목표점(몸통 안)에서는 예전 고정 꼬리 그대로인지도 본다.
 // #242 (가): 2인 컷 화자(speaker_index) 목표점과, Export 경로에서 화자별로 꼬리가 달라지는지도 본다.
+// #242: 에디터에서 끌어 놓은 좌표(caption.anchor)를 몸통 중심으로 쓰는지(폭 0.44, 보정 없음, 잘못된 값 무시, 꼬리는 화자 쪽)도 본다.
 //
 // 실행: npx tsx lib/render/compose.demo.ts
 
@@ -290,11 +291,91 @@ async function main() {
     }
   }
 
+  // #242: 에디터에서 끌어 놓은 좌표(caption.anchor)를 Export가 쓴다 — 몸통 중심이 좌표에 오고, 폭은 0.44로
+  // 고정, 가장자리여도 보정하지 않고, 잘못된 좌표는 무시(칸 이름 자리), 꼬리는 화자 쪽. 검은 1024 캔버스에서 잰다.
+  {
+    const black = await sharp({ create: { width: 1024, height: 1024, channels: 3, background: { r: 0, g: 0, b: 0 } } })
+      .png()
+      .toBuffer();
+    const raw = async (caption: Caption, target?: HeadTarget) => {
+      const { data, info } = await sharp(await composeCut(black, [caption], target ? [target] : undefined)).raw().toBuffer({ resolveWithObject: true });
+      const white = (xx: number, yy: number) => { const i = (yy * info.width + xx) * info.channels; return data[i] > 200 && data[i + 1] > 200 && data[i + 2] > 200; };
+      return { white, w: info.width, h: info.height };
+    };
+    const rowSpan = (r: Awaited<ReturnType<typeof raw>>, yy: number) => {
+      let l = -1, rr = -1;
+      for (let xx = 0; xx < r.w; xx++) if (r.white(xx, yy)) { if (l < 0) l = xx; rr = xx; }
+      return { l, r: rr };
+    };
+    const colSpan = (r: Awaited<ReturnType<typeof raw>>, xx: number) => {
+      let t = -1, b = -1;
+      for (let yy = 0; yy < r.h; yy++) if (r.white(xx, yy)) { if (t < 0) t = yy; b = yy; }
+      return { t, b };
+    };
+    const short = "무릎이 한결 가벼워졌어!";
+
+    // ① 몸통 중심 = 좌표 (rect, 몸통 가운데 행의 흰 구간 중심 + 꼬리를 피한 세로줄의 위·아래 끝 중심)
+    try {
+      const bad: string[] = [];
+      for (const [ax, ay] of [[0.5, 0.5], [0.3, 0.7], [0.68, 0.25]] as const) {
+        const r = await raw({ text: short, bubble_type: "rect", position: "top_left", anchor: { x: ax, y: ay } });
+        const row = rowSpan(r, Math.round(ay * r.h)), col = colSpan(r, Math.round(ax * r.w) + 150); // 꼬리를 피해 몸통 오른쪽 세로줄에서 잰다
+        const cx = (row.l + row.r) / 2, cy = (col.t + col.b) / 2;
+        if (Math.abs(cx - ax * r.w) > 6 || Math.abs(cy - ay * r.h) > 6) bad.push(`(${ax},${ay})→(${cx.toFixed(0)},${cy.toFixed(0)})`);
+      }
+      if (bad.length === 0) console.log("ok   anchor 위치 — 세 좌표 모두 몸통 중심이 좌표에 옴(±6px)");
+      else { failed++; console.error(`FAIL anchor 위치 — ${bad.join(", ")}`); }
+    } catch (err) { failed++; console.error(`FAIL anchor 위치 — ${(err as Error).message}`); }
+
+    // ② 폭 0.44 고정 — center 칸의 아주 긴 대사도 폭을 넓히지 않는다(center 폭 넓히기는 좌표가 없을 때만)
+    try {
+      const longT = Array(6).fill("아침마다 무릎이 뻣뻣해서 계단을 내려갈 때마다 조심하게 돼요").join(" ");
+      const r = await raw({ text: longT, bubble_type: "rect", position: "center", anchor: { x: 0.5, y: 0.5 } });
+      const row = rowSpan(r, 512); const width = row.r - row.l + 1;
+      if (Math.abs(width - 0.44 * r.w) <= 8) console.log(`ok   anchor 폭 — 긴 대사도 ${width}px(≈0.44×1024=${(0.44 * r.w).toFixed(0)})`);
+      else { failed++; console.error(`FAIL anchor 폭 — ${width}px`); }
+    } catch (err) { failed++; console.error(`FAIL anchor 폭 — ${(err as Error).message}`); }
+
+    // ③ 가장자리여도 보정하지 않는다 — x 0.05면 몸통이 왼쪽 끝(0열)까지 걸친다
+    try {
+      const r = await raw({ text: short, bubble_type: "rect", position: "top_right", anchor: { x: 0.05, y: 0.5 } });
+      if (r.white(0, 512)) console.log("ok   anchor 보정 없음 — 가장자리 좌표는 몸통이 화면 밖으로 걸친 채 그대로");
+      else { failed++; console.error("FAIL anchor 보정 없음 — 왼쪽 끝으로 당겨짐"); }
+    } catch (err) { failed++; console.error(`FAIL anchor 보정 없음 — ${(err as Error).message}`); }
+
+    // ④ 잘못된 좌표는 무시 — 좌표 없는 것과 같은 그림
+    try {
+      const base: Caption = { text: short, bubble_type: "rounded", position: "bottom_left" };
+      const ref = await composeCut(black, [base]);
+      const bads = [{ x: 1.5, y: 0.5 }, { x: "0.5", y: 0.5 }, { x: NaN, y: 0.5 }, { x: 0.5 }, null, "center", { x: -0.1, y: 0.2 }];
+      const diff: string[] = [];
+      for (const a of bads) {
+        const out = await composeCut(black, [{ ...base, anchor: a as unknown as Caption["anchor"] }]);
+        if (Buffer.compare(ref, out) !== 0) diff.push(JSON.stringify(a));
+      }
+      if (diff.length === 0) console.log(`ok   anchor 잘못된 값 ${bads.length}가지 — 모두 무시하고 칸 이름 자리로 그림`);
+      else { failed++; console.error(`FAIL anchor 잘못된 값이 그림을 바꿈 — ${diff.join(", ")}`); }
+    } catch (err) { failed++; console.error(`FAIL anchor 잘못된 값 — ${(err as Error).message}`); }
+
+    // ⑤ 꼬리는 화자 쪽 — 위쪽 가운데(0.5, 0.15)에 놓은 말풍선, 화자가 왼쪽(0.3)이면 몸통 아래 흰 픽셀이 왼쪽에 더 많다
+    try {
+      const cap: Caption = { text: short, bubble_type: "rounded", position: "top_left", anchor: { x: 0.5, y: 0.15 } };
+      const side = async (tx: number) => {
+        const r = await raw(cap, { x: tx, y: 0.42 }); let left = 0, right = 0;
+        for (let yy = 215; yy < 340; yy++) for (let xx = 0; xx < r.w; xx++) if (r.white(xx, yy)) { if (xx < 512) left++; else right++; }
+        return { left, right };
+      };
+      const L = await side(0.3), R = await side(0.7);
+      if (L.left > L.right && R.right > R.left) console.log(`ok   anchor 꼬리 — 화자 왼쪽이면 왼쪽(${L.left}>${L.right}), 오른쪽이면 오른쪽(${R.right}>${R.left})`);
+      else { failed++; console.error(`FAIL anchor 꼬리 — 왼쪽 화자 ${L.left}/${L.right}, 오른쪽 화자 ${R.left}/${R.right}`); }
+    } catch (err) { failed++; console.error(`FAIL anchor 꼬리 — ${(err as Error).message}`); }
+  }
+
   if (failed > 0) {
     console.error(`\n${failed}건 실패`);
     process.exit(1);
   }
-  console.log("\n30건 통과");
+  console.log("\n35건 통과");
 }
 
 main();
