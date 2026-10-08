@@ -274,15 +274,25 @@ export function buildCutPrompt(
   // character_id === preset.mascot.label 이다 — role === 'supporting' 은 조연이 둘이
   // 되거나 마스코트가 아닌 조연을 고른 세션에서 조용히 틀린다. 마스코트가 없거나
   // 프레임에 없으면 위 이유대로 기존 문장(시트 인물과 다른 사람)을 그대로 쓴다.
+  //
+  // #312: 처음 문장은 "시트 인물이 이 컷에 나온다 — 얼굴·머리·옷을 시트와 같게" 를 누구에게
+  // 적용하는지 말하지 않아, 마스코트와 같이 나온 컷에서 주인공 얼굴까지 시트 쪽으로 바뀌었다
+  // (세션 b750f650 3컷). 시트를 따르는 대상을 마스코트 서술로 못박고, 나머지 인물은 시트
+  // 얼굴을 빌리지 말라고 적는다. 체이닝된 컷이면 앞 컷의 외형을 기준으로 삼게 한다.
   const mascot = activeMascot(preset)
   const mascotInFrame =
     !!mascot && (cut?.characters_in_frame ?? []).some((c) => c.character_id === mascot.label)
+  const mascotWho = mascot ? project(mascot.description).replace(/[.\s]+$/, '') : ''
   const sheetSentence = mascotInFrame
     ? `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
-      `attached reference sheet. The character drawn on that sheet appears in this panel — ` +
-      `keep their face, hairstyle, outfit and body proportions the same as on the sheet. ` +
-      `Anyone else in this panel is a different person; follow the character descriptions ` +
-      `below for who they are.`
+      `attached reference sheet. The sheet shows only the mascot (${mascotWho}) — draw the mascot ` +
+      `with the same face, hairstyle, outfit and body proportions as on the sheet. Everyone else ` +
+      `in this panel is a different person and must not take the sheet character's face, ` +
+      `hairstyle or outfit; ` +
+      (opts.continuesChain
+        ? `keep them looking exactly as they did in the earlier panels of this conversation ` +
+          `(same face, hairstyle and outfit) and follow the character descriptions below.`
+        : `follow the character descriptions below for who they are.`)
     : `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
       `attached reference sheet, but the person in this panel is a different character from ` +
       `the one drawn on that sheet — follow the character description below for who they are.`

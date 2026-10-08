@@ -412,6 +412,44 @@ async function main(): Promise<void> {
     checks.push(["3인 → 좌우 문장 없음", !three.includes("side of the panel:")]);
   }
 
+  // --- 9. #312 마스코트 컷 — 시트 얼굴은 마스코트만, 나머지는 앞 컷/서술 기준 ---
+  {
+    const sb = {
+      subject: "demo",
+      cast: [
+        { character_id: "protagonist", role: "protagonist", description: "50대 여성 직장인" },
+        { character_id: "mascot", role: "supporting", description: "주황색 여우 마스코트" },
+      ],
+    } as CutStoryboard;
+    const preset = { mascot: { label: "mascot", description: "a brave orange fox." } };
+    const who = (ids: string[]) => ({
+      cut_index: 3,
+      characters_in_frame: ids.map((character_id) => ({ character_id, expression: "smile", pose: "stand" })),
+    });
+    const ONLY = "The sheet shows only the mascot (a brave orange fox) — draw the mascot with the same face";
+    const NOT_SHEET = "must not take the sheet character's face, hairstyle or outfit";
+    const KEEP = "keep them looking exactly as they did in the earlier panels of this conversation";
+    const OLD = "The character drawn on that sheet appears in this panel";
+
+    const chained = buildCutPrompt(sb, preset, who(["protagonist", "mascot"]), { continuesChain: true });
+    checks.push(["(a) 마스코트+체인 → 시트는 마스코트만", chained.includes(ONLY) && chained.includes(NOT_SHEET)]);
+    checks.push(["(a) 마스코트+체인 → 앞 컷 모습 유지 문장", chained.includes(KEEP)]);
+    checks.push(["(a) 옛 문장(누구인지 안 밝힘) 없음", !chained.includes(OLD)]);
+
+    const first = buildCutPrompt(sb, preset, who(["protagonist", "mascot"]));
+    checks.push(["(b) 체인 아님 → 시트는 마스코트만", first.includes(ONLY) && first.includes(NOT_SHEET)]);
+    checks.push(["(b) 체인 아님 → 시트 문장에 앞 컷 언급 없음", !first.includes(KEEP) && !first.includes("earlier panels")]);
+
+    const NON_MASCOT =
+      "Single webtoon/comic panel. Match the art style, line weight and coloring of the " +
+      "attached reference sheet, but the person in this panel is a different character from " +
+      "the one drawn on that sheet — follow the character description below for who they are.";
+    const noMascot = buildCutPrompt(sb, preset, who(["protagonist"]));
+    checks.push(["(c) 마스코트 없는 컷 → 기존 문장 그대로로 시작", noMascot.startsWith(NON_MASCOT + "\n") || noMascot.startsWith(NON_MASCOT + " ")]);
+    const noPreset = buildCutPrompt(sb, {}, who(["protagonist", "mascot"]), { continuesChain: true });
+    checks.push(["(c) mascot 설정 없음 → 기존 문장 그대로", noPreset.includes(NON_MASCOT) && !noPreset.includes(ONLY)]);
+  }
+
   let failed = 0;
   for (const [name, pass] of checks) {
     if (pass) {
