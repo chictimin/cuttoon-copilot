@@ -54,8 +54,6 @@ flowchart TD
   end
   subgraph SRV["서버·DB·스키마 — chictimin"]
     S_UP["POST /api/upload → lib/asset-store.ts uploadAsset"]
-    S_EX["POST /api/extract (asset-store에서 읽기)"]
-    S_GENR["POST /api/generate (라우트: kind 분기)"]
     S_BRAIN["POST /api/brainstorm/route.ts → lib/llm/brainstorm.ts"]
     S_CAP["POST /api/session/captions/route.ts (대사 생성)"]
     S_PRE["POST /api/preset/route.ts → assertValidPreset + dedupePresetArrays (#263)"]
@@ -65,7 +63,9 @@ flowchart TD
     S_DB["lib/db/sessions.ts + selections.ts + presets.ts (Supabase)"]
     S_STORE["Storage 버킷 미확인"]
   end
-  subgraph GEN["생성·추출 — joniverse-ai (lib/openai/)"]
+  subgraph GEN["생성·추출 — joniverse-ai (app/api/extract/ + app/api/generate/ + lib/openai/)"]
+    S_EX["POST /api/extract (asset-store에서 읽기)"]
+    S_GENR["POST /api/generate (라우트: kind 분기)"]
     G_EXT["extract.ts: extractStyle + generateCharacterSheet"]
     G_GEN["generate.ts: generateCut + generateCoverVariants"]
   end
@@ -76,7 +76,8 @@ flowchart TD
   end
   C0["데모 캐시 연결 #307 (미확인·진행중)"]
 
-  U_ON --> S_UP --> S_EX --> G_EXT
+  U_ON --> S_UP
+  U_ON --> S_EX --> G_EXT
   U_ON --> S_GENR --> G_EXT
   S_GENR --> G_GEN
   U_SESS --> S_BRAIN
