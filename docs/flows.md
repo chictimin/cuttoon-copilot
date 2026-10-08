@@ -45,23 +45,68 @@ flowchart TD
 ## 2. 프로세스 흐름 — 화면 입력부터 ZIP까지
 
 ```mermaid
-flowchart TD
-  P1["화면에서 입력받기"]
-  P2["API 라우트로 보내기"]
-  P3["3턴 대화 만들기"]
-  P4["대사 만들기"]
-  P5["표지·컷 이미지 만들기"]
-  P6["저장 검사하기"]
-  P7["DB·버킷에 저장하기"]
-  P8["에디터에서 불러오기"]
-  P9["대사·말풍선 고치기"]
-  P10["버전 저장·되돌리기"]
-  P11["말풍선 합성하기"]
-  P12["ZIP으로 묶어 내려주기"]
-  P0["데모 캐시 연결 (미확인·진행중)"]
+sequenceDiagram
+  participant U as 사용자 화면
+  participant A as API 라우트
+  participant T as 텍스트 생성(LLM)
+  participant G as 이미지 생성
+  participant V as 저장 검사
+  participant D as DB·버킷
+  participant E as Export 합성
 
-  P1 --> P2 --> P3 --> P2 --> P4 --> P2 --> P5 --> P6 --> P7 --> P8 --> P9 --> P10 --> P11 --> P12
-  P9 -. "미확인" .-> P0
+  rect rgb(240, 245, 255)
+  Note over U,G: ① 세션 생성
+  U->>A: 소재 보내기
+  A->>T: 3턴 대화 만들기
+  T-->>U: 선택지 보여주기
+  U->>U: 답하기 ×3 · 말투 고르기
+  U->>A: 대사 요청
+  A->>T: 4컷 대사 만들기
+  U->>A: 표지 3안 요청
+  A->>G: 표지 만들기
+  alt 표지 실패
+    U->>U: 다시 뽑기
+  end
+  U->>U: 표지 1안 고르기
+  U->>A: 나머지 컷 요청
+  loop 이어서 만들기
+    A->>G: 컷 만들기
+  end
+  alt 컷 실패
+    U->>U: 이어서 만들기
+  end
+  end
+
+  rect rgb(240, 255, 240)
+  Note over U,D: ② 저장
+  U->>A: 세션 저장
+  A->>V: 스키마·선택 기록 검사
+  alt 검사 실패
+    V-->>U: 400 · 고치기 안내
+  else 통과
+    V->>D: 세션·선택 기록 저장
+    D-->>U: 저장됨(선택 기록 결과 포함)
+  end
+  end
+
+  rect rgb(255, 248, 240)
+  Note over U,D: ③ 에디터 저장
+  U->>A: 버전 저장
+  A->>D: 버전 저장하기
+  end
+
+  rect rgb(255, 240, 245)
+  Note over U,E: ④ Export
+  U->>A: ZIP 요청
+  A->>D: 세션·폰트 읽기
+  alt 데모 캐시면
+    D-->>E: public 파일
+  else 아니면
+    D-->>E: 버킷 이미지
+  end
+  E->>E: 말풍선 합성(좌표·화자 꼬리)
+  E-->>U: ZIP 내려주기
+  end
 ```
 
 ## 3. 상세 — 소유자별 레인 · 파일 경로
