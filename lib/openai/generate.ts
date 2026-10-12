@@ -611,8 +611,20 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   // 유료 호출 전에 읽어 모르는 값이면 여기서 멈춘다(#190).
   const setting = imageSetting()
 
+  // #326 S9: 다시 그리기 자유 입력. 대상 컷(nextUngeneratedCut) 프롬프트의
+  // direction_note 자리에 덮어쓴다 — 정리·100자 상한·브랜드 투영은
+  // buildCutPrompt가 그대로 처리한다. 컷에 기존 direction_note가 있어도
+  // 이번 요청 값이 이긴다. 요청 복사본에만 싣고 저장하지 않는다.
+  // route가 문자열·비어 있지 않음을 걸러 오지만, 직접 호출도 있을 수 있어
+  // 여기서도 확인한다.
+  const regenNote =
+    typeof input.regen_note === 'string' && input.regen_note.trim()
+      ? input.regen_note
+      : undefined
+  const promptCut = regenNote !== undefined && cut ? { ...cut, direction_note: regenNote } : cut
+
   // ComfyUI 는 체이닝이 없어 앞 컷을 모른다(comfyui.ts 머리말) — 그때는 연속 문장을 넣지 않는다.
-  const prompt = buildCutPrompt(storyboard, preset, cut, {
+  const prompt = buildCutPrompt(storyboard, preset, promptCut, {
     continuesChain: !!input.continueFrom && setting !== 'comfyui',
   })
   const { base64, responseId } = await callImageGeneration(

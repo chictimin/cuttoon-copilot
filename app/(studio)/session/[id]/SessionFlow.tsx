@@ -40,7 +40,7 @@ import { resolveImageUrl } from "../../asset-url";
 import { CTA_STRENGTHS } from "../../cta-strength-options";
 import { DIRECTION_VARIETIES } from "../../direction-variety-options";
 import { beatLabel } from "../../ui-labels";
-import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
+import { generateChainedCuts, generateCoverVariants, generateRedrawnCut, type GeneratedCut } from "./generate-client";
 // 순수 헬퍼라 클라이언트에서 값으로 import해도 된다(서버 모듈·DB import 없음, #207).
 import {
   createSelectionLog,
@@ -55,7 +55,7 @@ import {
   fetchSubjectSuggestions,
   hasSuggestionContext,
 } from "./subject-suggestions";
-import type { CameraAngle, Cut, ShotType, Storyboard } from "./storyboard-types";
+import type { CameraAngle, Cut, CutCharacter, Expression, Pose, ShotType, Storyboard, TimeOfDay } from "./storyboard-types";
 
 type Step = "subject" | "brainstorm" | "tone" | "assembling" | "conti" | "captions" | "cover" | "generating" | "cuts" | "saved";
 
@@ -129,6 +129,79 @@ function isCameraAngle(value: unknown): value is CameraAngle {
   return (
     typeof value === "string" && CAMERA_ANGLE_OPTIONS.some((option) => option.id === value)
   );
+}
+
+// #326 S9: 다시 그리기 모달 선택지. 값 목록은 storyboard-types.ts의 유니언과
+// 같은 집합이다(스키마 enum과 동일). 라벨은 화면 표시용이다.
+const TIME_OF_DAY_OPTIONS: { id: TimeOfDay; label: string }[] = [
+  { id: "morning", label: "아침" },
+  { id: "noon", label: "점심" },
+  { id: "evening", label: "저녁" },
+  { id: "night", label: "밤" },
+];
+const EXPRESSION_OPTIONS: { id: Expression; label: string }[] = [
+  { id: "neutral", label: "무표정" },
+  { id: "smile", label: "미소" },
+  { id: "laugh", label: "웃음" },
+  { id: "tired", label: "지침" },
+  { id: "worried", label: "걱정" },
+  { id: "surprised", label: "놀람" },
+  { id: "determined", label: "결심" },
+  { id: "relieved", label: "안도" },
+];
+const POSE_OPTIONS: { id: Pose; label: string }[] = [
+  { id: "stand", label: "서 있기" },
+  { id: "sit", label: "앉기" },
+  { id: "slump", label: "축 늘어짐" },
+  { id: "point", label: "가리키기" },
+  { id: "arms_up", label: "만세" },
+  { id: "walk", label: "걷기" },
+  { id: "stretch", label: "기지개" },
+  { id: "lie_down", label: "눕기" },
+];
+
+/** #326 S9: 다시 그려 만든 후보 1장 + 그 그림을 만든 연출 값. */
+interface RedrawCandidate {
+  asset: string;
+  image: string;
+  shot_type: ShotType;
+  camera_angle: CameraAngle;
+  time_of_day: TimeOfDay | undefined;
+  characters: CutCharacter[];
+}
+
+/** #326 S9: 후보를 넘기다 원본으로 돌아올 때 복원할 값(첫 재생성 때 1회 기록). */
+interface RedrawOriginal {
+  asset: string | null;
+  image: string;
+  shot_type: ShotType;
+  camera_angle: CameraAngle;
+  time_of_day: TimeOfDay | undefined;
+  characters: CutCharacter[];
+}
+
+/** #326 S9: 모달 입력. time_of_day "auto"는 컷 값 유지(덮어쓰지 않음). */
+interface RedrawFormState {
+  shot_type: ShotType;
+  camera_angle: CameraAngle;
+  time_of_day: TimeOfDay | "auto";
+  characters: { character_id: string; expression: Expression; pose: Pose }[];
+  note: string;
+}
+
+// #326 S9: 모달을 열 때 컷 현재 값으로 폼을 채운다.
+function redrawFormFor(cut: Cut): RedrawFormState {
+  return {
+    shot_type: cut.shot_type,
+    camera_angle: cut.camera_angle,
+    time_of_day: cut.time_of_day ?? "auto",
+    characters: cut.characters_in_frame.map((c) => ({
+      character_id: c.character_id,
+      expression: c.expression,
+      pose: c.pose,
+    })),
+    note: "",
+  };
 }
 
 // spec-a3 3-2: 조립 전에는 상태 subjectTags, 조립 후에는 storyboard.subject_tags가
@@ -243,6 +316,18 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [directionVariety, setDirectionVariety] = useState<DirectionVariety>("normal");
   // #326 S2: "디테일 수정" 토글(기본 꺼짐). 끄는 것은 숨김 — 바꾼 값은 유지된다.
   const [showDetailEdit, setShowDetailEdit] = useState(false);
+  // #326 S9: 한 컷 다시 그리기. 모달 대상은 cuts 배열 인덱스, 후보 목록·표시
+  // 위치는 cut_index 키. 후보·원본은 메모리에만 둔다(저장 전 이탈 시 사라짐).
+  const [redrawCutIndex, setRedrawCutIndex] = useState<number | null>(null);
+  const [redrawForm, setRedrawForm] = useState<RedrawFormState | null>(null);
+  const [redrawing, setRedrawing] = useState(false);
+  const [redrawError, setRedrawError] = useState<string | null>(null);
+  const [redrawCandidates, setRedrawCandidates] = useState<Record<number, RedrawCandidate[]>>({});
+  const [redrawShown, setRedrawShown] = useState<Record<number, number>>({});
+  // #326 S9: 컷별 체이닝 토큰(그 컷을 만들 때 쓴 continueFrom). 컷2는 표지 토큰.
+  // 없으면 다시 그리기 요청에서 continueFrom을 생략한다.
+  const chainTokensRef = useRef<Record<number, string>>({});
+  const redrawOriginalsRef = useRef<Record<number, RedrawOriginal>>({});
   // F2: 이미지 호출 전 생성 대사의 상태. "idle"이면 captions 단계 진입 시 1회 호출.
   const [captionStatus, setCaptionStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [captionError, setCaptionError] = useState<string | null>(null);
@@ -824,6 +909,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   async function runChainedCuts(startStoryboard: Board, token: string) {
     if (!preset) return;
     chainRef.current = { storyboard: startStoryboard, token };
+    // #326 S9: 첫 미생성 컷(보통 컷2)의 체이닝 토큰을 기록한다 — 표지 토큰이다.
+    if (token) {
+      const firstPending = startStoryboard.cuts.find((cut) => !cut.generated_image);
+      if (firstPending) chainTokensRef.current[firstPending.cut_index] = token;
+    }
     setStep("generating");
     setGenError(null);
     setGenProgress(null);
@@ -847,6 +937,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             storyboard: { ...chain.storyboard, cuts },
             token: generated.continuationToken ?? chain.token,
           };
+          // #326 S9: 다음 컷을 만들 때 쓸 토큰(이번 컷 결과 토큰)을 기록한다.
+          const nextCut = cuts[i + 1];
+          if (nextCut && generated.continuationToken) {
+            chainTokensRef.current[nextCut.cut_index] = generated.continuationToken;
+          }
           setStoryboard(chainRef.current.storyboard);
           setCutImageUrls((prev) => ({ ...prev, [cuts[i].cut_index]: generated.image }));
         },
@@ -899,6 +994,370 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     setCaptionError(null);
     setDefaultCutIndexes([]);
     setStep("captions");
+  }
+
+  // #326 S9: cuts 배열 인덱스의 컷에 후보(원본=0, 재생성n=1..n) 값을 입힌다.
+  // 대사·말풍선 위치·reserved_zone은 건드리지 않는다. 저장은 storyboard
+  // 그대로 하므로 표시 중인 후보가 곧 확정 값이다.
+  function materializeCandidate(
+    board: Board,
+    arrayIndex: number,
+    shown: number,
+    lists: Record<number, RedrawCandidate[]>
+  ): Board {
+    const cut = board.cuts[arrayIndex];
+    if (!cut) return board;
+    if (shown === 0) {
+      const orig = redrawOriginalsRef.current[cut.cut_index];
+      if (!orig) return board;
+      return {
+        ...board,
+        cuts: board.cuts.map((c, idx) =>
+          idx === arrayIndex
+            ? {
+                ...c,
+                generated_image: orig.asset,
+                shot_type: orig.shot_type,
+                camera_angle: orig.camera_angle,
+                time_of_day: orig.time_of_day,
+                characters_in_frame: orig.characters.map((ch) => ({ ...ch })),
+                prompt_used: promptForCut(board.subject, {
+                  ...c,
+                  shot_type: orig.shot_type,
+                  camera_angle: orig.camera_angle,
+                }),
+              }
+            : c
+        ),
+      };
+    }
+    const cand = lists[cut.cut_index]?.[shown - 1];
+    if (!cand) return board;
+    return {
+      ...board,
+      cuts: board.cuts.map((c, idx) =>
+        idx === arrayIndex
+          ? {
+              ...c,
+              generated_image: cand.asset,
+              shot_type: cand.shot_type,
+              camera_angle: cand.camera_angle,
+              time_of_day: cand.time_of_day,
+              characters_in_frame: cand.characters.map((ch) => ({ ...ch })),
+              prompt_used: promptForCut(board.subject, {
+                ...c,
+                shot_type: cand.shot_type,
+                camera_angle: cand.camera_angle,
+              }),
+            }
+          : c
+      ),
+    };
+  }
+
+  // #326 S9: 후보 넘겨 보기. storyboard 컷 값과 표시 이미지를 함께 바꾼다.
+  function showRedrawCandidateWith(
+    arrayIndex: number,
+    shown: number,
+    active: Record<number, RedrawCandidate[]>
+  ) {
+    const cutKey = storyboard?.cuts[arrayIndex]?.cut_index;
+    if (cutKey == null) return;
+    setRedrawShown((prev) => ({ ...prev, [cutKey]: shown }));
+    setStoryboard((prev) => (prev ? materializeCandidate(prev, arrayIndex, shown, active) : prev));
+    const image =
+      shown === 0
+        ? redrawOriginalsRef.current[cutKey]?.image
+        : active[cutKey]?.[shown - 1]?.image;
+    if (image !== undefined) setCutImageUrls((prev) => ({ ...prev, [cutKey]: image }));
+  }
+
+  function showRedrawCandidate(arrayIndex: number, shown: number) {
+    showRedrawCandidateWith(arrayIndex, shown, redrawCandidates);
+  }
+
+  // #326 S9: 모달 열기 — 폼을 컷 현재 값으로 채운다.
+  function openRedrawModal(arrayIndex: number) {
+    const cut = storyboard?.cuts[arrayIndex];
+    if (!cut) return;
+    setRedrawCutIndex(arrayIndex);
+    setRedrawForm(redrawFormFor(cut));
+    setRedrawError(null);
+  }
+
+  function closeRedrawModal() {
+    setRedrawCutIndex(null);
+  }
+
+  function updateRedrawCharacter(characterId: string, patch: { expression?: Expression; pose?: Pose }) {
+    setRedrawForm((prev) =>
+      prev
+        ? {
+            ...prev,
+            characters: prev.characters.map((c) =>
+              c.character_id === characterId ? { ...c, ...patch } : c
+            ),
+          }
+        : prev
+    );
+  }
+
+  // #326 S9: 모달에서 [다시 그리기] — 그 컷 한 장만 생성한다. 요청용 복사본은
+  // 대상 컷 generated_image만 비우고 모달 연출값을 덮어쓴다. 자유 입력은 이번
+  // 요청에만 싣고 스토리보드에 저장하지 않는다. 만든 후보를 표시 후보로 둔다.
+  async function handleRedrawGenerate() {
+    if (!storyboard || !preset || redrawCutIndex === null || !redrawForm) return;
+    const cut = storyboard.cuts[redrawCutIndex];
+    if (!cut) return;
+    const arrayIndex = redrawCutIndex;
+    const form = redrawForm;
+    setRedrawing(true);
+    setRedrawError(null);
+    try {
+      const requestCuts = storyboard.cuts.map((c) =>
+        c.cut_index === cut.cut_index
+          ? {
+              ...c,
+              generated_image: null,
+              shot_type: form.shot_type,
+              camera_angle: form.camera_angle,
+              ...(form.time_of_day !== "auto" ? { time_of_day: form.time_of_day } : {}),
+              characters_in_frame: form.characters.map((ch) => ({ ...ch })),
+            }
+          : c
+      );
+      const requestBoard: Board = { ...storyboard, cuts: requestCuts };
+      const token = chainTokensRef.current[cut.cut_index];
+      const generated = await generateRedrawnCut({
+        storyboard: requestBoard,
+        preset,
+        ...(token ? { continueFrom: token } : {}),
+        ...(form.note.trim() ? { regenNote: form.note.trim() } : {}),
+      });
+      if (!redrawOriginalsRef.current[cut.cut_index]) {
+        redrawOriginalsRef.current[cut.cut_index] = {
+          asset: cut.generated_image,
+          image: cutImageUrls[cut.cut_index] ?? "",
+          shot_type: cut.shot_type,
+          camera_angle: cut.camera_angle,
+          time_of_day: cut.time_of_day,
+          characters: cut.characters_in_frame.map((c) => ({ ...c })),
+        };
+      }
+      const candidate: RedrawCandidate = {
+        asset: generated.asset,
+        image: generated.image,
+        shot_type: form.shot_type,
+        camera_angle: form.camera_angle,
+        time_of_day: form.time_of_day === "auto" ? cut.time_of_day : form.time_of_day,
+        characters: form.characters.map((c) => ({ ...c })),
+      };
+      const list = [...(redrawCandidates[cut.cut_index] ?? []), candidate];
+      const active = { ...redrawCandidates, [cut.cut_index]: list };
+      setRedrawCandidates(active);
+      showRedrawCandidateWith(arrayIndex, list.length, active);
+    } catch {
+      setRedrawError("그 컷을 다시 그리지 못했어요. 다시 시도해주세요");
+    } finally {
+      setRedrawing(false);
+    }
+  }
+
+  // #326 S9: 컷별 다시 그리기·후보 넘기기 UI. 후보가 없으면 다시 그리기 버튼만 둔다.
+  function redrawControls(arrayIndex: number, cutKey: number) {
+    const total = redrawCandidates[cutKey]?.length ?? 0;
+    const shown = redrawShown[cutKey] ?? 0;
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => openRedrawModal(arrayIndex)}
+          className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium hover:bg-zinc-50"
+        >
+          다시 그리기
+        </button>
+        {total > 0 && (
+          <>
+            <button
+              type="button"
+              aria-label="이전 후보"
+              disabled={shown === 0}
+              onClick={() => showRedrawCandidate(arrayIndex, shown - 1)}
+              className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-40"
+            >
+              ‹
+            </button>
+            <span className="text-xs text-zinc-500">
+              {shown === 0 ? "원본" : `재생성${shown}/${total}`}
+            </span>
+            <button
+              type="button"
+              aria-label="다음 후보"
+              disabled={shown === total}
+              onClick={() => showRedrawCandidate(arrayIndex, shown + 1)}
+              className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-40"
+            >
+              ›
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // #326 S9: 다시 그리기 모달. 입력→[다시 그리기]→모달 안 결과, 반복 가능.
+  // 닫아도 만든 후보는 버리지 않는다(표시 후보가 storyboard에 이미 반영됨).
+  function redrawModal() {
+    if (redrawCutIndex === null || !redrawForm || !storyboard) return null;
+    const cut = storyboard.cuts[redrawCutIndex];
+    if (!cut) return null;
+    const form = redrawForm;
+    const roleName = (id: string) =>
+      storyboard.cast.find((m) => m.character_id === id)?.role === "supporting"
+        ? "조연"
+        : "주인공";
+    const currentTimeLabel =
+      cut.time_of_day != null
+        ? (TIME_OF_DAY_OPTIONS.find((o) => o.id === cut.time_of_day)?.label ?? cut.time_of_day)
+        : "미지정";
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="다시 그리기"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      >
+        <div className="flex max-h-full w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-lg bg-white p-4 text-left">
+          <h2 className="text-base font-semibold">어떻게 다시 만들어볼까요?</h2>
+          <div className="flex gap-2">
+            <label className="flex flex-1 items-center gap-2 text-xs text-zinc-600">
+              구도
+              <select
+                value={form.shot_type}
+                onChange={(e) => setRedrawForm({ ...form, shot_type: e.target.value as ShotType })}
+                className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+              >
+                {SHOT_TYPE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-1 items-center gap-2 text-xs text-zinc-600">
+              앵글
+              <select
+                value={form.camera_angle}
+                onChange={(e) =>
+                  setRedrawForm({ ...form, camera_angle: e.target.value as CameraAngle })
+                }
+                className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+              >
+                {CAMERA_ANGLE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-zinc-600">
+            시간대
+            <select
+              value={form.time_of_day}
+              onChange={(e) =>
+                setRedrawForm({
+                  ...form,
+                  time_of_day: e.target.value as RedrawFormState["time_of_day"],
+                })
+              }
+              className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+            >
+              <option value="auto">컷 값 유지({currentTimeLabel})</option>
+              {TIME_OF_DAY_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {form.characters.map((ch) => (
+            <div key={ch.character_id} className="flex items-center gap-2">
+              <span className="shrink-0 text-xs text-zinc-600">
+                {roleName(ch.character_id)} · {ch.character_id}
+              </span>
+              <select
+                aria-label={`${ch.character_id} 표정`}
+                value={ch.expression}
+                onChange={(e) =>
+                  updateRedrawCharacter(ch.character_id, {
+                    expression: e.target.value as Expression,
+                  })
+                }
+                className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+              >
+                {EXPRESSION_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label={`${ch.character_id} 포즈`}
+                value={ch.pose}
+                onChange={(e) =>
+                  updateRedrawCharacter(ch.character_id, { pose: e.target.value as Pose })
+                }
+                className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+              >
+                {POSE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+          <label className="flex items-center gap-2 text-xs text-zinc-600">
+            자유 입력
+            <input
+              value={form.note}
+              onChange={(e) => setRedrawForm({ ...form, note: e.target.value })}
+              placeholder="예: 커피잔을 들고 있게"
+              className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+            />
+          </label>
+          {redrawError && (
+            <p className="rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">{redrawError}</p>
+          )}
+          {cutImageUrls[cut.cut_index] && (
+            // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
+            <img
+              src={cutImageUrls[cut.cut_index]}
+              alt={`다시 그린 ${cut.cut_index}컷`}
+              className="aspect-square w-full rounded-md object-cover"
+            />
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={redrawing}
+              onClick={() => void handleRedrawGenerate()}
+              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
+            >
+              {redrawing ? "그리는 중…" : "다시 그리기"}
+            </button>
+            <button
+              type="button"
+              onClick={closeRedrawModal}
+              className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   async function handleSave() {
@@ -1705,6 +2164,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                     {cut.caption.text}
                   </button>
                 )}
+                {/* #326 S9: 복원 뷰 제외. 복원 뷰는 저장 수단이 없어 후보를 확정할 수 없다. */}
+                {!isRestoredView && redrawControls(i, cut.cut_index)}
               </div>
             ))}
           </div>
@@ -1730,6 +2191,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           )}
         </div>
       )}
+
+      {/* #326 S9: 다시 그리기 모달. cuts 단계에서만 열린다. */}
+      {redrawModal()}
 
       {step === "saved" && storyboard && (
         <div className="flex flex-col items-center gap-4 text-center">

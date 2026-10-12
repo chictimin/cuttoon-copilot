@@ -6,7 +6,7 @@ import type { PresetInput } from '@/lib/openai/extract'
 // POST /api/generate
 // body: { kind: 'character_sheet', preset }
 //     | { kind: 'cover_variants', storyboard, preset, referenceAssets }
-//     | { kind: 'cut', storyboard, preset, referenceAssets, continueFrom? }
+//     | { kind: 'cut', storyboard, preset, referenceAssets, continueFrom?, regen_note? }
 export async function POST(request: Request) {
   let body: unknown
   try {
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   if (typeof body !== 'object' || body === null) {
     return Response.json({ error: '본문은 객체여야 합니다' }, { status: 400 })
   }
-  const { kind, preset, storyboard, referenceAssets, continueFrom } = body as Record<string, unknown>
+  const { kind, preset, storyboard, referenceAssets, continueFrom, regen_note } = body as Record<string, unknown>
 
   if (!preset) {
     return Response.json({ error: 'preset이 필요합니다' }, { status: 400 })
@@ -56,6 +56,8 @@ export async function POST(request: Request) {
       case 'cut':
         // storyboard 검증은 lib/llm/storyboard-guard.ts(A① 소유)가 담당한다.
         // route에서 중복 구현하지 않고, 실제 생성을 붙이는 시점에 연결한다.
+        // #326 S9: regen_note(선택). 문자열이 아니거나 빈 값이면 무시한다 —
+        // 대상 컷(nextUngeneratedCut) 프롬프트에만 싣고 저장하지 않는다.
         return Response.json({
           result: await generateCut({
             storyboard,
@@ -64,6 +66,10 @@ export async function POST(request: Request) {
             // 체이닝 토큰. 문자열이 아니면 넘기지 않는다 — 첫 컷은 이어받을
             // 대상이 없어 생략되는 것이 정상이다.
             continueFrom: typeof continueFrom === 'string' ? continueFrom : undefined,
+            regen_note:
+              typeof regen_note === 'string' && regen_note.trim()
+                ? regen_note.trim()
+                : undefined,
           }),
         })
       default:

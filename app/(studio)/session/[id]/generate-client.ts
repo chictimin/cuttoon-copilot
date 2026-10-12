@@ -54,11 +54,19 @@ async function callGenerateCut(input: {
   preset: Preset;
   referenceAssets: string[];
   continueFrom?: string;
+  /** #326 S9: 다시 그리기 자유 입력. 요청에만 싣는다. */
+  regenNote?: string;
 }): Promise<{ asset: string; continuationToken?: string }> {
+  const { regenNote, ...rest } = input;
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "cut", ...input }),
+    // 계약 키는 regen_note(스네이크). 없으면 키를 빼고 보낸다.
+    body: JSON.stringify({
+      kind: "cut",
+      ...rest,
+      ...(regenNote ? { regen_note: regenNote } : {}),
+    }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -185,4 +193,24 @@ export async function generateChainedCuts(
   }
 
   return results;
+}
+
+// #326 S9: 한 컷만 다시 그리기. 호출부는 요청용 storyboard 복사본(대상 컷의
+// generated_image만 비우고 모달 연출값으로 덮어쓴 것)과 앞 컷 체이닝 토큰·
+// 자유 입력만 넘긴다. nextUngeneratedCut이 비워진 대상 컷을 고른다.
+export async function generateRedrawnCut(input: {
+  storyboard: Storyboard;
+  preset: Preset;
+  continueFrom?: string;
+  regenNote?: string;
+}): Promise<GeneratedCut> {
+  const referenceAssets = referenceAssetsOf(input.preset);
+  const raw = await callGenerateCut({
+    storyboard: input.storyboard,
+    preset: input.preset,
+    referenceAssets,
+    ...(input.continueFrom ? { continueFrom: input.continueFrom } : {}),
+    ...(input.regenNote ? { regenNote: input.regenNote } : {}),
+  });
+  return toGeneratedCut(raw);
 }

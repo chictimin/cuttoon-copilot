@@ -60,5 +60,9 @@ export interface ImageProvider {
     preset: unknown
     referenceAssets: unknown[]
     continueFrom?: string
+    // #326 S9: 컷 하나 다시 그리기 자유 입력(선택). 대상 컷 프롬프트의
+    // direction_note 자리에 들어가고, 스토리보드에는 저장되지 않는다.
+    // 문자열이 아니거나 빈 값이면 route가 버리고 여기까지 오지 않는다.
+    regen_note?: string
   }): Promise<GeneratedImageResult>
 }
