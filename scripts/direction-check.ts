@@ -3,7 +3,7 @@
  *
  * 기존 세션 하나의 스토리보드·preset·시트를 읽어, 컷 2~4에 서로 다른 연출을
  * 지정하고(기본 2 full·eye / 3 closeup·high / 4 wide·low, --cut1 로 컷 1도 지정 가능),
- * --mode 에 따라 표지(또는 레퍼런스)와 컷 이미지를 만든다. "구도·앵글·연출 메모가 그림에
+ * --mode 에 따라 표지(또는 기준 컷)와 컷 이미지를 만든다. "구도·앵글·연출 메모가 그림에
  * 먹히는가", "컷 사이 인물(얼굴·피부색·옷·머리색)이 유지되는가" 를 사람이 본다.
  *
  * - DB·Storage 쓰기 0. 세션·preset 은 getSession·getPreset, 시트는 readAsset 으로 읽기만 한다.
@@ -11,7 +11,7 @@
  *   (callImageGeneration)는 export 돼 있지 않다. 제품 코드를 고치지 않으려고 같은 요청을
  *   여기서 재현한다 — 모델(gpt-5 + image_generation)·크기(OUTPUT_SIZE)·quality(imageQuality)·
  *   첨부(모드별 generateCut 참조 고르기와 같게)·프롬프트(buildCutPrompt·buildReferencePrompt
- *   출력 그대로, 표지 구도는 coverDirectionsForMode 그대로)·이어받기(previous_response_id).
+ *   출력 그대로)·이어받기(previous_response_id).
  * - **기본은 --dry-run**: 이미지 호출 0, 프롬프트와 요청별 첨부·이어받기만 출력·저장한다.
  *   유료 생성은 --run 을 명시했을 때만 나간다. 1회 실행 최대 이미지 8장(MAX_IMAGES).
  *   --run의 OpenAI 클라이언트는 maxRetries 0이라 SDK 자동 재시도가 없어 실제 HTTP 생성
@@ -30,16 +30,13 @@
  * 옵션: --session <id>(--run 필수, --dry-run은 생략 시 fake) · --cut1/--cut2/--cut3/--cut4 <shot,angle>
  *   (--cut1 생략 시 세션 값) · --note "<문장>" · --note-cut <2|3|4, 기본 3> · --out <폴더>(기본
  *   tmp/direction-check, 아래 시각 하위폴더) · --dry-run(기본) · --run ·
- *   --mode <아래, 기본 chain> · --cover-pick <1|2|3, 기본 1 — 표지 3안이 있는 모드에서 컷 1로 고를 안> ·
- *   --ref-style <on|off, 기본 on — 레퍼런스(C·C´)에 참고 그림을 붙일지. 제품은 NEXT_PUBLIC_REFERENCE_STYLE_REFS>
+ *   --mode <아래, 기본 cover-ref-chain> · --cover-pick <1|2|3, 기본 1 — A에서 컷 1로 고를 표지 안>
  *
  * --mode(lib/cut-reference-mode.ts 와 같은 값, 제품은 NEXT_PUBLIC_CUT_REFERENCE_MODE):
- * - chain(A): 표지 3안(S5 배정) → 고른 표지가 컷 1, 컷 2~4 이어받기, 첨부 [시트, ...style_refs]. 6장.
- * - chain-nostyle(A´): A와 같되 컷 2~4 첨부는 시트만. 6장.
- * - cover-ref(C): 레퍼런스 1장(bust·eye + 배경) → 컷 1~4를 [시트, 레퍼런스]로 이어받기 없이 동시. 5장.
- * - cover-ref-chain(C´): C와 같되 레퍼런스 응답에서 시작해 컷 1→4 이어받기(화면 13986bc 흐름과 같다). 5장.
- * - cover-fixed(D): 표지 3안을 모두 bust·eye로 → 고른 표지가 컷 1, 컷 2~4는 [시트, 고른 표지] +
- *   이어받기. 6장.
+ * - cover-ref-chain(C´, 기본): 기준 컷 = 컷 1(buildReferencePrompt, bust·eye 고정, 첨부 [시트, ...style_refs])
+ *   → 컷 2~4는 [시트, 컷 1] + 컷 1부터 이어받기. 4장. (--cut1 구도는 기준 컷에 쓰이지 않는다 — bust·eye 고정)
+ * - chain(A, 비상용 = main 방식): 표지 3안(같은 프롬프트) → 고른 표지(--cover-pick)가 컷 1, 컷 2~4는
+ *   [시트, ...style_refs] + 이어받기. 6장.
  * 어느 모드든 인물 0명 컷은 제품(generateCut)처럼 시트를 첨부에서 뺀다.
  */
 
@@ -52,7 +49,7 @@ import { normalizeTagText, parseSubjectTags } from "../lib/llm/subject-tags";
 // generate.ts 는 불러오는 순간 OpenAI·Supabase 환경변수를 요구한다(모듈 최상위 클라이언트).
 // --dry-run 이 가짜 값을 깐 뒤, 실제 실행은 --run 확인 뒤에 동적으로 불러온다.
 
-const MAX_IMAGES = 8; // 1회 실행 상한. 모드별 최대 6장이라 기본 구성은 항상 안쪽이다.
+const MAX_IMAGES = 8; // 1회 실행 상한. 모드별 최대 6장(A)이라 기본 구성은 항상 안쪽이다.
 const RESPONSES_MODEL = "gpt-5"; // generate.ts RESPONSES_MODEL 과 같은 값
 // generate.ts OUTPUT_SIZE(1024×1024)와 같은 값. 불러온 뒤 같은지 다시 확인한다.
 const IMAGE_SIZE = "1024x1024";
@@ -60,8 +57,8 @@ const IMAGE_SIZE = "1024x1024";
 // 넣어 브랜드 투영(projectForModel)이 메모에도 걸리는지 같이 본다.
 const FAKE_NOTE = "손에 [블루핏 앱]을 들고 환하게 웃기";
 
-type Mode = "chain" | "chain-nostyle" | "cover-ref" | "cover-ref-chain" | "cover-fixed";
-const MODES: readonly Mode[] = ["chain", "chain-nostyle", "cover-ref", "cover-ref-chain", "cover-fixed"];
+type Mode = "cover-ref-chain" | "chain";
+const MODES: readonly Mode[] = ["cover-ref-chain", "chain"];
 type Spec = { shot: string; angle: string };
 
 interface Args {
@@ -74,7 +71,6 @@ interface Args {
   run: boolean;
   mode: Mode;
   coverPick: 1 | 2 | 3;
-  refStyle: boolean;
 }
 
 type CastMember = { character_id?: string; role?: string; description?: string };
@@ -97,10 +93,10 @@ interface Loaded {
   readAsset: (uri: string) => Promise<Buffer | null>;
 }
 
-// 요청 하나. attach 는 애셋 URI 또는 앞 요청의 파일 라벨(cover-N·reference), prev 는 이어받을
+// 요청 하나. attach 는 애셋 URI 또는 앞 요청의 파일 라벨(cover-N·cut-1), prev 는 이어받을
 // 앞 요청의 파일 라벨. --dry-run 은 이 목록을 기록만 하고, --run 은 이 순서대로 보낸다.
 interface Req {
-  file: string; // 확장자 없는 파일 이름(cover-1·reference·cut-2)
+  file: string; // 확장자 없는 파일 이름(cover-1·cut-1·cut-2)
   kind: "cover" | "reference" | "cut";
   cutIndex?: number;
   prompt: string;
@@ -129,7 +125,7 @@ function parseArgs(argv: string[]): Args {
   if (noteCutRaw !== "2" && noteCutRaw !== "3" && noteCutRaw !== "4") {
     throw new Error(`--note-cut 은 2|3|4 중 하나여야 합니다(받음: ${noteCutRaw})`);
   }
-  const modeRaw = get("--mode") ?? "chain";
+  const modeRaw = get("--mode") ?? "cover-ref-chain";
   if (!(MODES as readonly string[]).includes(modeRaw)) {
     throw new Error(`--mode 는 ${MODES.join("|")} 중 하나여야 합니다(받음: ${modeRaw})`);
   }
@@ -137,15 +133,10 @@ function parseArgs(argv: string[]): Args {
   if (pickRaw !== "1" && pickRaw !== "2" && pickRaw !== "3") {
     throw new Error(`--cover-pick 은 1|2|3 중 하나여야 합니다(받음: ${pickRaw})`);
   }
-  const refStyleRaw = get("--ref-style") ?? "on";
-  if (refStyleRaw !== "on" && refStyleRaw !== "off") {
-    throw new Error(`--ref-style 은 on|off 중 하나여야 합니다(받음: ${refStyleRaw})`);
-  }
   const cut1Raw = get("--cut1");
   return {
     mode: modeRaw as Mode,
     coverPick: Number(pickRaw) as 1 | 2 | 3,
-    refStyle: refStyleRaw === "on",
     session,
     cut1: cut1Raw !== undefined ? parseCutSpec(cut1Raw, "--cut1") : undefined,
     cutSpecs: {
@@ -191,7 +182,7 @@ async function loadDry(): Promise<Loaded> {
       cast: [{ character_id: "protagonist", role: "protagonist", description: "하루 종일 서서 일하는 40대 카페 사장님, 상의 #e8734a" }],
       cuts: [1, 2, 3, 4].map(one),
     },
-    // 참고 그림 1장을 둔다 — #326 실험(A/A'/C)은 참고 그림이 있는 조건에서 첨부 차이를 본다.
+    // 참고 그림 1장을 둔다 — #326 A·C´는 참고 그림이 있는 조건에서 첨부 차이를 본다.
     preset: {
       style: { line_weight: "medium", saturation: "pastel", character_ratio: "2.5head" },
       assets: { character_sheet: "asset://dry-sheet", style_refs: ["asset://dry-style"] },
@@ -237,8 +228,8 @@ async function main(): Promise<void> {
   const setting = imageSetting();
   if (setting === "comfyui") throw new Error("이 확인은 OpenAI 이미지로 한다 — IMAGE_PROVIDER 를 비우거나 openai 로 두세요");
   const quality = imageQuality(setting);
-  const refMode = args.mode === "cover-ref" || args.mode === "cover-ref-chain"; // 레퍼런스 1장 구조
-  const totalImages = refMode ? 1 + 4 : 3 + 3;
+  const refMode = args.mode === "cover-ref-chain"; // C´: 기준 컷 = 컷 1
+  const totalImages = refMode ? 1 + 3 : 3 + 3;
   if (totalImages > MAX_IMAGES) throw new Error(`1회 ${totalImages}장은 상한(${MAX_IMAGES}장)을 넘겨 거부합니다`);
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -275,10 +266,9 @@ async function main(): Promise<void> {
     // generate.ts 동적 import용 키만 없을 때 가짜를 깐다. 이 키로는 호출하지 않는다.
     process.env.OPENAI_API_KEY = "sk-dry-fake";
   }
-  // 제품 코드와 같은 스위치 값을 깔아 둔다 — coverDirectionsForMode 가 이 값으로 표지 구도를 정한다.
+  // 제품 코드와 같은 스위치 값을 깔아 둔다(스크립트는 요청을 재현하므로 직접 읽지는 않는다).
   process.env.NEXT_PUBLIC_CUT_REFERENCE_MODE = args.mode;
-  process.env.NEXT_PUBLIC_REFERENCE_STYLE_REFS = args.refStyle ? "on" : "off";
-  const { OUTPUT_SIZE, buildCutPrompt, buildReferencePrompt, coverDirectionsForMode } = await import("../lib/openai/generate");
+  const { OUTPUT_SIZE, buildCutPrompt, buildReferencePrompt } = await import("../lib/openai/generate");
   if (`${OUTPUT_SIZE.width}x${OUTPUT_SIZE.height}` !== IMAGE_SIZE) throw new Error("OUTPUT_SIZE 가 바뀌었습니다 — 이 스크립트의 IMAGE_SIZE 를 맞추세요");
 
   const loaded = args.session === "fake" ? await loadDry() : await loadReal(args.session);
@@ -286,7 +276,7 @@ async function main(): Promise<void> {
   const storyboard = applyDirection(loaded.storyboard, args);
   const cutOf = (i: number): Cut => (storyboard.cuts ?? []).find((c) => c.cut_index === i) ?? { cut_index: i };
 
-  // ── 요청 목록 (모드별 generateCut·generateReference·generateCoverVariants 재현) ──
+  // ── 요청 목록 (모드별 generateCut·generateCoverVariants 재현) ──
   const sheetUri = loaded.preset.assets?.character_sheet;
   const styleUris = (loaded.preset.assets?.style_refs ?? []).filter((u) => u !== sheetUri);
   const firstAttach = [sheetUri, ...styleUris].filter((u): u is string => typeof u === "string");
@@ -298,41 +288,35 @@ async function main(): Promise<void> {
   const build = (cut: Cut, opts: Parameters<typeof buildCutPrompt>[3]) => buildCutPrompt(storyboard as any, loaded.preset as any, cut as any, opts);
 
   if (refMode) {
-    // C·C´: 레퍼런스 1장(첨부 [시트, ...style_refs], 이어받기 없음) → 컷 1~4는 [시트, 레퍼런스].
-    // 첨부는 [시트, ...style_refs], --ref-style off 면 시트만(generate.ts referenceAttachments 와 같다).
-    const refAttach = args.refStyle ? firstAttach : firstAttach.filter((u) => u === sheetUri);
+    // C´: 기준 컷 = 컷 1(화면 cover_variants count 1과 같다 — 첨부 [시트, ...style_refs], 이어받기 없음)
+    // → 컷 2~4는 [시트, 컷 1] + 컷 1부터 이어받기(generateCut 의 reference_asset 분기).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    reqs.push({ file: "reference", kind: "reference", prompt: buildReferencePrompt(storyboard as any, loaded.preset as any), attach: refAttach, prev: null, note: `레퍼런스(bust·eye, 참고 그림 ${args.refStyle ? "on" : "off"})` });
-    for (const i of [1, 2, 3, 4]) {
-      // C´: 화면(13986bc)과 같이 레퍼런스 응답에서 시작해 컷 1→4로 이어받는다.
-      const chained = args.mode === "cover-ref-chain";
+    reqs.push({ file: "cut-1", kind: "reference", cutIndex: 1, prompt: buildReferencePrompt(storyboard as any, loaded.preset as any), attach: firstAttach, prev: null, note: "컷 1(기준 컷, bust·eye)" });
+    for (const i of [2, 3, 4]) {
       reqs.push({
         file: `cut-${i}`,
         kind: "cut",
         cutIndex: i,
-        prompt: build(cutOf(i), { referenceImage: true, ...(chained ? { continuesChain: true } : {}) }),
-        attach: withSheet(i, [sheetUri, "reference"]),
-        prev: chained ? (i === 1 ? "reference" : `cut-${i - 1}`) : null,
+        prompt: build(cutOf(i), { referenceImage: true, continuesChain: true }),
+        attach: withSheet(i, [sheetUri, "cut-1"]),
+        prev: `cut-${i - 1}`,
         note: `컷 ${i}`,
       });
     }
   } else {
-    // A·A´·D: 표지 3안(첨부 [시트, ...style_refs]) → 고른 안이 컷 1 → 컷 2~4 이어받기.
+    // A(main 방식): 표지 3안은 같은 프롬프트(첨부 [시트, ...style_refs]) → 고른 안이 컷 1 → 컷 2~4 이어받기.
     const cut1 = cutOf(1);
-    coverDirectionsForMode(cut1).forEach((d, k) => {
-      const variantCut = { ...cut1, shot_type: d.shot_type ?? cut1.shot_type, camera_angle: d.camera_angle ?? cut1.camera_angle, direction_note: undefined };
-      reqs.push({ file: `cover-${k + 1}`, kind: "cover", prompt: build(variantCut, {}), attach: firstAttach, prev: null, note: `표지 ${k + 1}안` });
-    });
+    for (const k of [1, 2, 3]) {
+      reqs.push({ file: `cover-${k}`, kind: "cover", prompt: build(cut1, {}), attach: firstAttach, prev: null, note: `표지 ${k}안` });
+    }
     const picked = `cover-${args.coverPick}`;
     for (const i of [2, 3, 4]) {
-      const base =
-        args.mode === "cover-fixed" ? [sheetUri, picked] : args.mode === "chain-nostyle" ? [sheetUri] : [sheetUri, ...styleUris];
       reqs.push({
         file: `cut-${i}`,
         kind: "cut",
         cutIndex: i,
-        prompt: build(cutOf(i), { continuesChain: true, ...(args.mode === "cover-fixed" ? { referenceImage: true } : {}) }),
-        attach: withSheet(i, base),
+        prompt: build(cutOf(i), { continuesChain: true }),
+        attach: withSheet(i, [sheetUri, ...styleUris]),
         prev: i === 2 ? picked : `cut-${i - 1}`,
         note: `컷 ${i}`,
       });
@@ -344,9 +328,7 @@ async function main(): Promise<void> {
   const covers = reqs.filter((r) => r.kind === "cover");
   const cutReqs = reqs.filter((r) => r.kind === "cut");
   const reference = reqs.find((r) => r.kind === "reference");
-  const pairs = covers.map((r) => framingCamera(r.prompt));
-  if (args.mode === "cover-fixed") checks.push(["D: 표지 3안 모두 bust·eye 같은 구도", new Set(pairs).size === 1]);
-  else if (!refMode) checks.push(["표지 3안 (Framing, Camera) 조합이 3종", new Set(pairs).size === 3]);
+  if (!refMode) checks.push(["A: 표지 3안이 같은 프롬프트(main 방식)", new Set(covers.map((r) => r.prompt)).size === 1]);
   const raws = parseSubjectTags(storyboard.subject ?? "").map((t) => normalizeTagText(t.raw)).filter(Boolean);
   const leaked = reqs.filter((r) => raws.some((w) => normalizeTagText(r.prompt).includes(w))).length;
   checks.push([`소재 [태그] 원문 0회(${reqs.length}개 프롬프트 전부)`, leaked === 0]);
@@ -355,9 +337,9 @@ async function main(): Promise<void> {
     checks.push([`메모가 지정 컷(컷 ${args.noteCut}) 프롬프트에만`, noted.length === 1 && noted[0].cutIndex === args.noteCut]);
   }
   checks.push(["체인 문장 = 이어받는 컷에만", reqs.every((r) => r.prompt.includes(CHAIN) === (r.prev !== null && !noPeople(r.cutIndex ?? 0)))]);
-  const refImageExpected = refMode || args.mode === "cover-fixed";
+  const refImageExpected = refMode;
   checks.push([
-    `레퍼런스 안내 문장 = ${refImageExpected ? "모든 컷에" : "없음"}`,
+    `기준 컷 안내 문장 = ${refImageExpected ? "컷 2~4 모두에" : "없음"}`,
     cutReqs.every((r) => r.prompt.includes(REF_IMAGE) === refImageExpected) && [...covers, ...(reference ? [reference] : [])].every((r) => !r.prompt.includes(REF_IMAGE)),
   ]);
   if (reference) {
@@ -369,7 +351,7 @@ async function main(): Promise<void> {
         framingCamera(reference.prompt) === framingCamera(build({ cut_index: 0, shot_type: "bust", camera_angle: "eye" }, {})),
     ]);
   }
-  checks.push(["레퍼런스 외 요청에 기준 그림 문장 0", reqs.every((r) => r.kind === "reference" || !r.prompt.includes(REF_PANEL))]);
+  checks.push(["기준 컷 외 요청에 기준 그림 문장 0", reqs.every((r) => r.kind === "reference" || !r.prompt.includes(REF_PANEL))]);
   for (const r of noted) {
     const p = r.prompt;
     const iNote = p.indexOf("Director's note:");
@@ -387,7 +369,6 @@ async function main(): Promise<void> {
   const manifest = {
     session: args.session,
     mode: args.mode,
-    refStyle: args.refStyle ? "on" : "off",
     ...(refMode ? {} : { coverPick: args.coverPick }),
     dryRun: !args.run,
     model: RESPONSES_MODEL,
@@ -500,11 +481,9 @@ async function main(): Promise<void> {
   }
 
   const startedAll = performance.now();
-  // 표지 3안·레퍼런스를 먼저(순서대로), 그다음 컷. C는 컷 1~4를 동시에(앞 컷 의존 없음), 나머지는
-  // 이어받기 순서대로 하나씩 보낸다.
+  // 표지 3안·기준 컷을 먼저(순서대로), 그다음 컷을 이어받기 순서대로 하나씩 보낸다.
   for (const r of reqs.filter((x) => x.kind !== "cut")) await send(r);
-  if (args.mode === "cover-ref") await Promise.all(cutReqs.map(send));
-  else for (const r of cutReqs) await send(r);
+  for (const r of cutReqs) await send(r);
   const totalSeconds = ((performance.now() - startedAll) / 1000).toFixed(1);
 
   writeFileSync(

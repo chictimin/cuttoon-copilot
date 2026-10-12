@@ -1,37 +1,21 @@
-// #326 비교 실험(POC 한정): 컷 참조 방식 스위치. 서버(generate.ts)와 화면
-// (SessionFlow·generate-client)이 같은 값을 읽어야 해서 NEXT_PUBLIC_ 변수 하나로 둔다.
+// #326 컷 참조 방식 스위치(POC 통합 기준). 서버(generate.ts)가 읽는다.
 //
-// - chain (기본, A): 지금 그대로. 표지 = 컷 1, 컷 2~4는 앞 컷 이어받기 + [시트, ...style_refs].
-// - chain-nostyle (A'): A와 같되, 이어 그리는 컷(continueFrom 있음)에는 style_refs를 빼고 시트만(#328 1번).
-// - cover-ref (C): 표지 = 레퍼런스 1장(kind 'reference'). 컷 1~4를 새로 그리고, 각 컷은
-//   [시트, 레퍼런스]만 참조, 이어받기 없이 동시 생성.
-// - cover-ref-chain (C´): C와 같은 참조 + 앞 컷 이어받기(continueFrom)는 유지.
-// - cover-fixed (D, #326 JEON 제안): 표지 3안은 지금처럼 컷 1이 되되 구도를 bust·eye로
-//   고정하고, 컷 2~4는 [시트, 고른 표지] + 앞 컷 이어받기. 서버 컷 분기는 C´와 같다.
+// - cover-ref-chain (기본, C´): 컷 1 = 기준 컷(cover_variants count 1, bust·eye). 컷 2~4는
+//   [시트, 기준 컷](reference_asset) + 앞 컷 이어받기(continueFrom).
+// - chain (비상용, A): main 기존 방식. reference_asset 을 무시하고 [시트, ...style_refs] +
+//   앞 컷 이어받기.
 //
-// 모르는 값은 chain으로 돌린다 — 실험 스위치 오타로 생성이 막히지 않게 하되, 콘솔에 남긴다.
-// NEXT_PUBLIC_ 값은 화면 번들에 빌드(dev 서버 시작) 시점에 박힌다. 바꾸면 dev 서버를 다시 띄운다.
-export type CutReferenceMode = 'chain' | 'chain-nostyle' | 'cover-ref' | 'cover-ref-chain' | 'cover-fixed'
+// 값이 비었거나 모르는 값이면 C´로 돈다(모르는 값은 콘솔에 남긴다).
+// NEXT_PUBLIC_ 이라 값이 빌드(dev 서버 시작) 시점에 박힌다. 바꾸면 dev 서버를 다시 띄운다.
+export type CutReferenceMode = 'cover-ref-chain' | 'chain'
 
-const MODES: readonly CutReferenceMode[] = ['chain', 'chain-nostyle', 'cover-ref', 'cover-ref-chain', 'cover-fixed']
+const MODES: readonly CutReferenceMode[] = ['cover-ref-chain', 'chain']
 
 export function cutReferenceMode(): CutReferenceMode {
-  // process.env.NEXT_PUBLIC_… 를 그대로 적어야 Next가 화면 번들에 값을 넣는다(구조 분해 금지).
+  // process.env.NEXT_PUBLIC_… 를 그대로 적어야 Next가 번들에 값을 넣는다(구조 분해 금지).
   const raw = (process.env.NEXT_PUBLIC_CUT_REFERENCE_MODE ?? '').trim()
-  if (!raw) return 'chain'
+  if (!raw) return 'cover-ref-chain'
   if ((MODES as readonly string[]).includes(raw)) return raw as CutReferenceMode
-  console.warn(`[cut-reference-mode] 모르는 값 "${raw}" — chain(A)으로 동작합니다`)
-  return 'chain'
-}
-
-// #326 비교 실험(POC 한정): 기준 컷(레퍼런스 1장)에 참고 그림(style_refs)을 붙일지.
-// on(기본) = 지금처럼 [시트, ...style_refs], off = 시트만. 레퍼런스 생성 경로
-// (cover_variants count 1·kind reference)에만 걸린다 — 표지 3안·컷 첨부는 그대로.
-// 참고 그림 속 인물이 레퍼런스 인물로 끌려 들어오는지(#328) 따로 보려는 변수다.
-export function referenceStyleRefs(): boolean {
-  const raw = (process.env.NEXT_PUBLIC_REFERENCE_STYLE_REFS ?? '').trim().toLowerCase()
-  if (!raw || raw === 'on') return true
-  if (raw === 'off') return false
-  console.warn(`[cut-reference-mode] NEXT_PUBLIC_REFERENCE_STYLE_REFS 모르는 값 "${raw}" — on으로 동작합니다`)
-  return true
+  console.warn(`[cut-reference-mode] 모르는 값 "${raw}" — cover-ref-chain(C´)으로 동작합니다`)
+  return 'cover-ref-chain'
 }

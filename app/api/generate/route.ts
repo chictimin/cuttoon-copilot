@@ -1,4 +1,4 @@
-import { generateCut, generateCoverVariants, generateReference } from '@/lib/openai/generate'
+import { generateCut, generateCoverVariants } from '@/lib/openai/generate'
 // #19 결정: generateCharacterSheet는 B②(extract.ts) 소유 — extractStyle과 결합도가 높음.
 import { generateCharacterSheet } from '@/lib/openai/extract'
 import type { PresetInput } from '@/lib/openai/extract'
@@ -7,7 +7,6 @@ import type { PresetInput } from '@/lib/openai/extract'
 // body: { kind: 'character_sheet', preset }
 //     | { kind: 'cover_variants', storyboard, preset, referenceAssets }
 //     | { kind: 'cut', storyboard, preset, referenceAssets, continueFrom?, regen_note?, target_cut_index?, reference_asset? }
-//     | { kind: 'reference', storyboard, preset, referenceAssets, regen_note? }   (#326 POC: 레퍼런스 1장)
 export async function POST(request: Request) {
   let body: unknown
   try {
@@ -37,9 +36,9 @@ export async function POST(request: Request) {
       case 'cover_variants':
         // 표지 3안. count 는 1~3(기본 3) — 호출부가 안 개수를
         // 임의로 늘리지 못하게 한 것이므로(#50) 본문에서 받되 범위를 묶는다.
-        // #326 구조변경: 레퍼런스 1장 용도로 count 1을 보낸다.
-        // count 1 이면 generateCoverVariants 가 레퍼런스 프롬프트(bust·eye + 배경,
-        // 말풍선 자리 없음)로 1장을 그린다.
+        // #326 절충안: 기준 컷(= 컷 1) 1장 용도로 count 1을 보낸다.
+        // count 1 이면 generateCoverVariants 가 기준 컷 프롬프트(컷 1 그대로에 bust·eye 고정,
+        // 배경이 보이게, 말풍선 자리는 컷 1 값)로 1장을 그린다.
         // 체이닝 토큰도 받지 않는다: 3안은 독립 호출이어야 한다 (PRD 6절).
         //
         // requested 를 같이 내려보내는 이유(#108): generateCoverVariants 가
@@ -87,23 +86,9 @@ export async function POST(request: Request) {
                 : undefined,
           }),
         })
-      case 'reference':
-        // #326 POC: 레퍼런스 1장(표지). 구도 고정(bust·eye + 배경). 재생성은 같은 요청을
-        // 다시 보내고, 자유 입력은 regen_note 로 싣는다(저장하지 않음).
-        return Response.json({
-          result: await generateReference({
-            storyboard,
-            preset,
-            referenceAssets: Array.isArray(referenceAssets) ? referenceAssets : [],
-            regen_note:
-              typeof regen_note === 'string' && regen_note.trim()
-                ? regen_note.trim()
-                : undefined,
-          }),
-        })
       default:
         return Response.json(
-          { error: "kind는 'character_sheet' · 'cover_variants' · 'cut' · 'reference' 중 하나여야 합니다" },
+          { error: "kind는 'character_sheet' · 'cover_variants' · 'cut' 중 하나여야 합니다" },
           { status: 400 },
         )
     }

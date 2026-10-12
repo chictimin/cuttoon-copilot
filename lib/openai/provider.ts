@@ -24,9 +24,8 @@ export interface GeneratedImageResult {
   // 화면이 진짜 프롬프트를 받을 방법이 없어서 요약 문자열을 그 자리에 대신
   // 채워 넣던 문제를 없앤다.
   prompt?: string
-  // #325 POC: 표지 3안이 안마다 다른 연출로 생성되므로, 그 안에 실제로 쓴 연출을
-  // 함께 돌려준다. 호출부가 고른 안의 연출을 컷 1에 반영할 수 있게 선택 필드로
-  // 추가한다 — 기존 호출부는 이 필드를 읽지 않아도 그대로 동작한다.
+  // #326: 기준 컷(cover_variants count 1)은 구도를 bust·eye로 고정해 그리므로, 실제로 쓴
+  // 구도·앵글을 함께 돌려준다. 선택 필드라 기존 호출부는 읽지 않아도 된다.
   shot_type?: string
   camera_angle?: string
 }
@@ -39,7 +38,7 @@ export interface ImageProvider {
   // 표지 3안: 독립 호출. 세션에 누적하면 2안이 1안에 끌려가 서로 비슷해진다
   // (PRD 6절). 체이닝 토큰을 받지 않는 것으로 독립성을 계약에 드러낸다.
   // count 는 1~3 으로 묶어 호출부가 안 개수를 임의로 늘리지 못하게 한다.
-  // #326 POC: count 1 은 레퍼런스 1장이다(generate.ts generateCoverVariants 참조).
+  // #326: count 1 은 기준 컷(= 컷 1) 1장이다(generate.ts generateCoverVariants 참조).
   generateCoverVariants(input: {
     storyboard: unknown
     preset: unknown
@@ -65,11 +64,10 @@ export interface ImageProvider {
     // direction_note 자리에 들어가고, 스토리보드에는 저장되지 않는다.
     // 문자열이 아니거나 빈 값이면 route가 버리고 여기까지 오지 않는다.
     regen_note?: string
-    // #326 비교 실험(POC): 그릴 컷의 cut_index. 없으면 "그림 빈 첫 컷" 규칙.
-    // C(cover-ref)는 4컷을 동시에 그려 그 규칙으로는 대상을 못 고른다.
+    // #326: 그릴 컷의 cut_index. 없으면 "그림 빈 첫 컷" 규칙.
     target_cut_index?: number
-    // #326 실험 C·C´(cover-ref·cover-ref-chain): 레퍼런스 1장의 asset. 그 모드일 때만
-    // 읽고, 참조는 [시트, 레퍼런스]. C는 continueFrom 을 버리고 C´는 쓴다.
+    // #326 C´(기본 모드): 확정한 기준 컷(컷 1)의 asset. 오면 첨부는 [시트, 기준 컷],
+    // continueFrom 은 그대로 이어받는다. 비상 모드 A(chain)는 이 값을 읽지 않는다.
     reference_asset?: string
   }): Promise<GeneratedImageResult>
 }
