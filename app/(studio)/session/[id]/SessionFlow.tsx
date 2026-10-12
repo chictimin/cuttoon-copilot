@@ -81,10 +81,17 @@ const TURN_ORDER: BrainstormTurn["key"][] = ["protagonist", "supporting", "flow"
 //    빠져 있으면 되살린다 — 사용자 입력을 덮어쓰는 게 아니라 사라진 선택지를
 //    복구하는 것이다.
 // 3. 순서를 protagonist → supporting → flow 로 맞추고 빠진 턴은 채운다.
-function normalizeTurns(turns: BrainstormTurn[]): BrainstormTurn[] {
+// 4. 소재에서 이미 파악된 슬롯(resolved)은 서버가 일부러 뺀 턴이다(#331). 3번처럼
+//    빈 턴으로 되살리면 이미 답한 것을 다시 묻고, 거기서 "알아서 해줘"를 누르면
+//    소재에서 파악한 값을 덮어쓴다. 그래서 resolved 키는 되살리지 않는다. resolved에
+//    없는데 빠진 턴(서버·모델이 정말 빼먹은 경우)만 3번대로 빈 턴으로 남긴다(#247).
+function normalizeTurns(
+  turns: BrainstormTurn[],
+  resolvedKeys: ReadonlySet<BrainstormTurn["key"]> = new Set()
+): BrainstormTurn[] {
   const byKey = new Map(turns.map((turn) => [turn.key, turn]));
 
-  return TURN_ORDER.map((key) => {
+  return TURN_ORDER.filter((key) => !resolvedKeys.has(key)).map((key) => {
     if (key === "flow") {
       return normalizeFlowTurn(byKey.get(key));
     }
@@ -454,7 +461,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         });
         setResolvedSlots(resolved);
       }
-      setTurns(normalizeTurns(loaded));
+      setTurns(normalizeTurns(loaded, new Set((resolved ?? []).map((slot) => slot.key))));
       // spec-a3 3-2(a): id가 최신이고 요청 소재가 현재 소재와 같을 때만 태그 반영.
       // turns 등 기존 반영 조건은 현행 유지 — 태그 반영만 이 조건을 탄다.
       if (requestId === requestIdRef.current && requestSubject === subjectRef.current) {
