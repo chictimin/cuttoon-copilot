@@ -460,8 +460,17 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const subjectRef = useRef(subject);
   subjectRef.current = subject;
   const [preset, setPreset] = useState<Preset | null>(null);
-  const [coverVariants, setCoverVariants] = useState<GeneratedCut[] | null>(null);
-  const [coverRequested, setCoverRequested] = useState<number | undefined>(undefined);
+  // #326 구조변경: 표지 3안 → 레퍼런스 1장(상반신·눈높이 고정). 후보 목록·
+  // 표시 위치·확정값. 확정 뒤에는 변경이 잠긴다(cover 단계로 돌아가는 경로 없음).
+  const [refCandidates, setRefCandidates] = useState<GeneratedCut[]>([]);
+  const [refShown, setRefShown] = useState(0);
+  const [reference, setReference] = useState<{ asset: string; image: string } | null>(null);
+  // #326 구조변경: 레퍼런스 모달 입력. 구도·앵글은 bust·eye 고정, 인물 구성 고정.
+  const [refModalOpen, setRefModalOpen] = useState(false);
+  const [refTimeOfDay, setRefTimeOfDay] = useState<TimeOfDay | "auto">("auto");
+  const [refNote, setRefNote] = useState("");
+  const [refGenerating, setRefGenerating] = useState(false);
+  const [refError, setRefError] = useState<string | null>(null);
   const [cutImageUrls, setCutImageUrls] = useState<Record<number, string>>({});
   const [genError, setGenError] = useState<string | null>(null);
   const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
@@ -980,27 +989,37 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   }, [selectionNotice]);
 
   useEffect(() => {
-    if (step !== "cover" || !storyboard || coverVariants) return;
-    void loadCoverVariants();
+    if (step !== "cover" || !storyboard || refCandidates.length > 0) return;
+    void loadReference();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, storyboard]);
 
-  async function loadCoverVariants() {
+  // #326 구조변경: 레퍼런스 1장(상반신·눈높이 고정). 요청 복사본의 컷1
+  // shot_type·camera_angle만 bust·eye로 덮어쓴다 — storyboard 값은 그대로 둔다.
+  async function loadReference() {
     // preset은 assembling effect가 "cover"로 넘어가기 전에 이미 기다렸으므로
     // 이 시점엔 항상 준비돼 있다 — 여기서 다시 fetch하지 않는다(issue #123).
     if (!storyboard || !preset) return;
     setGenError(null);
 
     try {
-      const { variants, requested } = await generateCoverVariants(storyboard, preset);
-      setCoverVariants(variants);
-      setCoverRequested(requested);
+      const refBoard: Board = {
+        ...storyboard,
+        cuts: storyboard.cuts.map((c, i) =>
+          i === 0 ? { ...c, shot_type: "bust", camera_angle: "eye" } : c
+        ),
+      };
+      const { variants, requested } = await generateCoverVariants(refBoard, preset, 1);
+      setRefCandidates(variants);
+      setRefShown(0);
       selectionLogRef.current = recordRound(selectionLogRef.current, variants, requested ?? variants.length);
     } catch {
-      setGenError("표지를 만드는 데 실패했어요. 다시 시도해주세요");
+      setGenError("레퍼런스를 만드는 데 실패했어요. 다시 시도해주세요");
     }
   }
 
+  // #326 구조변경: 표지=레퍼런스 — S6 경로(표지가 컷1 되기)는 호출하지 않는다.
+  // 코드는 남긴다(삭제보다 호출 중단).
   async function handleSelectCover(variant: GeneratedCut, index: number) {
     if (!storyboard || !preset) return;
     selectionLogRef.current = markSelected(selectionLogRef.current, index);
@@ -1030,10 +1049,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   // 컷이 하나 끝날 때마다 storyboard·이미지 URL을 바로 반영한다. 다음 컷이 실패해도
   // 이미 유료로 만든 컷이 화면 상태에 남고, 재시도는 첫 미생성 컷부터 이어진다.
-  async function runChainedCuts(startStoryboard: Board, token: string) {
+  // #326 구조변경: 컷1도 체이닝으로 만든다. 시작 토큰은 확정 레퍼런스 결과 토큰.
+  // #326 S9: 첫 미생성 컷(컷1)의 체이닝 토큰을 기록한다 — 레퍼런스 토큰이다.
+  async function runChainedCuts(startStoryboard: Board, token: string, refAsset?: string) {
     if (!preset) return;
     chainRef.current = { storyboard: startStoryboard, token };
-    // #326 S9: 첫 미생성 컷(보통 컷2)의 체이닝 토큰을 기록한다 — 표지 토큰이다.
+    // #326 S9: 첫 미생성 컷의 체이닝 토큰을 기록한다 — 구조변경 뒤에는 컷1(레퍼런스 토큰)이다.
     if (token) {
       const firstPending = startStoryboard.cuts.find((cut) => !cut.generated_image);
       if (firstPending) chainTokensRef.current[firstPending.cut_index] = token;
@@ -1069,13 +1090,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           setStoryboard(chainRef.current.storyboard);
           setCutImageUrls((prev) => ({ ...prev, [cuts[i].cut_index]: generated.image }));
         },
-      });
+      }, refAsset);
       setStep("cuts");
     } catch {
       // step은 generating에 둔다 — 표지로 돌아가면 만든 컷이 버려진다.
       // chainRef는 메모리 상태라 새로고침·탭 닫기 시 사라진다 — 문구에 그 한계를 밝힌다.
+      // #326 구조변경: "나머지 컷" 문구를 전 컷 기준으로 바꾼다.
       setGenError(
-        "나머지 컷 생성에 실패했어요. 이미 만든 컷은 이 화면을 닫거나 새로고침하기 전까지만 보관돼요. 창을 닫지 말고 '이어서 만들기'를 눌러주세요"
+        "컷 생성에 실패했어요. 이미 만든 컷은 이 화면을 닫거나 새로고침하기 전까지만 보관돼요. 창을 닫지 말고 '이어서 만들기'를 눌러주세요"
       );
     }
   }
@@ -1259,6 +1281,68 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     setRedrawCutIndex(null);
   }
 
+  // #326 구조변경: 레퍼런스 모달 열기. 컷 생성 시작 뒤에는 잠긴다(cover 단계에서만 연다).
+  function openRefModal() {
+    if (step !== "cover" || !storyboard) return;
+    const cut1 = storyboard.cuts[0];
+    setRefTimeOfDay(cut1?.time_of_day ?? "auto");
+    setRefNote("");
+    setRefError(null);
+    setRefModalOpen(true);
+  }
+
+  // #326 구조변경: 레퍼런스 재생성. S9 모달 UX(자유 입력·모달 안 결과·반복)를
+  // 쓰되 구도·앵글은 bust·eye 고정, 인물 구성은 고정이다. 자유 입력은 요청
+  // 복사본 컷1 direction_note + regen_note 키에만 싣고 저장하지 않는다.
+  async function handleRefGenerate() {
+    if (!storyboard || !preset) return;
+    const note = refNote.trim();
+    const refBoard: Board = {
+      ...storyboard,
+      cuts: storyboard.cuts.map((c, i) =>
+        i === 0
+          ? {
+              ...c,
+              shot_type: "bust",
+              camera_angle: "eye",
+              ...(refTimeOfDay !== "auto" ? { time_of_day: refTimeOfDay } : {}),
+              ...(note ? { direction_note: note } : {}),
+            }
+          : c
+      ),
+    };
+    setRefGenerating(true);
+    setRefError(null);
+    try {
+      const { variants } = await generateCoverVariants(
+        refBoard,
+        preset,
+        1,
+        note ? note : undefined
+      );
+      if (variants.length === 0) throw new Error("empty");
+      const list = [...refCandidates, variants[0]];
+      setRefCandidates(list);
+      setRefShown(list.length - 1);
+    } catch {
+      setRefError("레퍼런스를 다시 만들지 못했어요. 다시 시도해주세요");
+    } finally {
+      setRefGenerating(false);
+    }
+  }
+
+  // #326 구조변경: 표시 중인 레퍼런스 후보로 확정하고 전 컷 생성을 시작한다.
+  // 확정 뒤 레퍼런스 변경은 잠긴다(cover 단계로 돌아가는 경로가 없다).
+  function handleConfirmReference() {
+    if (!storyboard || !preset) return;
+    const chosen = refCandidates[refShown];
+    if (!chosen) return;
+    selectionLogRef.current = markSelected(selectionLogRef.current, 0);
+    const confirmed = { asset: chosen.asset, image: chosen.image };
+    setReference(confirmed);
+    void runChainedCuts(storyboard, chosen.continuationToken ?? "", confirmed.asset);
+  }
+
   function updateRedrawCharacter(characterId: string, patch: { expression?: Expression; pose?: Pose }) {
     setRedrawForm((prev) =>
       prev
@@ -1333,6 +1417,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         preset,
         ...(token ? { continueFrom: token } : {}),
         ...(form.note.trim() ? { regenNote: form.note.trim() } : {}),
+        // #326 구조변경: 확정 레퍼런스를 컷 다시 그리기에도 싣는다(확정 뒤 잠금값).
+        ...(reference ? { referenceAsset: reference.asset } : {}),
       });
       if (!redrawOriginalsRef.current[cut.cut_index]) {
         redrawOriginalsRef.current[cut.cut_index] = {
@@ -1407,15 +1493,17 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   // #326 S9: 다시 그리기 모달. 입력→[다시 그리기]→모달 안 결과, 반복 가능.
   // 닫아도 만든 후보는 버리지 않는다(표시 후보가 storyboard에 이미 반영됨).
-  // #326 POC 수정: 생성 중에는 Esc로도 모달을 닫을 수 없다.
+  // #326 POC 수정: 생성 중에는 Esc로도 모달을 닫을 수 없다. 레퍼런스 모달도 같다.
   useEffect(() => {
-    if (redrawCutIndex === null) return;
+    if (redrawCutIndex === null && !refModalOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !redrawing) closeRedrawModal();
+      if (e.key !== "Escape") return;
+      if (redrawCutIndex !== null && !redrawing) closeRedrawModal();
+      else if (refModalOpen && !refGenerating) setRefModalOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [redrawCutIndex, redrawing]);
+  }, [redrawCutIndex, redrawing, refModalOpen, refGenerating]);
 
   function redrawModal() {
     if (redrawCutIndex === null || !redrawForm || !storyboard) return null;
@@ -1610,12 +1698,114 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     );
   }
 
+  // #326 구조변경: 레퍼런스 모달. 구도·앵글 고정(셀렉트 없음), 인물 구성 고정,
+  // 시간대·자유 입력·모달 안 결과·반복 생성. 생성 중에는 S9 모달과 같은 전체 잠금.
+  function refModal() {
+    if (!refModalOpen || !storyboard) return null;
+    const cut1 = storyboard.cuts[0];
+    const currentTimeLabel =
+      cut1?.time_of_day != null
+        ? (TIME_OF_DAY_OPTIONS.find((o) => o.id === cut1.time_of_day)?.label ?? cut1.time_of_day)
+        : "미지정";
+    const shown = refCandidates[refShown];
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="레퍼런스 다시 만들기"
+        onClick={() => {
+          if (!refGenerating) setRefModalOpen(false);
+        }}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="relative flex max-h-full w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-lg bg-white p-4 text-left"
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold">레퍼런스를 다시 만들어볼까요?</h2>
+            <button
+              type="button"
+              aria-label="닫기"
+              disabled={refGenerating}
+              onClick={() => setRefModalOpen(false)}
+              className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-40"
+            >
+              X
+            </button>
+          </div>
+          <p className="text-xs text-zinc-500">구도 상반신·앵글 눈높이 고정</p>
+          <label className="flex items-center gap-2 text-xs text-zinc-600">
+            시간대
+            <select
+              value={refTimeOfDay}
+              disabled={refGenerating}
+              onChange={(e) =>
+                setRefTimeOfDay(e.target.value as TimeOfDay | "auto")
+              }
+              className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+            >
+              <option value="auto">컷 값 유지({currentTimeLabel})</option>
+              {TIME_OF_DAY_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-zinc-600">
+            자유 입력
+            <input
+              value={refNote}
+              disabled={refGenerating}
+              onChange={(e) => setRefNote(e.target.value)}
+              placeholder="예: 커피잔을 들고 있게"
+              className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+            />
+          </label>
+          {refError && (
+            <p className="rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">{refError}</p>
+          )}
+          {shown?.image && (
+            // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
+            <img
+              src={shown.image}
+              alt="다시 만든 레퍼런스"
+              className="aspect-square w-full rounded-md object-cover"
+            />
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={refGenerating}
+              onClick={() => void handleRefGenerate()}
+              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
+            >
+              {refGenerating ? "그리는 중…" : "다시 그리기"}
+            </button>
+            <button
+              type="button"
+              disabled={refGenerating}
+              onClick={() => setRefModalOpen(false)}
+              className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
+            >
+              이 결과로 확정
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   async function handleSave() {
     if (!storyboard) return;
 
+    // #326 구조변경: 저장 시 확정 레퍼런스 asset을 reference_image로 싣는다.
+    const payload: Board = reference ? { ...storyboard, reference_image: reference.asset } : storyboard;
+
     try {
       // #205: 강도를 함께 넘겨야 none(CTA 컷 0개)이 기존 규칙(CTA 1개)에 막히지 않는다.
-      assertStoryboardRuntimeInvariants(storyboard.cuts, storyboard.cta_strength);
+      assertStoryboardRuntimeInvariants(payload.cuts, payload.cta_strength);
     } catch {
       setSaveError("컷 구성에 문제가 있어요. 처음부터 다시 시도해주세요");
       return;
@@ -1644,7 +1834,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         body: JSON.stringify({
           projectId,
           presetId,
-          storyboard,
+          storyboard: payload,
           ...(selections.length > 0 ? { selections } : {}),
         }),
       });
@@ -2212,13 +2402,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           )}
         </div>
       )}
-      {step === "cover" && !coverVariants && !genError && <Spinner text="표지 3안을 그리고 있어요..." />}
+      {step === "cover" && refCandidates.length === 0 && !genError && <Spinner text="레퍼런스를 그리고 있어요..." />}
       {step === "generating" && !genError && (
         <Spinner
           text={
             genProgress
-              ? `나머지 컷을 완성하고 있어요... (${genProgress.done}/${genProgress.total})`
-              : "나머지 컷을 완성하고 있어요..."
+              ? `컷을 만들고 있어요... (${genProgress.done}/${genProgress.total})`
+              : "컷을 만들고 있어요..."
           }
           progress={genProgress}
         />
@@ -2231,14 +2421,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             type="button"
             onClick={() => {
               if (step === "generating" && chainRef.current) {
-                void runChainedCuts(chainRef.current.storyboard, chainRef.current.token);
+                void runChainedCuts(chainRef.current.storyboard, chainRef.current.token, reference?.asset);
                 return;
               }
               setGenError(null);
-              setCoverVariants(null);
-              setCoverRequested(undefined);
+              setRefCandidates([]);
+              setRefShown(0);
               setStep("cover");
-              void loadCoverVariants();
+              void loadReference();
             }}
             className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
           >
@@ -2247,43 +2437,69 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
-      {step === "cover" && coverVariants && storyboard && !genError && (
-        <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
-          <h1 className="text-xl font-semibold">마음에 드는 표지를 골라주세요</h1>
-          {/* #259 4번: 카드 자체가 버튼이고 확인 단계가 없다 — 누르면 바로 나머지 컷 생성이 시작되는 것을 미리 알린다. */}
-          <p className="text-sm text-zinc-500">표지를 누르면 바로 나머지 컷을 만들기 시작해요</p>
-          {coverRequested != null && coverVariants.length < coverRequested && (
-            <p className="w-full max-w-md rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-700">
-              {coverRequested}안 중 {coverVariants.length}안만 만들어졌어요. 다시 뽑기를 눌러보세요
-            </p>
+      {/* #326 구조변경: 레퍼런스 1장 확정 단계. 표시 중인 후보로 확정하면 전 컷 생성이 시작된다. */}
+      {step === "cover" && refCandidates.length > 0 && storyboard && !genError && (
+        <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
+          <h1 className="text-xl font-semibold">이 레퍼런스로 4컷을 만들까요?</h1>
+          <p className="text-sm text-zinc-500">확정하면 컷 1부터 순서대로 만들기 시작해요</p>
+          {refCandidates[refShown]?.image ? (
+            // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
+            <img
+              src={refCandidates[refShown].image}
+              alt="레퍼런스"
+              className="aspect-square w-full max-w-md rounded-md object-cover"
+            />
+          ) : (
+            <div className="flex aspect-square w-full max-w-md flex-col items-center justify-center gap-1 rounded-md bg-zinc-100 text-center">
+              <span className="text-xs text-zinc-400">이미지를 불러오지 못했어요</span>
+            </div>
           )}
-          <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
-            {coverVariants.map((variant, i) => (
+          {refCandidates.length > 1 && (
+            <div className="flex items-center gap-2">
               <button
-                key={i}
                 type="button"
-                onClick={() => handleSelectCover(variant, i)}
-                className="overflow-hidden rounded-lg border border-zinc-200 hover:border-zinc-900"
+                aria-label="이전 레퍼런스"
+                disabled={refShown === 0}
+                onClick={() => setRefShown(refShown - 1)}
+                className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-40"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element -- mock placeholder, next/image 불필요 */}
-                <img src={variant.image} alt={`표지 안 ${i + 1}`} className="aspect-square w-full object-cover" />
+                ‹
               </button>
-            ))}
+              <span className="text-xs text-zinc-500">
+                {refShown + 1}/{refCandidates.length}
+              </span>
+              <button
+                type="button"
+                aria-label="다음 레퍼런스"
+                disabled={refShown === refCandidates.length - 1}
+                onClick={() => setRefShown(refShown + 1)}
+                className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-40"
+              >
+                ›
+              </button>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={openRefModal}
+              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm font-medium hover:bg-zinc-50"
+            >
+              다시 만들기
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmReference}
+              className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
+            >
+              이 레퍼런스로 진행
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              selectionLogRef.current = markRegenerated(selectionLogRef.current);
-              setCoverVariants(null);
-              setCoverRequested(undefined);
-              void loadCoverVariants();
-            }}
-            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
-          >
-            다시 뽑기
-          </button>
         </div>
       )}
+
+      {/* #326 구조변경: 레퍼런스 모달. cover 단계에서만 열린다(확정 뒤 잠금). */}
+      {refModal()}
 
       {step === "cuts" && storyboard && (
         <div className="flex w-full max-w-4xl flex-col items-center gap-6">

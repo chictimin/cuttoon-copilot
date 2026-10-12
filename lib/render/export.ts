@@ -20,13 +20,27 @@ export interface ExportResult {
 // demoCachePublicDir: 데모 캐시를 읽을 public 폴더(#240). demo만 임시 폴더를 넘기고 실제 호출은 생략한다.
 export async function exportCuts(
   cuts: Cut[],
-  opts: { font?: PresetFont | null; demoCachePublicDir?: string } = {}
+  opts: { font?: PresetFont | null; demoCachePublicDir?: string; referenceImage?: string | null } = {}
 ): Promise<ExportResult> {
   const font = await loadFont(opts.font);
   const sorted = [...cuts].sort((a, b) => a.cut_index - b.cut_index);
   const entries: { name: string; data: Buffer }[] = [];
   const included: number[] = [];
   const skipped: number[] = [];
+
+  // #326 POC 한정: 확정 레퍼런스 컷이 있으면 00-reference.png로 맨 앞에 넣는다.
+  // 없으면 기존대로(컷만). 못 읽으면 조용히 빼고 경고만 남긴다 — 컷 하나가
+  // 깨져도 나머지는 내보낸다는 기존 의도와 같다.
+  if (typeof opts.referenceImage === "string" && opts.referenceImage.length > 0) {
+    const refBuffer = isDemoCacheRef(opts.referenceImage)
+      ? await readDemoCacheImage(opts.referenceImage, opts.demoCachePublicDir)
+      : await readAsset(opts.referenceImage);
+    if (refBuffer) {
+      entries.push({ name: "00-reference.png", data: refBuffer });
+    } else {
+      console.warn(`[export] reference_image를 읽지 못해 제외: ${opts.referenceImage}`);
+    }
+  }
 
   for (const cut of sorted) {
     if (!cut.generated_image) {
@@ -42,7 +56,16 @@ export async function exportCuts(
       continue;
     }
     // #242: 2인 컷은 화자 쪽(가로 30%/70%), wide 컷은 꼬리 목표점을 아래로. 그 밖에는 기본 목표점.
-    const composed = await composeCut(imageBuffer, [cut.caption], [headTargetForCut(cut)], font);
+    // #326 S10 ⑥: 인물 0명 컷은 꼬리 생략(가리킬 화자가 없음).
+    const noTail =
+      Array.isArray(cut.characters_in_frame) && cut.characters_in_frame.length === 0;
+    const composed = await composeCut(
+      imageBuffer,
+      [cut.caption],
+      [headTargetForCut(cut)],
+      font,
+      [noTail]
+    );
     entries.push({ name: `cut_${cut.cut_index}.png`, data: composed });
     included.push(cut.cut_index);
   }

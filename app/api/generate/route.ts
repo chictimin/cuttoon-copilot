@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   if (typeof body !== 'object' || body === null) {
     return Response.json({ error: '본문은 객체여야 합니다' }, { status: 400 })
   }
-  const { kind, preset, storyboard, referenceAssets, continueFrom, regen_note } = body as Record<string, unknown>
+  const { kind, preset, storyboard, referenceAssets, continueFrom, regen_note, count } = body as Record<string, unknown>
 
   if (!preset) {
     return Response.json({ error: 'preset이 필요합니다' }, { status: 400 })
@@ -34,8 +34,11 @@ export async function POST(request: Request) {
         // 캐스팅만 한다. 확정 검증은 lib/llm/preset-guard.ts 쪽 후속 작업으로 남긴다.
         return Response.json({ result: await generateCharacterSheet(preset as PresetInput) })
       case 'cover_variants':
-        // 표지 3안. count 는 계약이 리터럴 3 으로 고정한다 — 호출부가 안 개수를
-        // 임의로 늘리지 못하게 한 것이므로(#50) 본문에서 받지 않는다.
+        // 표지 3안. count 는 1~3(기본 3) — 호출부가 안 개수를
+        // 임의로 늘리지 못하게 한 것이므로(#50) 본문에서 받되 범위를 묶는다.
+        // #326 구조변경: 레퍼런스 1장 용도로 count 1을 보낸다.
+        // provider 타입은 count: 3 리터럴(joniverse 전담)이라 여기서 묶은 뒤 캐스트 —
+        // 런타임은 input.count 숫자를 그대로 쓴다(generate.ts 781행).
         // 체이닝 토큰도 받지 않는다: 3안은 독립 호출이어야 한다 (PRD 6절).
         //
         // requested 를 같이 내려보내는 이유(#108): generateCoverVariants 가
@@ -49,9 +52,14 @@ export async function POST(request: Request) {
             storyboard,
             preset,
             referenceAssets: Array.isArray(referenceAssets) ? referenceAssets : [],
-            count: 3,
+            count: (typeof count === 'number' && Number.isInteger(count) && count >= 1 && count <= 3
+              ? count
+              : 3) as 3,
           }),
-          requested: 3,
+          requested:
+            typeof count === 'number' && Number.isInteger(count) && count >= 1 && count <= 3
+              ? count
+              : 3,
         })
       case 'cut':
         // storyboard 검증은 lib/llm/storyboard-guard.ts(A① 소유)가 담당한다.

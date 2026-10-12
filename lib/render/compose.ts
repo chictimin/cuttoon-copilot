@@ -291,12 +291,17 @@ function bubbleShapeSvg(
   bubbleType: BubbleType, x: number, y: number, w: number, h: number,
   position: Position, canvasW: number, canvasH: number, headTarget: HeadTarget,
   radii: { rx: number; ry: number },
+  // #326 S10 ⑥: 인물 0명 컷은 꼬리 생략(가리킬 화자가 없음). rect·cloud·rounded
+  // 모두 tail null 경로(위 rectPath·ellipsePath)가 있어 그대로 탄다.
+  noTail = false,
 ): string {
   const cx = x + w / 2;
   const cy = y + h / 2;
-  const tail = bubbleType === "rounded"
-    ? resolveTail(position, "ellipse", cx, cy, radii.rx, radii.ry, canvasW, canvasH, headTarget)
-    : resolveTail(position, "box", cx, cy, w / 2, h / 2, canvasW, canvasH, headTarget);
+  const tail = noTail
+    ? null
+    : bubbleType === "rounded"
+      ? resolveTail(position, "ellipse", cx, cy, radii.rx, radii.ry, canvasW, canvasH, headTarget)
+      : resolveTail(position, "box", cx, cy, w / 2, h / 2, canvasW, canvasH, headTarget);
 
   if (bubbleType === "rect") {
     return rectPath(x, y, w, h, 6, tail);
@@ -364,7 +369,7 @@ export function validAnchor(anchor: unknown): { x: number; y: number } | null {
   return ok(x) && ok(y) ? { x, y } : null;
 }
 
-function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarget: HeadTarget, font: LoadedFont | null = null): string {
+function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarget: HeadTarget, font: LoadedFont | null = null, noTail = false): string {
   // storyboard.schema.json의 enum 밖의 값이 저장 시점 검증을 뚫고 들어올 수 있다
   // (app/api/session/validate.ts는 아직 필드별 enum까지는 안 봄, #70). lib/render/는
   // 라이브러리 계층이라 호출자가 무엇을 넘기든 예외로 죽지 않는 편이 맞다고 보고
@@ -469,7 +474,7 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
   // center/rounded로 정리한 position/bubbleType을 넘긴다.
   // 좌표가 있으면 꼬리는 center 방식으로 정한다 — 목표점(화자)이 몸통 밖이면 그쪽으로, 아무 데나 놓인 몸통이
   // 목표점을 덮으면 고정 꼬리로 폴백한다(resolveTail). 칸 이름의 구석 방식은 몸통이 구석에 있을 때만 맞다.
-  const shape = bubbleShapeSvg(bubbleType, x, y, maxWidth, bubbleH, anchor ? "center" : position, canvasW, canvasH, headTarget, radii);
+  const shape = bubbleShapeSvg(bubbleType, x, y, maxWidth, bubbleH, anchor ? "center" : position, canvasW, canvasH, headTarget, radii, noTail);
 
   const cx = x + maxWidth / 2;
   const firstLineY = y + PADDING + fontSize * 0.85;
@@ -499,9 +504,11 @@ function captionSvg(caption: Caption, canvasW: number, canvasH: number, headTarg
 // 호출자(예: 수동 보정, 향후 얼굴 검출 결과)가 캡션별로 꼬리 목표점을 옮길 수
 // 있게 하기 위한 것 — storyboard.schema.json의 Caption 자체는 바꾸지 않는다
 // (additionalProperties: false와 충돌하지 않도록).
+// noTail[i]가 true면 그 캡션의 꼬리를 생략한다(#326 S10 ⑥ 인물 0명 컷).
 // font: 프로젝트 웹폰트(#209, lib/render/font.ts의 loadFont 결과). null이면 지금처럼 시스템 폰트.
 export async function composeCut(
   imageBuffer: Buffer, captions: Caption[], headTargets?: (HeadTarget | undefined)[], font: LoadedFont | null = null,
+  noTail?: boolean[],
 ): Promise<Buffer> {
   const image = sharp(imageBuffer);
   const meta = await image.metadata();
@@ -510,7 +517,7 @@ export async function composeCut(
 
   const overlaySvg = `
     <svg width="${canvasW}" height="${canvasH}" xmlns="http://www.w3.org/2000/svg">
-      ${captions.map((c, i) => captionSvg(c, canvasW, canvasH, headTargets?.[i] ?? DEFAULT_HEAD_TARGET, font)).join("\n")}
+      ${captions.map((c, i) => captionSvg(c, canvasW, canvasH, headTargets?.[i] ?? DEFAULT_HEAD_TARGET, font, noTail?.[i] ?? false)).join("\n")}
     </svg>
   `;
 
