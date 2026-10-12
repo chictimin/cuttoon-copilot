@@ -38,12 +38,13 @@ export interface ImageProvider {
 
   // 표지 3안: 독립 호출. 세션에 누적하면 2안이 1안에 끌려가 서로 비슷해진다
   // (PRD 6절). 체이닝 토큰을 받지 않는 것으로 독립성을 계약에 드러낸다.
-  // count 를 리터럴 3 으로 고정해 호출부가 안 개수를 임의로 늘리지 못하게 한다.
+  // count 는 1~3 으로 묶어 호출부가 안 개수를 임의로 늘리지 못하게 한다.
+  // #326 POC: count 1 은 레퍼런스 1장이다(generate.ts generateCoverVariants 참조).
   generateCoverVariants(input: {
     storyboard: unknown
     preset: unknown
     referenceAssets: unknown[]
-    count: 3
+    count: 1 | 2 | 3
   }): Promise<GeneratedImageResult[]>
 
   // 표지 이후 컷: 이전 컷을 이어받는 체이닝 경로.

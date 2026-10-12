@@ -896,12 +896,20 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   const cut = storyboard.cuts?.[0]
   // #325 POC: 3안이 같은 프롬프트를 쓰면 구도 비교가 안 된다. 안마다 컷 1
   // 연출을 덮어쓴 복사본으로 프롬프트를 만든다(배정은 coverVariantDirections).
-  const specs = coverDirectionsForMode(cut).map((d) => {
-    const variantCut: MinimalCut | undefined = cut
-      ? { ...cut, shot_type: d.shot_type ?? cut.shot_type, camera_angle: d.camera_angle ?? cut.camera_angle }
-      : { shot_type: d.shot_type, camera_angle: d.camera_angle }
-    return { ...d, prompt: buildCutPrompt(storyboard, preset, variantCut) }
-  })
+  //
+  // #326 POC: count 1 은 레퍼런스 1장이다(화면이 표지 3안 대신 보낸다). 레퍼런스 프롬프트
+  // (buildReferencePrompt — bust·eye 고정, 배경이 보이게, cast 전원, narrative_beat 없음)를
+  // 쓰고, 말풍선 자리가 없으니 크롭도 가운데 기준이다. 다시 생성 자유 입력은 화면이 컷 1
+  // 복사본의 direction_note 로 싣는다. 첨부는 3안과 같은 [시트, ...style_refs].
+  const specs: Array<{ shot_type?: string; camera_angle?: string; prompt: string; zone?: ReservedZone }> =
+    input.count === 1
+      ? [{ shot_type: 'bust', camera_angle: 'eye', prompt: buildReferencePrompt(storyboard, preset, cut?.direction_note) }]
+      : coverDirectionsForMode(cut).map((d) => {
+          const variantCut: MinimalCut | undefined = cut
+            ? { ...cut, shot_type: d.shot_type ?? cut.shot_type, camera_angle: d.camera_angle ?? cut.camera_angle }
+            : { shot_type: d.shot_type, camera_angle: d.camera_angle }
+          return { ...d, prompt: buildCutPrompt(storyboard, preset, variantCut), zone: cut?.reserved_zone }
+        })
   // allSettled 안에서 읽으면 모르는 값이 "3안 모두 실패"로 뭉개진다 — 배치 전에 읽어
   // 설정 오류로 바로 던진다(#190).
   const setting = imageSetting()
@@ -938,7 +946,7 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
     // 프롬프트로 채우면 3안 비교가 깨진다.
     const settled = await Promise.allSettled(
       batch.map((i) =>
-        generateOneVariant(specs[i].prompt, input.referenceAssets, preset, setting, cut?.reserved_zone)
+        generateOneVariant(specs[i].prompt, input.referenceAssets, preset, setting, specs[i].zone)
       )
     )
 

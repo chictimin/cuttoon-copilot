@@ -36,7 +36,7 @@
  * - chain(A): 표지 3안(S5 배정) → 고른 표지가 컷 1, 컷 2~4 이어받기, 첨부 [시트, ...style_refs]. 6장.
  * - chain-nostyle(A´): A와 같되 컷 2~4 첨부는 시트만. 6장.
  * - cover-ref(C): 레퍼런스 1장(bust·eye + 배경) → 컷 1~4를 [시트, 레퍼런스]로 이어받기 없이 동시. 5장.
- * - cover-ref-chain(C´): C와 같되 컷 2~4는 앞 컷 이어받기(컷 1은 앞 컷이 없어 이어받지 않음). 5장.
+ * - cover-ref-chain(C´): C와 같되 레퍼런스 응답에서 시작해 컷 1→4 이어받기(화면 13986bc 흐름과 같다). 5장.
  * - cover-fixed(D): 표지 3안을 모두 bust·eye로 → 고른 표지가 컷 1, 컷 2~4는 [시트, 고른 표지] +
  *   이어받기. 6장.
  * 어느 모드든 인물 0명 컷은 제품(generateCut)처럼 시트를 첨부에서 뺀다.
@@ -293,14 +293,15 @@ async function main(): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     reqs.push({ file: "reference", kind: "reference", prompt: buildReferencePrompt(storyboard as any, loaded.preset as any), attach: firstAttach, prev: null, note: "레퍼런스(bust·eye)" });
     for (const i of [1, 2, 3, 4]) {
-      const chained = args.mode === "cover-ref-chain" && i > 1;
+      // C´: 화면(13986bc)과 같이 레퍼런스 응답에서 시작해 컷 1→4로 이어받는다.
+      const chained = args.mode === "cover-ref-chain";
       reqs.push({
         file: `cut-${i}`,
         kind: "cut",
         cutIndex: i,
         prompt: build(cutOf(i), { referenceImage: true, ...(chained ? { continuesChain: true } : {}) }),
         attach: withSheet(i, [sheetUri, "reference"]),
-        prev: chained ? `cut-${i - 1}` : null,
+        prev: chained ? (i === 1 ? "reference" : `cut-${i - 1}`) : null,
         note: `컷 ${i}`,
       });
     }

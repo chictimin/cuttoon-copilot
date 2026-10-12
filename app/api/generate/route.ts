@@ -38,8 +38,8 @@ export async function POST(request: Request) {
         // 표지 3안. count 는 1~3(기본 3) — 호출부가 안 개수를
         // 임의로 늘리지 못하게 한 것이므로(#50) 본문에서 받되 범위를 묶는다.
         // #326 구조변경: 레퍼런스 1장 용도로 count 1을 보낸다.
-        // provider 타입은 count: 3 리터럴(joniverse 전담)이라 여기서 묶은 뒤 캐스트 —
-        // 런타임은 input.count 숫자를 그대로 쓴다(generate.ts 781행).
+        // count 1 이면 generateCoverVariants 가 레퍼런스 프롬프트(bust·eye + 배경,
+        // 말풍선 자리 없음)로 1장을 그린다.
         // 체이닝 토큰도 받지 않는다: 3안은 독립 호출이어야 한다 (PRD 6절).
         //
         // requested 를 같이 내려보내는 이유(#108): generateCoverVariants 가
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
             referenceAssets: Array.isArray(referenceAssets) ? referenceAssets : [],
             count: (typeof count === 'number' && Number.isInteger(count) && count >= 1 && count <= 3
               ? count
-              : 3) as 3,
+              : 3) as 1 | 2 | 3,
           }),
           requested:
             typeof count === 'number' && Number.isInteger(count) && count >= 1 && count <= 3
