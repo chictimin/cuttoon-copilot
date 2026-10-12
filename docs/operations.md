@@ -75,7 +75,7 @@ cuttoon-copilot/
 │  ├─ data/                    값 목록 데이터
 │  └─ samples/                 샘플 응답 JSON + 이미지
 └─ public/
-   └─ demo-cache/              발표용 캐시 폴백 (예정 — 아직 없음)
+   └─ demo-cache/              발표용 캐시 폴백 (PNG 6장 + manifest.json, #310)
 ```
 
 | 담당 | 폴더 · 파일 | 역할 |
@@ -86,7 +86,7 @@ cuttoon-copilot/
 | smartman3514-commits | `lib/render/` | 렌더링 버그 수정(#105, #169, #170) + QA 검증 |
 | (지정 없음) | `scripts/`(`p0-storyboard-scan`·`demo-cache-build`·`two-person-check`) | 작업용 스크립트 |
 
-1차에는 A①~B③ 6파트 체제였다. `pipeline.md`는 각자 자기 영역 절을 고친다. `public/demo-cache/`는 아직 만들어지지 않았고 담당은 joniverse-ai(10-10 생성 예정)이다.
+1차에는 A①~B③ 6파트 체제였다. `pipeline.md`는 각자 자기 영역 절을 고친다. `public/demo-cache/`는 joniverse-ai가 만들었다(#310, `scripts/demo-cache-build`).
 
 <a id="ops-git"></a>
 ## 브랜치 · git 규칙
