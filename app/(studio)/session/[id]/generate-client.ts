@@ -18,15 +18,32 @@ export interface GeneratedCut {
   image: string;
   /** 다음 컷 체이닝에 쓸 토큰(provider의 previous_response_id). 표지 3안엔 없다. */
   continuationToken?: string;
+  /**
+   * #326 S6: 표지 안의 실제 연출(서버가 결과에 실어 보낸 경우).
+   * 없으면(데모 캐시·이전 버전 결과) 컷1 값을 바꾸지 않는다.
+   */
+  shot_type?: string;
+  camera_angle?: string;
 }
 
 function referenceAssetsOf(preset: Preset): string[] {
   return [preset.assets.character_sheet, ...preset.assets.style_refs];
 }
 
-async function toGeneratedCut(result: { asset: string; continuationToken?: string }): Promise<GeneratedCut> {
+async function toGeneratedCut(result: {
+  asset: string;
+  continuationToken?: string;
+  shot_type?: string;
+  camera_angle?: string;
+}): Promise<GeneratedCut> {
   const image = await fetchAssetUrl(result.asset);
-  return { asset: result.asset, image, continuationToken: result.continuationToken };
+  return {
+    asset: result.asset,
+    image,
+    continuationToken: result.continuationToken,
+    ...(typeof result.shot_type === "string" ? { shot_type: result.shot_type } : {}),
+    ...(typeof result.camera_angle === "string" ? { camera_angle: result.camera_angle } : {}),
+  };
 }
 
 // URL 리졸브 없이 생성 결과(asset·continuationToken)만 받는다. #104: 리졸브
@@ -82,7 +99,7 @@ export async function generateCoverVariants(
     throw new Error(body?.error ?? "표지 생성에 실패했습니다");
   }
   const { result, requested } = (await res.json()) as {
-    result: Array<{ asset: string; continuationToken?: string }>;
+    result: Array<{ asset: string; continuationToken?: string; shot_type?: string; camera_angle?: string }>;
     requested?: number;
   };
 

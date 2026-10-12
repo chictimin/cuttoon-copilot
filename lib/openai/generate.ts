@@ -676,15 +676,29 @@ async function generateOneVariant(
   }
 }
 
-// #325 POC: 표지 3안의 안별 연출 배정. 1안은 컷 1 연출 그대로, 2안은 다른
-// 구도(기준이 closeup·bust면 full, 아니면 closeup), 3안은 같은 구도·다른 앵글
-// (eye면 high, 아니면 eye)이다. "구도를 바꾸면 그림이 달라지는가" 를 3안
-// 안에서 바로 비교하려는 배정이다.
+// #326 S5: 표지 3안의 안별 연출 배정(명세 표). 1안은 컷 1 연출 그대로,
+// 2·3안은 컷 1 구도에 따라 아래 표로 정한다. 세 안의 구도가 모두 다르고,
+// 3안은 앵글도 바뀐다(컷 1이 eye면 low, 아니면 eye). 1·2안 앵글은 컷 1 값.
+//
+// | 컷 1 구도 | 2안 구도 | 3안 구도 |
+// | closeup   | full     | wide     |
+// | bust      | full     | wide     |
+// | waist     | closeup  | wide     |
+// | full      | closeup  | wide     |
+// | wide      | closeup  | full     |
 //
 // 순수 함수로 둔 이유: generateCoverVariants(유료 경로)와 direction-check
 // 스크립트(--dry-run 무과금 경로)가 같은 배정을 쓰게 하려는 것이다. 두 곳에
 // 복사하면 한쪽만 바뀌어 "확인한 것과 다른 것을 생성" 하게 된다.
 // export 하는 이유도 같다 — 스크립트가 배정을 재현이 아니라 호출로 쓴다.
+const COVER_VARIANT_2_SHOT: Record<string, string> = {
+  closeup: "full",
+  bust: "full",
+  waist: "closeup",
+  full: "closeup",
+  wide: "closeup",
+};
+
 export function coverVariantDirections(base?: {
   shot_type?: string
   camera_angle?: string
@@ -693,8 +707,8 @@ export function coverVariantDirections(base?: {
   const angle = base?.camera_angle
   return [
     { shot_type: shot, camera_angle: angle },
-    { shot_type: shot === 'closeup' || shot === 'bust' ? 'full' : 'closeup', camera_angle: angle },
-    { shot_type: shot, camera_angle: angle === 'eye' ? 'high' : 'eye' },
+    { shot_type: shot !== undefined ? (COVER_VARIANT_2_SHOT[shot] ?? "closeup") : shot, camera_angle: angle },
+    { shot_type: shot !== undefined ? (shot === "wide" ? "full" : "wide") : shot, camera_angle: angle === "eye" ? "low" : "eye" },
   ]
 }
 

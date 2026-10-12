@@ -9,6 +9,9 @@ import type { Preset } from "@/lib/llm/preset-guard";
 import type { BrainstormTurn, ExtractedSlot } from "@/lib/llm/brainstorm";
 // brainstorm.ts와는 별개 파일이다 — OPENAI_API_KEY를 쓰지 않는 순수 상수라
 // 값으로 import해도 위 규칙에 안 걸린다(lib/llm/brainstorm-options.ts 참고).
+// captions.ts도 값 import는 서버 코드라 안 되지만, 타입만 가져오는 것은
+// 컴파일에 지워져 클라이언트 번들에 들어오지 않는다(#326 S1 DirectionVariety).
+import type { DirectionVariety } from "@/lib/llm/captions";
 import {
   FLOW_QUESTION,
   NO_SUPPORTING_OPTION,
@@ -35,6 +38,7 @@ import {
 } from "./storyboard-assembly";
 import { resolveImageUrl } from "../../asset-url";
 import { CTA_STRENGTHS } from "../../cta-strength-options";
+import { DIRECTION_VARIETIES } from "../../direction-variety-options";
 import { beatLabel } from "../../ui-labels";
 import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
 // 순수 헬퍼라 클라이언트에서 값으로 import해도 된다(서버 모듈·DB import 없음, #207).
@@ -51,9 +55,9 @@ import {
   fetchSubjectSuggestions,
   hasSuggestionContext,
 } from "./subject-suggestions";
-import type { Cut, Storyboard } from "./storyboard-types";
+import type { CameraAngle, Cut, ShotType, Storyboard } from "./storyboard-types";
 
-type Step = "subject" | "brainstorm" | "tone" | "assembling" | "captions" | "cover" | "generating" | "cuts" | "saved";
+type Step = "subject" | "brainstorm" | "tone" | "assembling" | "conti" | "captions" | "cover" | "generating" | "cuts" | "saved";
 
 const TURN_ORDER: BrainstormTurn["key"][] = ["protagonist", "supporting", "flow"];
 
@@ -98,6 +102,33 @@ function normalizeTurns(turns: BrainstormTurn[]): BrainstormTurn[] {
 function supportingIdField(storyboard: Storyboard): { supporting_id?: string } {
   const supporting = storyboard.cast.find((member) => member.role === "supporting");
   return supporting ? { supporting_id: supporting.character_id } : {};
+}
+
+// #326 S2·S6: 컷 연출 셀렉트 선택지와 서버 연출값 판정. 값 목록은
+// storyboard-types.ts의 유니언과 같은 집합이다(스키마 enum과 동일).
+const SHOT_TYPE_OPTIONS: { id: ShotType; label: string }[] = [
+  { id: "closeup", label: "클로즈업" },
+  { id: "bust", label: "상반신" },
+  { id: "waist", label: "허리" },
+  { id: "full", label: "전신" },
+  { id: "wide", label: "와이드" },
+];
+const CAMERA_ANGLE_OPTIONS: { id: CameraAngle; label: string }[] = [
+  { id: "eye", label: "눈높이" },
+  { id: "high", label: "위에서" },
+  { id: "low", label: "아래에서" },
+];
+
+function isShotType(value: unknown): value is ShotType {
+  return (
+    typeof value === "string" && SHOT_TYPE_OPTIONS.some((option) => option.id === value)
+  );
+}
+
+function isCameraAngle(value: unknown): value is CameraAngle {
+  return (
+    typeof value === "string" && CAMERA_ANGLE_OPTIONS.some((option) => option.id === value)
+  );
 }
 
 // spec-a3 3-2: 조립 전에는 상태 subjectTags, 조립 후에는 storyboard.subject_tags가
@@ -207,6 +238,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [ctaPurposeChoice, setCtaPurposeChoice] = useState<string | null>(null);
   // #205: 말투를 고른 순간 확정한 이번 편 CTA. 조립·대사 생성·컷별 다시 뽑기가 같은 값을 쓴다.
   const [sessionCta, setSessionCta] = useState<CtaRequest | undefined>(undefined);
+  // #326 S1: 구도 변화 핸들 값(기본 normal). 세션 state로 들고 다니며 대사 생성
+  // 3경로(최초·재요청·컷별 다시 뽑기) 요청에 모두 실어 보낸다.
+  const [directionVariety, setDirectionVariety] = useState<DirectionVariety>("normal");
+  // #326 S2: "디테일 수정" 토글(기본 꺼짐). 끄는 것은 숨김 — 바꾼 값은 유지된다.
+  const [showDetailEdit, setShowDetailEdit] = useState(false);
   // F2: 이미지 호출 전 생성 대사의 상태. "idle"이면 captions 단계 진입 시 1회 호출.
   const [captionStatus, setCaptionStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [captionError, setCaptionError] = useState<string | null>(null);
@@ -501,8 +537,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       setStoryboard(
         assembleStoryboard(subject, full, preset.style.palette, preset.mascot, sessionCta, subjectTags)
       );
-      // F2: 조립된 기본 대사를 먼저 보여주고 이미지 호출 전에 생성 대사로 바꾼다.
-      setStep("captions");
+      // #326 S4: 조립 뒤 바로 captions로 가지 않고 콘티 확인으로 간다.
+      // F2 기본 대사는 조립 결과에 이미 들어 있다. 대사 생성은 콘티 화면의
+      // "이대로 만들기"를 눌렀을 때 captions 단계에서 1회 호출된다.
+      setStep("conti");
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -543,6 +581,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           ...supportingIdField(storyboard),
           // #205: 조립에 쓴 것과 같은 cta. 빠지면 서버가 clear로 보고 none 4컷에 400을 낸다.
           cta: sessionCta,
+          // #326 S1: 구도 변화 핸들 값. 최초 생성·재요청에 모두 실어 보낸다.
+          direction_variety: directionVariety,
           ...(tags.length > 0 ? { subject_tags: tags } : {}),
         }),
       });
@@ -628,6 +668,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     // spec-a3 3-2(d): 다시 뽑기도 같은 단일 출처. 재진입 후 진행 문맥(toneId 등)
     // 미복원은 범위 밖이라 현행대로 toneId 없으면 반환한다.
     const tags = storyboard.subject_tags ?? [];
+    // #326 S1·S3: 핸들 값과 그 컷의 현재 연출을 함께 실어 보낸다.
+    const currentCut = storyboard.cuts.find((cut) => cut.cut_index === cutIndex);
     try {
       const res = await fetch(CAPTIONS_ROUTE, {
         method: "POST",
@@ -645,6 +687,15 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           },
           ...supportingIdField(storyboard),
           cta: sessionCta,
+          direction_variety: directionVariety,
+          ...(currentCut
+            ? {
+                current_direction: {
+                  shot_type: currentCut.shot_type,
+                  camera_angle: currentCut.camera_angle,
+                },
+              }
+            : {}),
           ...(tags.length > 0 ? { subject_tags: tags } : {}),
           cut_index: cutIndex,
         }),
@@ -674,7 +725,23 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         const withCaption = prev.cuts.map((cut) =>
           cut.cut_index === cutIndex ? setCaptionSpeaker({ ...cut, caption: { ...cut.caption, text } }, typeof (entry as Record<string, unknown>).speaker === "string" ? ((entry as Record<string, unknown>).speaker as string) : undefined) : cut // setCaptionSpeaker speaker_index
         );
-        return { ...prev, cuts: applyCutDirections(withCaption, directions, directionFallback) };
+        // #326 S3: 다시 뽑기 응답은 shot_type·camera_angle 두 필드만 보존한다
+        // (바꾸기 전 사용자가 고른 연출 유지). 표정·포즈·시간대·말풍선 위치·
+        // reserved_zone은 기존 applyCutDirections 적용 그대로 둔다.
+        const keepDirections = new Map(
+          prev.cuts.map((cut) => [
+            cut.cut_index,
+            { shot_type: cut.shot_type, camera_angle: cut.camera_angle },
+          ])
+        );
+        const applied = applyCutDirections(withCaption, directions, directionFallback);
+        return {
+          ...prev,
+          cuts: applied.map((cut) => {
+            const kept = keepDirections.get(cut.cut_index);
+            return kept ? { ...cut, ...kept } : cut;
+          }),
+        };
       });
       const fellBack =
         Array.isArray(data.fallbackCutIndexes) && data.fallbackCutIndexes.includes(cutIndex);
@@ -729,11 +796,21 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     if (!storyboard || !preset) return;
     selectionLogRef.current = markSelected(selectionLogRef.current, index);
     const firstCutIndex = storyboard.cuts[0].cut_index;
+    // #326 S6: 고른 안 객체에 실린 연출만 컷1에 반영한다. 없으면(데모 캐시·
+    // 이전 버전 결과) 컷1 값을 바꾸지 않는다. 카드 번호로 배정을 추정하지 않는다.
+    const coverShotType = isShotType(variant.shot_type) ? variant.shot_type : undefined;
+    const coverCameraAngle = isCameraAngle(variant.camera_angle) ? variant.camera_angle : undefined;
     const updated: Board = {
       ...storyboard,
       cuts: storyboard.cuts.map((cut, i) =>
         i === 0
-          ? { ...cut, generated_image: variant.asset, prompt_used: promptForCut(storyboard.subject, cut) }
+          ? {
+              ...cut,
+              generated_image: variant.asset,
+              prompt_used: promptForCut(storyboard.subject, cut),
+              ...(coverShotType !== undefined ? { shot_type: coverShotType } : {}),
+              ...(coverCameraAngle !== undefined ? { camera_angle: coverCameraAngle } : {}),
+            }
           : cut
       ),
     };
@@ -794,6 +871,34 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         ),
       };
     });
+  }
+
+  // #326 S2: 셀렉트 변경은 그 컷의 shot_type·camera_angle만 갱신한다. 대사는 그대로 둔다.
+  function updateCutDirection(index: number, patch: Pick<Cut, "shot_type"> | Pick<Cut, "camera_angle">) {
+    setStoryboard((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        cuts: prev.cuts.map((cut, i) => (i === index ? { ...cut, ...patch } : cut)),
+      };
+    });
+  }
+
+  // #326 S4: 콘티 확인에서 항목을 눌러 해당 선택 단계로 돌아간다.
+  // brainstorm으로 가면 그 턴부터 다시 답하고 tone을 거쳐 재조립 뒤 conti로 복귀한다.
+  function backToBrainstorm(key: BrainstormTurn["key"]) {
+    setTurnIndex(Math.max(0, TURN_ORDER.indexOf(key)));
+    setStep("brainstorm");
+  }
+
+  // #326 S4: "이대로 만들기" — 콘티 확인 화면까지 대사 생성 호출 0회,
+  // 여기서 captions 단계로 넘어가며 1회 호출된다. 재조립 뒤 돌아온 경우
+  // 이전 대사가 남지 않도록 idle로 되돌리고 진입한다.
+  function handleConfirmConti() {
+    setCaptionStatus("idle");
+    setCaptionError(null);
+    setDefaultCutIndexes([]);
+    setStep("captions");
   }
 
   async function handleSave() {
@@ -1168,6 +1273,36 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               </div>
             </div>
 
+            {/* #326 S1: 구도 변화 핸들(기본 보통). CTA 강도와 같은 3단 슬라이더 형태. */}
+            <div className="flex flex-col gap-1">
+              <label htmlFor="direction-variety" className="text-sm font-medium">
+                구도 변화
+              </label>
+              <input
+                id="direction-variety"
+                type="range"
+                min={0}
+                max={DIRECTION_VARIETIES.length - 1}
+                step={1}
+                value={DIRECTION_VARIETIES.findIndex((s) => s.id === directionVariety)}
+                onChange={(e) => setDirectionVariety(DIRECTION_VARIETIES[Number(e.target.value)].id)}
+                aria-valuetext={DIRECTION_VARIETIES.find((s) => s.id === directionVariety)?.label}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs">
+                {DIRECTION_VARIETIES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setDirectionVariety(s.id)}
+                    className={s.id === directionVariety ? "font-semibold text-zinc-900" : "text-zinc-400"}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex flex-col gap-1">
               <label htmlFor="cta-purpose" className="text-sm font-medium">
                 이번 편 목적
@@ -1230,9 +1365,87 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
       {step === "assembling" && !presetError && <Spinner text="이야기를 엮고 있어요..." />}
 
+      {/* #326 S4: 콘티 확인 단계. 조립 결과(고른 값·컷 흐름)를 보여 주고,
+          항목을 누르면 해당 선택 단계로 돌아간다. 이 화면까지 대사 생성 호출 0회. */}
+      {step === "conti" && storyboard && (
+        <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
+          <h1 className="text-xl font-semibold">콘티를 확인해주세요</h1>
+          <p className="text-sm text-zinc-500">고른 것을 눌러 되돌아가 바꿀 수 있어요</p>
+          <div className="flex w-full flex-col gap-2 text-left">
+            <button
+              type="button"
+              onClick={() => backToBrainstorm("protagonist")}
+              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+            >
+              주인공: {answers.protagonist ?? ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => backToBrainstorm("supporting")}
+              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+            >
+              조연: {answers.supporting ?? ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => backToBrainstorm("flow")}
+              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+            >
+              흐름: {answers.flow ?? ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep("tone")}
+              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+            >
+              말투: {CAPTION_TONES.find((tone) => tone.id === toneId)?.label ?? toneId ?? ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep("tone")}
+              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+            >
+              마무리: {CTA_STRENGTHS.find((s) => s.id === ctaStrength)?.label ?? ctaStrength}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep("tone")}
+              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+            >
+              구도 변화:{" "}
+              {DIRECTION_VARIETIES.find((s) => s.id === directionVariety)?.label ?? directionVariety}
+            </button>
+          </div>
+          <div className="flex w-full flex-col gap-2 rounded-md border border-zinc-200 px-4 py-3 text-left">
+            <p className="text-sm font-medium">컷 흐름</p>
+            {storyboard.cuts.map((cut) => (
+              <p key={cut.cut_index} className="text-sm text-zinc-600">
+                {cut.cut_index}컷 · {beatLabel(cut.narrative_beat)}
+              </p>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={handleConfirmConti}
+            className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
+          >
+            이대로 만들기
+          </button>
+        </div>
+      )}
+
       {step === "captions" && storyboard && (
         <div className="flex w-full max-w-2xl flex-col items-center gap-4">
           <h1 className="text-xl font-semibold">대사를 확인하고 다듬어주세요</h1>
+          {/* #326 S2: "디테일 수정" 켜기/끄기(기본 꺼짐). 끄면 셀렉트가 숨겨진다. */}
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-600">
+            <input
+              type="checkbox"
+              checked={showDetailEdit}
+              onChange={(e) => setShowDetailEdit(e.target.checked)}
+            />
+            디테일 수정
+          </label>
           {captionStatus === "loading" && <Spinner text="대사를 만들고 있어요..." />}
           {captionError && (
             <div className="flex w-full flex-col items-center gap-3 rounded-md bg-red-50 px-4 py-3 text-center">
@@ -1279,6 +1492,44 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                         {regenCutIndex === cut.cut_index ? "뽑는 중…" : "다시 뽑기"}
                       </button>
                     </div>
+                    {/* #326 S2: 켰을 때만 컷 카드마다 구도·앵글 셀렉트. 바꾸면
+                        그 컷의 shot_type·camera_angle만 바뀌고 대사는 그대로 둔다. */}
+                    {showDetailEdit && (
+                      <div className="flex w-full gap-2">
+                        <label className="flex flex-1 items-center gap-2 text-xs text-zinc-600">
+                          구도
+                          <select
+                            value={cut.shot_type}
+                            onChange={(e) =>
+                              updateCutDirection(i, { shot_type: e.target.value as ShotType })
+                            }
+                            className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                          >
+                            {SHOT_TYPE_OPTIONS.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="flex flex-1 items-center gap-2 text-xs text-zinc-600">
+                          앵글
+                          <select
+                            value={cut.camera_angle}
+                            onChange={(e) =>
+                              updateCutDirection(i, { camera_angle: e.target.value as CameraAngle })
+                            }
+                            className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                          >
+                            {CAMERA_ANGLE_OPTIONS.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
