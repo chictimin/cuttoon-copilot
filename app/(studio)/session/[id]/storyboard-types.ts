@@ -85,9 +85,4 @@ export interface Storyboard {
   cuts: Cut[];
   /** 이 컷툰 한 편의 CTA 강도 (issue #205). 없으면 clear로 해석. */
   cta_strength?: "none" | "soft" | "clear";
-  /**
-   * POC 한정(#326, main 반영 아님). 확정 레퍼런스 컷 asset(asset://… 또는 /demo-cache/…).
-   * 컷 생성 요청 본문의 reference_asset으로 실어 보낸다(서버 연결은 후속).
-   */
-  reference_image?: string | null;
 }

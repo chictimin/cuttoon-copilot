@@ -460,11 +460,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const subjectRef = useRef(subject);
   subjectRef.current = subject;
   const [preset, setPreset] = useState<Preset | null>(null);
-  // #326 구조변경: 표지 3안 → 레퍼런스 1장(상반신·눈높이 고정). 후보 목록·
-  // 표시 위치·확정값. 확정 뒤에는 변경이 잠긴다(cover 단계로 돌아가는 경로 없음).
+  // #326 절충안: 컷1=기준컷. 후보 목록·표시 위치(확정은 컷1에 바로 입힌다).
   const [refCandidates, setRefCandidates] = useState<GeneratedCut[]>([]);
   const [refShown, setRefShown] = useState(0);
-  const [reference, setReference] = useState<{ asset: string; image: string } | null>(null);
   // #326 구조변경: 레퍼런스 모달 입력. 구도·앵글은 bust·eye 고정, 인물 구성 고정.
   const [refModalOpen, setRefModalOpen] = useState(false);
   const [refTimeOfDay, setRefTimeOfDay] = useState<TimeOfDay | "auto">("auto");
@@ -752,9 +750,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       // #150: 마스코트는 4번째 인자로만 넘긴다 — 조연 답변이 마스코트 후보면
       // cast의 조연 character_id가 mascot.label이 된다. 5번째는 #205 CTA.
       // spec-a3 3-2(c): 6번째는 조립 전 단일 출처 subjectTags. 비면 필드 생략(조립 함수 내).
-      setStoryboard(
-        assembleStoryboard(subject, full, preset.style.palette, preset.mascot, sessionCta, subjectTags)
-      );
+      // #326 절충안: 컷1=기준컷은 상반신·눈높이 고정 — 조립 직후 컷1만 덮어쓴다.
+      const assembled = assembleStoryboard(subject, full, preset.style.palette, preset.mascot, sessionCta, subjectTags);
+      setStoryboard({
+        ...assembled,
+        cuts: assembled.cuts.map((c, i) =>
+          i === 0 ? { ...c, shot_type: "bust", camera_angle: "eye" } : c
+        ),
+      });
       // #326 S4: 조립 뒤 바로 captions로 가지 않고 콘티 확인으로 간다.
       // F2 기본 대사는 조립 결과에 이미 들어 있다. 대사 생성은 콘티 화면의
       // "이대로 만들기"를 눌렀을 때 captions 단계에서 1회 호출된다.
@@ -871,10 +874,18 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   // F4: 서버 연출안을 조립된 컷에 반영한다. 검증·기본값 유지는
   // applyCutDirections(storyboard-assembly.ts)가 맡는다.
+  // #326 절충안: 컷1=기준컷 shot/angle은 bust/eye 유지 — 대사 생성이 바꿔도 덮어쓴다.
   function applyDirections(directions: unknown, fallbackCuts: unknown) {
     setStoryboard((prev) => {
       if (!prev) return prev;
-      return { ...prev, cuts: applyCutDirections(prev.cuts, directions, fallbackCuts) };
+      const applied = applyCutDirections(prev.cuts, directions, fallbackCuts);
+      const keep = prev.cuts[0];
+      return {
+        ...prev,
+        cuts: applied.map((cut, i) =>
+          i === 0 && keep ? { ...cut, shot_type: keep.shot_type, camera_angle: keep.camera_angle } : cut
+        ),
+      };
     });
   }
 
@@ -994,8 +1005,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, storyboard]);
 
-  // #326 구조변경: 레퍼런스 1장(상반신·눈높이 고정). 요청 복사본의 컷1
-  // shot_type·camera_angle만 bust·eye로 덮어쓴다 — storyboard 값은 그대로 둔다.
+  // #326 절충안: 컷1=기준컷 1장(상반신·눈높이 고정, 프롬프트는 서버가 처리).
+  // 결과는 컷1 generated_image에 바로 넣는다(컷1 shot/camera는 bust/eye로 맞춤).
   async function loadReference() {
     // preset은 assembling effect가 "cover"로 넘어가기 전에 이미 기다렸으므로
     // 이 시점엔 항상 준비돼 있다 — 여기서 다시 fetch하지 않는다(issue #123).
@@ -1003,19 +1014,47 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     setGenError(null);
 
     try {
-      const refBoard: Board = {
-        ...storyboard,
-        cuts: storyboard.cuts.map((c, i) =>
-          i === 0 ? { ...c, shot_type: "bust", camera_angle: "eye" } : c
-        ),
-      };
-      const { variants, requested } = await generateCoverVariants(refBoard, preset, 1);
+      const { variants, requested } = await generateCoverVariants(storyboard, preset, 1);
+      if (variants.length === 0) throw new Error("empty");
       setRefCandidates(variants);
       setRefShown(0);
+      applyCut1Candidate(variants[0]);
       selectionLogRef.current = recordRound(selectionLogRef.current, variants, requested ?? variants.length);
     } catch {
-      setGenError("레퍼런스를 만드는 데 실패했어요. 다시 시도해주세요");
+      setGenError("기준 컷을 만드는 데 실패했어요. 다시 시도해주세요");
     }
+  }
+
+  // #326 절충안: 후보 그림을 컷1에 입힌다(shot/camera는 bust/eye 고정).
+  function applyCut1Candidate(candidate: GeneratedCut) {
+    const cutKey = storyboard?.cuts[0]?.cut_index;
+    if (cutKey == null) return;
+    setStoryboard((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        cuts: prev.cuts.map((c, i) =>
+          i === 0
+            ? {
+                ...c,
+                generated_image: candidate.asset,
+                shot_type: "bust",
+                camera_angle: "eye",
+                prompt_used: promptForCut(prev.subject, { ...c, shot_type: "bust", camera_angle: "eye" }),
+              }
+            : c
+        ),
+      };
+    });
+    setCutImageUrls((prev) => ({ ...prev, [cutKey]: candidate.image }));
+  }
+
+  // #326 절충안: 기준 컷 후보 넘겨 보기.
+  function showRefCandidate(index: number) {
+    const candidate = refCandidates[index];
+    if (!candidate) return;
+    setRefShown(index);
+    applyCut1Candidate(candidate);
   }
 
   // #326 구조변경: 표지=레퍼런스 — S6 경로(표지가 컷1 되기)는 호출하지 않는다.
@@ -1324,23 +1363,23 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       const list = [...refCandidates, variants[0]];
       setRefCandidates(list);
       setRefShown(list.length - 1);
+      applyCut1Candidate(variants[0]);
     } catch {
-      setRefError("레퍼런스를 다시 만들지 못했어요. 다시 시도해주세요");
+      setRefError("기준 컷을 다시 만들지 못했어요. 다시 시도해주세요");
     } finally {
       setRefGenerating(false);
     }
   }
 
-  // #326 구조변경: 표시 중인 레퍼런스 후보로 확정하고 전 컷 생성을 시작한다.
-  // 확정 뒤 레퍼런스 변경은 잠긴다(cover 단계로 돌아가는 경로가 없다).
+  // #326 절충안: 표시 중인 후보가 곧 컷1이다 — 확정하면 컷 2~4 생성을 시작한다.
+  // 확정 뒤 컷1 변경은 잠긴다(cover 단계로 돌아가는 경로가 없고 cuts에서 컷1 버튼도 잠금).
   function handleConfirmReference() {
     if (!storyboard || !preset) return;
-    const chosen = refCandidates[refShown];
-    if (!chosen) return;
+    const cut1 = storyboard.cuts[0];
+    const token = refCandidates[refShown]?.continuationToken ?? "";
+    if (!cut1 || typeof cut1.generated_image !== "string") return;
     selectionLogRef.current = markSelected(selectionLogRef.current, 0);
-    const confirmed = { asset: chosen.asset, image: chosen.image };
-    setReference(confirmed);
-    void runChainedCuts(storyboard, chosen.continuationToken ?? "", confirmed.asset);
+    void runChainedCuts(storyboard, token, cut1.generated_image);
   }
 
   function updateRedrawCharacter(characterId: string, patch: { expression?: Expression; pose?: Pose }) {
@@ -1412,13 +1451,15 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       );
       const requestBoard: Board = { ...storyboard, cuts: requestCuts };
       const token = chainTokensRef.current[cut.cut_index];
+      const cut1Asset = storyboard.cuts[0]?.generated_image;
       const generated = await generateRedrawnCut({
         storyboard: requestBoard,
         preset,
         ...(token ? { continueFrom: token } : {}),
         ...(form.note.trim() ? { regenNote: form.note.trim() } : {}),
-        // #326 구조변경: 확정 레퍼런스를 컷 다시 그리기에도 싣는다(확정 뒤 잠금값).
-        ...(reference ? { referenceAsset: reference.asset } : {}),
+        // #326 절충안: 컷1(기준컷) asset을 컷 다시 그리기에도 싣는다.
+        ...(typeof cut1Asset === "string" ? { referenceAsset: cut1Asset } : {}),
+        targetCutIndex: cut.cut_index,
       });
       if (!redrawOriginalsRef.current[cut.cut_index]) {
         redrawOriginalsRef.current[cut.cut_index] = {
@@ -1698,7 +1739,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     );
   }
 
-  // #326 구조변경: 레퍼런스 모달. 구도·앵글 고정(셀렉트 없음), 인물 구성 고정,
+  // #326 절충안: 컷 1 다시 만들기 모달. 구도·앵글 고정(셀렉트 없음), 인물 구성 고정,
   // 시간대·자유 입력·모달 안 결과·반복 생성. 생성 중에는 S9 모달과 같은 전체 잠금.
   function refModal() {
     if (!refModalOpen || !storyboard) return null;
@@ -1712,7 +1753,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="레퍼런스 다시 만들기"
+        aria-label="컷 1 다시 만들기"
         onClick={() => {
           if (!refGenerating) setRefModalOpen(false);
         }}
@@ -1723,7 +1764,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           className="relative flex max-h-full w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-lg bg-white p-4 text-left"
         >
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold">레퍼런스를 다시 만들어볼까요?</h2>
+            <h2 className="text-base font-semibold">컷 1을 다시 만들어볼까요?</h2>
             <button
               type="button"
               aria-label="닫기"
@@ -1770,7 +1811,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
             <img
               src={shown.image}
-              alt="다시 만든 레퍼런스"
+              alt="다시 만든 컷 1"
               className="aspect-square w-full rounded-md object-cover"
             />
           )}
@@ -1800,12 +1841,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   async function handleSave() {
     if (!storyboard) return;
 
-    // #326 구조변경: 저장 시 확정 레퍼런스 asset을 reference_image로 싣는다.
-    const payload: Board = reference ? { ...storyboard, reference_image: reference.asset } : storyboard;
-
     try {
       // #205: 강도를 함께 넘겨야 none(CTA 컷 0개)이 기존 규칙(CTA 1개)에 막히지 않는다.
-      assertStoryboardRuntimeInvariants(payload.cuts, payload.cta_strength);
+      assertStoryboardRuntimeInvariants(storyboard.cuts, storyboard.cta_strength);
     } catch {
       setSaveError("컷 구성에 문제가 있어요. 처음부터 다시 시도해주세요");
       return;
@@ -1834,7 +1872,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         body: JSON.stringify({
           projectId,
           presetId,
-          storyboard: payload,
+          storyboard,
           ...(selections.length > 0 ? { selections } : {}),
         }),
       });
@@ -2159,6 +2197,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               value={directionVariety}
               onChange={setDirectionVariety}
             />
+            {/* #326 절충안: 구도 변화는 컷 1(기준컷)에는 적용되지 않아요. */}
+            <p className="-mt-2 text-xs text-zinc-400">구도 변화는 컷 1(기준 컷)에는 적용되지 않아요</p>
 
             <CtaPurposeSelect
               id="cta-purpose"
@@ -2350,17 +2390,24 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                       </button>
                     </div>
                     {/* #326 S2 수정: 켰을 때만 + 생성 완료 상태에서만 셀렉트. 바꾸면
-                        그 컷의 shot_type·camera_angle만 바뀌고 대사는 그대로 둔다. */}
+                        그 컷의 shot_type·camera_angle만 바뀌고 대사는 그대로 둔다.
+                        #326 절충안: 컷1=기준컷 셀렉트는 비활성(상반신·눈높이 고정). */}
                     {showDetailEdit && captionStatus === "ready" && (
                       <div className="flex w-full gap-2">
+                        {i === 0 && (
+                          <span className="shrink-0 rounded bg-zinc-100 px-2 py-1.5 text-xs text-zinc-500">
+                            기준 컷
+                          </span>
+                        )}
                         <label className="flex flex-1 items-center gap-2 text-xs text-zinc-600">
                           구도
                           <select
                             value={cut.shot_type}
+                            disabled={i === 0}
                             onChange={(e) =>
                               updateCutDirection(i, { shot_type: e.target.value as ShotType })
                             }
-                            className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                            className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm disabled:opacity-40"
                           >
                             {SHOT_TYPE_OPTIONS.map((option) => (
                               <option key={option.id} value={option.id}>
@@ -2373,10 +2420,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                           앵글
                           <select
                             value={cut.camera_angle}
+                            disabled={i === 0}
                             onChange={(e) =>
                               updateCutDirection(i, { camera_angle: e.target.value as CameraAngle })
                             }
-                            className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                            className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm disabled:opacity-40"
                           >
                             {CAMERA_ANGLE_OPTIONS.map((option) => (
                               <option key={option.id} value={option.id}>
@@ -2402,7 +2450,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           )}
         </div>
       )}
-      {step === "cover" && refCandidates.length === 0 && !genError && <Spinner text="레퍼런스를 그리고 있어요..." />}
+      {step === "cover" && refCandidates.length === 0 && !genError && <Spinner text="기준 컷을 그리고 있어요..." />}
       {step === "generating" && !genError && (
         <Spinner
           text={
@@ -2421,7 +2469,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             type="button"
             onClick={() => {
               if (step === "generating" && chainRef.current) {
-                void runChainedCuts(chainRef.current.storyboard, chainRef.current.token, reference?.asset);
+                void runChainedCuts(
+                  chainRef.current.storyboard,
+                  chainRef.current.token,
+                  chainRef.current.storyboard.cuts[0]?.generated_image ?? undefined
+                );
                 return;
               }
               setGenError(null);
@@ -2437,16 +2489,16 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
-      {/* #326 구조변경: 레퍼런스 1장 확정 단계. 표시 중인 후보로 확정하면 전 컷 생성이 시작된다. */}
+      {/* #326 절충안: 컷 1(기준컷) 확정 단계. 표시 중인 후보가 곧 컷1이다. */}
       {step === "cover" && refCandidates.length > 0 && storyboard && !genError && (
         <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
-          <h1 className="text-xl font-semibold">이 레퍼런스로 4컷을 만들까요?</h1>
-          <p className="text-sm text-zinc-500">확정하면 컷 1부터 순서대로 만들기 시작해요</p>
+          <h1 className="text-xl font-semibold">컷 1(기준 컷)입니다. 나머지 컷을 만들까요?</h1>
+          <p className="text-sm text-zinc-500">확정하면 컷 2부터 순서대로 만들어요. 컷 1은 확정이 기준 그림이에요</p>
           {refCandidates[refShown]?.image ? (
             // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
             <img
               src={refCandidates[refShown].image}
-              alt="레퍼런스"
+              alt="컷 1 기준 컷"
               className="aspect-square w-full max-w-md rounded-md object-cover"
             />
           ) : (
@@ -2458,9 +2510,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                aria-label="이전 레퍼런스"
+                aria-label="이전 기준 컷"
                 disabled={refShown === 0}
-                onClick={() => setRefShown(refShown - 1)}
+                onClick={() => showRefCandidate(refShown - 1)}
                 className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-40"
               >
                 ‹
@@ -2470,9 +2522,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               </span>
               <button
                 type="button"
-                aria-label="다음 레퍼런스"
+                aria-label="다음 기준 컷"
                 disabled={refShown === refCandidates.length - 1}
-                onClick={() => setRefShown(refShown + 1)}
+                onClick={() => showRefCandidate(refShown + 1)}
                 className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-40"
               >
                 ›
@@ -2492,13 +2544,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               onClick={handleConfirmReference}
               className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
             >
-              이 레퍼런스로 진행
+              이 컷 1로 진행
             </button>
           </div>
         </div>
       )}
 
-      {/* #326 구조변경: 레퍼런스 모달. cover 단계에서만 열린다(확정 뒤 잠금). */}
+      {/* #326 절충안: 컷 1 다시 만들기 모달. cover 단계에서만 열린다(확정 뒤 잠금). */}
       {refModal()}
 
       {step === "cuts" && storyboard && (
@@ -2588,8 +2640,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                     {cut.caption.text}
                   </button>
                 )}
-                {/* #326 S9: 복원 뷰 제외. 복원 뷰는 저장 수단이 없어 후보를 확정할 수 없다. */}
-                {!isRestoredView && redrawControls(i, cut.cut_index)}
+                {/* #326 절충안: 컷1=기준컷은 확정 뒤 잠금 — 다시 그리기 버튼 없음. 복원 뷰 제외. */}
+                {!isRestoredView && i !== 0 && redrawControls(i, cut.cut_index)}
               </div>
             ))}
           </div>

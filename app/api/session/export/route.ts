@@ -40,12 +40,7 @@ export async function GET(request: Request) {
 
   let result;
   try {
-    // #326 POC 한정: 확정 레퍼런스 컷이 있으면 00-reference.png로 포함한다.
-    // sessions.ts의 Storyboard 타입은 최상위 required 4개만 잡아두므로 여기서 좁힌다.
-    const storyboard = session.storyboard as unknown as Record<string, unknown>;
-    const referenceImage =
-      typeof storyboard.reference_image === "string" ? storyboard.reference_image : null;
-    result = await exportCuts(cuts, { font, referenceImage });
+    result = await exportCuts(cuts, { font });
   } catch (e) {
     console.error("[GET /api/session/export] ZIP 생성 실패:", e);
     return Response.json({ error: "Export에 실패했습니다" }, { status: 500 });

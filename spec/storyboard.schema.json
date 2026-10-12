@@ -60,14 +60,6 @@
           }
         }
       }
-    },
-    "reference_image": {
-      "anyOf": [
-        { "type": "null" },
-        { "type": "string", "pattern": "^asset://.+" },
-        { "type": "string", "pattern": "^/demo-cache/.+" }
-      ],
-      "description": "POC 한정(#326, main 반영 아님). 표지=레퍼런스 컷 결정에 따라 확정된 레퍼런스 컷 asset. generated_image와 같은 형식 규칙. 없으면 기존 세션 그대로 유효."
     }
   },
   "allOf": [

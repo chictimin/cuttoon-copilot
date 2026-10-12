@@ -5,7 +5,6 @@
 // 검사하는 규칙:
 // - A1 generated_image 형식(null 또는 ^asset://.+, 허용 집합에 정확히 있을 때만
 //   /demo-cache/… 통과 — 형식 검사이며 실존·UUID 검사가 아님)
-//   + reference_image(최상위, #326 POC 한정)도 같은 취급
 // - A2 storyboard_version enum(스키마에서 읽음)
 // - A3 cast 1~2명·주인공(protagonist) 정확히 1명
 // - A4 cuts 정확히 4개
@@ -204,9 +203,8 @@ function getSchemaPropsAt(pathParts: string[]): string[] {
 
 const ASSET_PATTERN = /^asset:\/\/.+/;
 
-// A1 asset 형식 — generated_image(컷별)와 reference_image(최상위, #326 POC 한정)가
-// 같은 취급이다. 형식 검사이며 실존 검사가 아님. 키 없음·null은 위반이 아니다.
-// 허용 집합(ctx)은 정확 일치만 통과.
+// A1 asset 형식 — generated_image(컷별) 검사용. 형식 검사이며 실존 검사가 아님.
+// 키 없음·null은 위반이 아니다. 허용 집합(ctx)은 정확 일치만 통과.
 function checkAssetFormat(
   value: unknown,
   loc: string,
@@ -787,9 +785,6 @@ function collectProblems(sb: unknown, demoCacheValues?: ReadonlySet<string>): Co
       // A1 generated_image — 위 checkAssetFormat 참조.
       checkAssetFormat(r.generated_image, `${loc}.generated_image`, problems, demoCacheValues);
     });
-
-    // A1 reference_image (최상위, #326 POC 한정) — generated_image와 같은 취급.
-    checkAssetFormat(rec.reference_image, "reference_image", problems, demoCacheValues);
 
     // CTA 비트 개수·위치 — 기존 assertCtaCutRule과 같은 규칙을 problem으로.
     const strengthRaw = rec.cta_strength;

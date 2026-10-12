@@ -58,17 +58,20 @@ async function callGenerateCut(input: {
   regenNote?: string;
   /** #326 구조변경: 확정 레퍼런스 asset. 있으면 reference_asset 키로 실어 보낸다. */
   referenceAsset?: string;
+  /** #326 절충안: 그릴 컷 번호. 있으면 target_cut_index 키로 실어 보낸다. */
+  targetCutIndex?: number;
 }): Promise<{ asset: string; continuationToken?: string }> {
-  const { regenNote, referenceAsset, ...rest } = input;
+  const { regenNote, referenceAsset, targetCutIndex, ...rest } = input;
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // 계약 키는 regen_note·reference_asset(스네이크). 없으면 키를 빼고 보낸다.
+    // 계약 키는 스네이크. 없으면 키를 빼고 보낸다.
     body: JSON.stringify({
       kind: "cut",
       ...rest,
       ...(regenNote ? { regen_note: regenNote } : {}),
       ...(referenceAsset ? { reference_asset: referenceAsset } : {}),
+      ...(typeof targetCutIndex === "number" ? { target_cut_index: targetCutIndex } : {}),
     }),
   });
   if (!res.ok) {
@@ -171,8 +174,9 @@ export async function generateChainedCuts(
   const cuts = storyboard.cuts.map((c) => ({ ...c }));
   const results: GeneratedCut[] = [];
   let continueFrom: string | undefined = startContinueFrom;
-  const total = cuts.length;
-  let done = cuts.filter((c) => c.generated_image).length;
+  // #326 절충안: 컷1=기준컷은 미리 만들어져 있어 건너뛴다. 진행 표시는 남은 컷 기준(n/3).
+  const total = cuts.filter((c) => !c.generated_image).length;
+  let done = 0;
   onProgress?.(done, total);
 
   for (let i = 0; i < cuts.length; i++) {
@@ -183,6 +187,7 @@ export async function generateChainedCuts(
       referenceAssets,
       continueFrom,
       ...(referenceAsset ? { referenceAsset } : {}),
+      targetCutIndex: cuts[i].cut_index,
     });
     // 생성(유료 호출) 자체는 여기서 이미 끝났다 — asset과 다음 컷 체이닝
     // 토큰을 확보했으니 체이닝은 리졸브 결과와 무관하게 이어간다.
@@ -220,6 +225,7 @@ export async function generateRedrawnCut(input: {
   continueFrom?: string;
   regenNote?: string;
   referenceAsset?: string;
+  targetCutIndex?: number;
 }): Promise<GeneratedCut> {
   const referenceAssets = referenceAssetsOf(input.preset);
   const raw = await callGenerateCut({
@@ -229,6 +235,7 @@ export async function generateRedrawnCut(input: {
     ...(input.continueFrom ? { continueFrom: input.continueFrom } : {}),
     ...(input.regenNote ? { regenNote: input.regenNote } : {}),
     ...(input.referenceAsset ? { referenceAsset: input.referenceAsset } : {}),
+    ...(typeof input.targetCutIndex === "number" ? { targetCutIndex: input.targetCutIndex } : {}),
   });
   return toGeneratedCut(raw);
 }
