@@ -174,16 +174,18 @@ function reservedZoneHint(zone: ReservedZone): string {
   )
 }
 
-// #325 POC: 연출 메모 정리. 줄바꿈·따옴표를 정리하고 100자를 넘기면 잘라낸다.
+// #325 POC: 연출 메모 정리. 줄바꿈·따옴표를 정리한다. 자릿수 상한은 여기서
+// 걸지 않는다 — 100자 제한은 브랜드 투영 "후" 최종 문자열에 거는 것이 호출부
+// 몫이다. 투영 전에 자르면 짧은 원문이 긴 category로 바뀌어 상한을 넘긴 채
+// 나가기 때문이다(예: 90자 입력이 투영 후 120자).
 // 따옴표를 걷는 이유: 메모는 사람이 쓰는 자유 문장이라 큰따옴표가 들어오면
 // 프롬프트 안의 다른 인용과 어긋나 모델이 문장 경계를 잘못 읽는다.
 function sanitizeDirectionNote(note: string): string {
-  const cleaned = note
+  return note
     .replace(/[\r\n]+/g, ' ')
     .replace(/["“”]/g, "'")
     .replace(/\s+/g, ' ')
     .trim()
-  return Array.from(cleaned).slice(0, 100).join('')
 }
 // enum 토큰을 그대로 넣으면 모델이 못 알아듣는다 — codex 4회 검증에서
 // "Shot type: closeup." 이 4/4 전신으로 나왔다. spec/vocabulary.json 의
@@ -400,10 +402,13 @@ export function buildCutPrompt(
     if (angle) parts.push(`Camera: ${angle}.`)
     // #325 POC: 연출 메모. Framing·Camera 문장 바로 뒤에 붙인다 — 구도·앵글
     // 지시와 한 덩어리로 읽히게 하려는 자리다. 사람이 쓰는 자유 문장이라
-    // 소재 쪽과 같은 브랜드 투영(projectForModel)을 거친다. 고정 규칙(말풍선·
+    // 소재 쪽과 같은 브랜드 투영(projectForModel)을 거친다. 100자 상한은
+    // 투영 후 최종 문자열에 건다(초과분 절단) — 투영 전에 자르면 짧은 원문이
+    // 긴 category로 바뀌어 상한을 넘긴 채 나간다. 고정 규칙(말풍선·
     // 글자 금지, Do not include)은 그대로 맨 뒤에 둔다.
     if (typeof cut.direction_note === 'string') {
-      const note = project(sanitizeDirectionNote(cut.direction_note))
+      const projected = project(sanitizeDirectionNote(cut.direction_note))
+      const note = Array.from(projected).slice(0, 100).join('').trim()
       if (note) parts.push(`Director's note: ${note}.`)
     }
     const time = hint('time_of_day', cut.time_of_day)

@@ -15,9 +15,16 @@
  *   컷 2~4 체이닝(previous_response_id)은 실제 흐름과 같다 — 표지 1안 응답 → 컷 2 → 컷 3 → 컷 4.
  * - **기본은 --dry-run**: 이미지 호출 0, 프롬프트만 출력·저장한다. 유료 생성은 --run 을
  *   명시했을 때만 나간다. 1회 실행 최대 이미지 8장(MAX_IMAGES), 넘으면 거부한다.
+ *   --run의 OpenAI 클라이언트는 maxRetries 0이라 SDK 자동 재시도가 없어 실제 HTTP 생성
+ *   시도는 표지 3 + 컷 3 = 최대 6회로 고정된다.
+ * - --dry-run에 실제 세션 id를 주면 DB 읽기(getSession·getPreset·시트 readAsset)는 실제로
+ *   한다. 쓰기(uploadAsset·이미지 호출)는 dry-run 경로에 없어 0이 보장된다.
+ *   세션을 생략하면 내장 fake로 돌며 그때만 외부 요청을 전부 가로챈다(.env·네트워크 없음).
  *
  * 실행(유료, 원본 폴더에서):
  *   npx tsx --env-file=.env --conditions=react-server scripts/direction-check.ts --session <세션 id> --run
+ * 실제 세션 프롬프트만(유료 0, DB 읽기만):
+ *   npx tsx --env-file=.env --conditions=react-server scripts/direction-check.ts --session <세션 id> --dry-run
  * 프롬프트만(유료 0, .env·네트워크 없음):
  *   npx tsx --conditions=react-server scripts/direction-check.ts --dry-run
  *
@@ -197,9 +204,13 @@ async function main(): Promise<void> {
       (args.note !== undefined ? ` / 메모(컷 ${args.noteCut}): ${args.note}` : " / 메모 없음")
   );
 
-  // --dry-run: 모든 fetch 를 가로채 외부로 나가지 않게 한다. OpenAI 클라이언트가 만들어지기 전에 바꾼다.
+  // fake 세션의 --dry-run만 모든 fetch 를 가로채 외부로 나가지 않게 한다. 실제 세션 id의
+  // --dry-run은 DB 읽기(getSession·getPreset·readAsset)를 실제로 하므로 가로채지 않는다.
+  // 쓰기는 어느 dry-run에서도 나가지 않는다 — uploadAsset·OpenAI 호출이 dry-run 경로에 없다.
+  // OpenAI 클라이언트가 만들어지기 전에 바꾼다.
+  const useFake = !args.run && args.session === "fake";
   const requests: string[] = [];
-  if (!args.run) {
+  if (useFake) {
     process.env.SUPABASE_URL = "https://demo.invalid";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "demo";
     process.env.OPENAI_API_KEY = "sk-dry-fake";
@@ -208,6 +219,10 @@ async function main(): Promise<void> {
       requests.push(`${init?.method ?? "GET"} ${url.host}${url.pathname}`);
       return new Response("{}", { status: 404, headers: { "content-type": "application/json" } });
     }) as typeof fetch;
+  } else if (!args.run && !process.env.OPENAI_API_KEY) {
+    // 실제 세션 읽기 모드: DB(getSession·getPreset·readAsset)는 실제 env로 나가고,
+    // generate.ts 동적 import용 키만 없을 때 가짜를 깐다. 이 키로는 호출하지 않는다.
+    process.env.OPENAI_API_KEY = "sk-dry-fake";
   }
   const { OUTPUT_SIZE, buildCutPrompt, coverVariantDirections } = await import("../lib/openai/generate");
   if (`${OUTPUT_SIZE.width}x${OUTPUT_SIZE.height}` !== IMAGE_SIZE) throw new Error("OUTPUT_SIZE 가 바뀌었습니다 — 이 스크립트의 IMAGE_SIZE 를 맞추세요");
@@ -318,10 +333,14 @@ async function main(): Promise<void> {
 
   if (!args.run) {
     console.log("--- --dry-run 확인");
-    console.log(`이미지 호출 0건, 가로챈 fetch ${requests.length}건:`);
-    for (const r of requests) console.log(`  ${r}`);
-    const uploads = requests.filter((r) => /^(POST|PUT) [^ ]*\/storage\/v1\/object\//.test(r)).length;
-    console.log(`Storage 업로드(쓰기) 요청: ${uploads}건`);
+    if (useFake) {
+      console.log(`이미지 호출 0건, 가로챈 fetch ${requests.length}건:`);
+      for (const r of requests) console.log(`  ${r}`);
+      const uploads = requests.filter((r) => /^(POST|PUT) [^ ]*\/storage\/v1\/object\//.test(r)).length;
+      console.log(`Storage 업로드(쓰기) 요청: ${uploads}건`);
+    } else {
+      console.log(`실제 세션 읽기(getSession·getPreset·readAsset) 수행, 이미지 호출 0건 — 쓰기 없음`);
+    }
     console.log(`완료: ${out}/ (manifest.json, result.md, cover-*.txt, cut-*.txt — PNG 없음)`);
     if (failed > 0) {
       console.error(`중단: 점검 ${failed}건 실패`);
@@ -331,7 +350,10 @@ async function main(): Promise<void> {
   }
 
   // ── --run (유료) ──
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  // SDK 자동 재시도를 끈다(maxRetries 0) — 실제 HTTP 생성 시도는 표지 3 + 컷 3 = 최대 6회로
+  // 고정돼 상한(MAX_IMAGES 8)을 넘을 수 없다. 실패한 이미지는 재시도하지 않고 에러로 멈춘다.
+  console.log(`OpenAI SDK 재시도 없음(maxRetries 0) — 실제 HTTP 생성 시도 최대 ${totalImages}회`);
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0 });
   // reference: 생성 화면(generate-client referenceAssetsOf)과 같은 [시트, ...style_refs], 중복 제거.
   const uris = [...new Set([loaded.preset.assets?.character_sheet, ...(loaded.preset.assets?.style_refs ?? [])])].filter(
     (u): u is string => typeof u === "string"
