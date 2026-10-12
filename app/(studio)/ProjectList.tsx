@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { setDemoMode, useDemoMode } from "./demo-mode";
+import { MANIFEST_URL, setDemoMode, useDemoMode } from "./demo-mode";
 
 interface ProjectSummary {
   projectId: string;
@@ -23,6 +23,9 @@ export default function ProjectList() {
   const [confirmTarget, setConfirmTarget] = useState<ProjectSummary | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState(false);
+  // #311: 데모 캐시 기준 프로젝트는 삭제 버튼을 숨긴다. manifest를 못 읽으면
+  // 빈 집합으로 두고 모든 카드에 삭제 버튼을 보인다(오류 안내 없음).
+  const [protectedIds, setProtectedIds] = useState<ReadonlySet<string>>(new Set());
   const router = useRouter();
   // #307: ?demo=1로 들어오면 여기서 기억해 두어 세션 화면까지 이어진다.
   const demoMode = useDemoMode();
@@ -47,6 +50,31 @@ export default function ProjectList() {
         setPhase("ready");
       } catch {
         if (!cancelled) setPhase("error");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(MANIFEST_URL, { cache: "no-store" });
+        if (cancelled || !res.ok) return;
+        const raw = (await res.json()) as {
+          generated?: { project_id?: unknown };
+        } | null;
+        const projectId = raw?.generated?.project_id;
+        if (cancelled) return;
+        if (typeof projectId === "string" && projectId.length > 0) {
+          setProtectedIds(new Set([projectId]));
+        }
+      } catch {
+        // 못 읽으면 보호 목록은 빈 것으로 보고 오류 안내는 띄우지 않는다.
       }
     })();
 
@@ -162,17 +190,20 @@ export default function ProjectList() {
                     {new Date(project.updatedAt).toLocaleDateString("ko-KR")}
                   </span>
                 </Link>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setConfirmTarget(project);
-                    setDeleteError(false);
-                  }}
-                  aria-label={`${project.projectName} 삭제`}
-                  className="shrink-0 rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600"
-                >
-                  삭제
-                </button>
+                {/* #311: 데모 캐시 기준 프로젝트에는 삭제 버튼을 렌더하지 않는다. */}
+                {!protectedIds.has(project.projectId) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmTarget(project);
+                      setDeleteError(false);
+                    }}
+                    aria-label={`${project.projectName} 삭제`}
+                    className="shrink-0 rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600"
+                  >
+                    삭제
+                  </button>
+                )}
               </div>
               <div className="mt-3 flex justify-end">
                 <button
