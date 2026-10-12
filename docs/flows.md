@@ -1,51 +1,117 @@
 # 사용자·프로세스 흐름
 
-- 기준 커밋: `73395e2` (main, 2026-10-08)
+- 기준 커밋: `a06a040` (main, 2026-10-08)
 - 작성일: 2026-10-08
 - 원칙: 코드(기준 커밋)를 직접 따라 그린다 — 문서 문구를 옮기지 않는다. 확인 못한 연결은 점선 + "미확인"으로 표시한다.
 - 함수 단위 상세 흐름은 `docs/pipeline.md` 1~4절, 흐름 점검 근거는 `.roster/inv-flow-lozu.md`를 본다.
 - 실선 = 코드에서 확인한 연결, 점선 = 미확인·진행중.
 
-## 1. 사용자 흐름 — 첫 진입부터 Export ZIP까지
+## 1. 사용자 흐름 — 첫 진입부터 Export까지
 
 ```mermaid
 flowchart TD
-  L0["첫 진입 / (app/(studio)/ProjectList.tsx)"]
-  L1["0건 안내 + 새 프로젝트 만들기 → /onboarding"]
-  L2["온보딩 (app/(studio)/onboarding/OnboardingFlow.tsx): 레퍼런스·상세 입력·마스코트·캐릭터 시트"]
-  L3["새 컷툰 만들기 → /session/uuid (sessionStorage에 project-id·preset-id 기록)"]
-  S0["세션 (app/(studio)/session/[id]/SessionFlow.tsx): 소재·3턴 대화·말투·표지 3안 선택·컷 생성"]
-  S1a["표지 생성 실패 → 다시 시도·다시 뽑기 → loadCoverVariants (step cover 유지)"]
-  S1b["나머지 컷 생성 실패 → 이어서 만들기 → runChainedCuts chainRef (step generating 유지)"]
-  S2["저장 handleSave → POST /api/session (+selections 동봉)"]
-  S3["저장 실패: 400 subject_tags 전용 복구 버튼 / 그 외 error 문구 · selectionsSaved=false면 비차단 토스트"]
-  S4["saved 단계 → /editor/id"]
-  R0["저장된 세션 재방문 → GET 복원뷰 (저장 버튼 없음, 에디터에서 수정하기)"]
-  R1["프로젝트 상세 세션 카드 → /editor 직행 (app/(studio)/projects/[projectId]/ProjectSessions.tsx)"]
-  E0["에디터 (app/(studio)/editor/[id]/EditorFlow.tsx): 대사 편집·말풍선 드래그·되돌리기"]
-  E1["미완성 id 접근: 아직 완성된 컷툰이 없어요 + 목록 링크"]
-  E2["Export: 미저장 수정이 있으면 먼저 저장, 실패하면 내보내지 않음 → GET /api/session/export → ZIP"]
-  W0["새로고침 경고 beforeunload: generating(나머지 컷 생성)·미저장 cuts + 에디터 미저장 수정 (cover·온보딩 시트 생성중에는 없음 #297)"]
-  W1["브라우저 뒤로가기 실동작 미확인"]
+  F1["목록 보기"]
+  F2["새 프로젝트 만들기"]
+  F3["레퍼런스 올리기"]
+  F4["상세 입력·마스코트 고르기"]
+  F5["캐릭터 시트 만들기"]
+  F6["소재 적기"]
+  F7["3턴 대화·말투 고르기"]
+  F8["표지 3안 고르기"]
+  F9["나머지 컷 만들기"]
+  F10["저장하기"]
+  F11["대사 고치기·말풍선 옮기기"]
+  F12["ZIP으로 내보내기"]
+  B1["표지 실패하면 다시 뽑기"]
+  B2["컷 실패하면 이어서 만들기"]
+  B3["저장 실패하면 복구 안내"]
+  B4["저장된 세션 다시 열기"]
+  B5["미완성이면 목록으로"]
+  B6["나갔다 들어오면 경고"]
+  B7["뒤로가기 미확인"]
 
-  L0 --> L1 --> L2 --> L3 --> S0
-  S0 --> S1a
-  S0 --> S1b
-  S0 --> S2
-  S2 --> S3
-  S2 --> S4 --> E0 --> E2
-  S0 -- "저장된 id 재방문" --> R0 -- "에디터에서 수정하기" --> E0
-  L0 --> R1 --> E0
-  E0 -- "미완성 id" --> E1
-  S0 -- "generating·미저장 cuts" --> W0
-  E0 -- "미저장 수정" --> W0
-  S0 -. "미확인" .-> W1
-  E0 -. "미확인" .-> W1
+  F1 --> F2 --> F3 --> F4 --> F5 --> F6 --> F7 --> F8 --> F9 --> F10 --> F11 --> F12
+  F8 --> B1
+  F9 --> B2
+  F10 --> B3
+  F10 -- "저장된 id 재방문" --> B4 --> F11
+  F11 -- "미완성 id" --> B5
+  F9 -- "generating·미저장" --> B6
+  F11 -- "미저장 수정" --> B6
+  F9 -. "미확인" .-> B7
+  F11 -. "미확인" .-> B7
 ```
 
-## 2. 프로세스 흐름 — 소유자별 레인
+## 2. 프로세스 흐름 — 화면 입력부터 ZIP까지
 
-레인 기준: `docs/operations.md` 폴더 구조와 소유권 표.
+```mermaid
+sequenceDiagram
+  participant U as 사용자 화면
+  participant A as API 라우트
+  participant T as 텍스트 생성(LLM)
+  participant G as 이미지 생성
+  participant V as 저장 검사
+  participant D as DB·버킷
+  participant E as Export 합성
+
+  rect rgb(240, 245, 255)
+  Note over U,G: ① 세션 생성
+  U->>A: 소재 보내기
+  A->>T: 3턴 대화 만들기
+  T-->>U: 선택지 보여주기
+  U->>U: 답하기 ×3 · 말투 고르기
+  U->>A: 대사 요청
+  A->>T: 4컷 대사 만들기
+  U->>A: 표지 3안 요청
+  A->>G: 표지 만들기
+  alt 표지 실패
+    U->>U: 다시 뽑기
+  end
+  U->>U: 표지 1안 고르기
+  U->>A: 나머지 컷 요청
+  loop 이어서 만들기
+    A->>G: 컷 만들기
+  end
+  alt 컷 실패
+    U->>U: 이어서 만들기
+  end
+  end
+
+  rect rgb(240, 255, 240)
+  Note over U,D: ② 저장
+  U->>A: 세션 저장
+  A->>V: 스키마·선택 기록 검사
+  alt 검사 실패
+    V-->>U: 400 · 고치기 안내
+  else 통과
+    V->>D: 세션·선택 기록 저장
+    D-->>U: 저장됨(선택 기록 결과 포함)
+  end
+  end
+
+  rect rgb(255, 248, 240)
+  Note over U,D: ③ 에디터 저장
+  U->>A: 버전 저장
+  A->>D: 버전 저장하기
+  end
+
+  rect rgb(255, 240, 245)
+  Note over U,E: ④ Export
+  U->>A: ZIP 요청
+  A->>D: 세션·폰트 읽기
+  alt 데모 캐시면
+    D-->>E: public 파일
+  else 아니면
+    D-->>E: 버킷 이미지
+  end
+  E->>E: 말풍선 합성(좌표·화자 꼬리)
+  E-->>U: ZIP 내려주기
+  end
+```
+
+## 3. 상세 — 소유자별 레인 · 파일 경로
+
+<details><summary>소유자별 레인 · 파일 경로 (펼쳐 보기)</summary>
 
 ```mermaid
 flowchart TD
@@ -94,3 +160,15 @@ flowchart TD
   S_UP -. "미확인" .-> S_STORE
   U_ED -. "미확인" .-> C0
 ```
+
+| 단계 | 파일 | 소유 |
+| --- | --- | --- |
+| 화면 | `app/(studio)/` (단 `session/[id]/storyboard-assembly.ts`는 제외) | JEON-DAEJIN |
+| 스토리보드 조립 | `app/(studio)/session/[id]/storyboard-assembly.ts` (소유 예외) | chictimin |
+| 세션·프리셋·업로드·브레인스토밍 API | `app/api/session/` · `app/api/preset/` · `app/api/upload/` · `app/api/brainstorm/` | chictimin |
+| 스키마·LLM·DB | `spec/` · `lib/llm/` · `lib/db/` · `lib/asset-store.ts` · `lib/session/` | chictimin |
+| 생성·추출 API | `app/api/generate/` · `app/api/extract/` | joniverse-ai |
+| 이미지 생성·추출 | `lib/openai/` | joniverse-ai |
+| 렌더·Export | `lib/render/` | smartman3514-commits |
+
+</details>
