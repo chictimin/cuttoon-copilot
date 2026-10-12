@@ -177,6 +177,47 @@ function ThreeStepHandle<T extends string>({
   );
 }
 
+// #326 POC 수정: 이번 편 목적 셀렉트(tone 화면·콘티 확인에서 재사용).
+// 말투 화면과 같은 비활성 규칙(none이면 비활성). 선택 뒤 처리는 onChange 호출부 몫이다.
+function CtaPurposeSelect({
+  id,
+  preset,
+  ctaStrength,
+  value,
+  onChange,
+}: {
+  id: string;
+  preset: Preset | null;
+  ctaStrength: CtaStrength;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="text-sm font-medium">
+        이번 편 목적
+      </label>
+      <select
+        id={id}
+        disabled={!preset || ctaStrength === "none"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-40"
+      >
+        {preset &&
+          ctaPurposeOptions(preset).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+      </select>
+      {ctaStrength === "none" && (
+        <p className="text-xs text-zinc-400">이야기만으로 끝내서 목적은 쓰지 않아요</p>
+      )}
+    </div>
+  );
+}
+
 // #326 S9: 다시 그리기 모달 선택지. 값 목록은 storyboard-types.ts의 유니언과
 // 같은 집합이다(스키마 enum과 동일). 라벨은 화면 표시용이다.
 const TIME_OF_DAY_OPTIONS: { id: TimeOfDay; label: string }[] = [
@@ -1092,6 +1133,17 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     setStep("assembling");
   }
 
+  // #326 POC 수정: 콘티 자리에서 이번 편 목적을 바꾸면 재조립한다.
+  // 목적 id는 조립 결과(CTA 컷 cta_override)에 들어간다 — 대사 요청값만이 아니다.
+  function handleContiCtaPurpose(value: string) {
+    const next = value === preset?.rules.cta_format ? null : value;
+    setCtaPurposeChoice(next);
+    if (ctaStrength !== "none") {
+      setSessionCta({ strength: ctaStrength, purpose_id: next });
+    }
+    setStep("assembling");
+  }
+
   // #326 S4: "이대로 만들기" — 콘티 확인 화면까지 대사 생성 호출 0회,
   // 여기서 captions 단계로 넘어가며 1회 호출된다. 재조립 뒤 돌아온 경우
   // 이전 대사가 남지 않도록 idle로 되돌리고 진입한다.
@@ -1355,6 +1407,16 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   // #326 S9: 다시 그리기 모달. 입력→[다시 그리기]→모달 안 결과, 반복 가능.
   // 닫아도 만든 후보는 버리지 않는다(표시 후보가 storyboard에 이미 반영됨).
+  // #326 POC 수정: 생성 중에는 Esc로도 모달을 닫을 수 없다.
+  useEffect(() => {
+    if (redrawCutIndex === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !redrawing) closeRedrawModal();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [redrawCutIndex, redrawing]);
+
   function redrawModal() {
     if (redrawCutIndex === null || !redrawForm || !storyboard) return null;
     const cut = storyboard.cuts[redrawCutIndex];
@@ -1375,15 +1437,34 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         role="dialog"
         aria-modal="true"
         aria-label="다시 그리기"
+        onClick={() => {
+          // #326 POC 수정: 생성 중에는 바깥 클릭으로 닫을 수 없다.
+          if (!redrawing) closeRedrawModal();
+        }}
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       >
-        <div className="flex max-h-full w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-lg bg-white p-4 text-left">
-          <h2 className="text-base font-semibold">어떻게 다시 만들어볼까요?</h2>
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="relative flex max-h-full w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-lg bg-white p-4 text-left"
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold">어떻게 다시 만들어볼까요?</h2>
+            <button
+              type="button"
+              aria-label="닫기"
+              disabled={redrawing}
+              onClick={closeRedrawModal}
+              className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-40"
+            >
+              X
+            </button>
+          </div>
           <div className="flex gap-2">
             <label className="flex flex-1 items-center gap-2 text-xs text-zinc-600">
               구도
               <select
                 value={form.shot_type}
+                disabled={redrawing}
                 onChange={(e) => setRedrawForm({ ...form, shot_type: e.target.value as ShotType })}
                 className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
               >
@@ -1398,6 +1479,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               앵글
               <select
                 value={form.camera_angle}
+                disabled={redrawing}
                 onChange={(e) =>
                   setRedrawForm({ ...form, camera_angle: e.target.value as CameraAngle })
                 }
@@ -1415,6 +1497,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             시간대
             <select
               value={form.time_of_day}
+              disabled={redrawing}
               onChange={(e) =>
                 setRedrawForm({
                   ...form,
@@ -1439,8 +1522,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               </span>
               <button
                 type="button"
+                disabled={redrawing}
                 onClick={() => updateRedrawIncluded(ch.character_id, !ch.included)}
-                className="shrink-0 rounded-md border border-zinc-300 px-2 py-1.5 text-xs hover:bg-zinc-50"
+                className="shrink-0 rounded-md border border-zinc-300 px-2 py-1.5 text-xs hover:bg-zinc-50 disabled:opacity-40"
               >
                 {ch.included ? "빼기" : "넣기"}
               </button>
@@ -1449,6 +1533,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   <select
                     aria-label={`${ch.character_id} 표정`}
                     value={ch.expression}
+                    disabled={redrawing}
                     onChange={(e) =>
                       updateRedrawCharacter(ch.character_id, {
                         expression: e.target.value as Expression,
@@ -1465,6 +1550,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   <select
                     aria-label={`${ch.character_id} 포즈`}
                     value={ch.pose}
+                    disabled={redrawing}
                     onChange={(e) =>
                       updateRedrawCharacter(ch.character_id, { pose: e.target.value as Pose })
                     }
@@ -1484,6 +1570,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             자유 입력
             <input
               value={form.note}
+              disabled={redrawing}
               onChange={(e) => setRedrawForm({ ...form, note: e.target.value })}
               placeholder="예: 커피잔을 들고 있게"
               className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
@@ -1511,8 +1598,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             </button>
             <button
               type="button"
+              disabled={redrawing}
               onClick={closeRedrawModal}
-              className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
+              className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
             >
               닫기
             </button>
@@ -1882,33 +1970,16 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               onChange={setDirectionVariety}
             />
 
-            <div className="flex flex-col gap-1">
-              <label htmlFor="cta-purpose" className="text-sm font-medium">
-                이번 편 목적
-              </label>
-              <select
-                id="cta-purpose"
-                disabled={!preset || ctaStrength === "none"}
-                value={ctaPurposeChoice ?? preset?.rules.cta_format ?? ""}
-                onChange={(e) =>
-                  // 프로젝트 기본 목적으로 되돌리면 null(= 프로젝트 기본)로 둔다.
-                  setCtaPurposeChoice(
-                    e.target.value === preset?.rules.cta_format ? null : e.target.value
-                  )
-                }
-                className="rounded-md border border-zinc-300 px-3 py-2 text-sm disabled:opacity-40"
-              >
-                {preset &&
-                  ctaPurposeOptions(preset).map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-              </select>
-              {ctaStrength === "none" && (
-                <p className="text-xs text-zinc-400">이야기만으로 끝내서 목적은 쓰지 않아요</p>
-              )}
-            </div>
+            <CtaPurposeSelect
+              id="cta-purpose"
+              preset={preset}
+              ctaStrength={ctaStrength}
+              value={ctaPurposeChoice ?? preset?.rules.cta_format ?? ""}
+              onChange={(v) =>
+                // 프로젝트 기본 목적으로 되돌리면 null(= 프로젝트 기본)로 둔다.
+                setCtaPurposeChoice(v === preset?.rules.cta_format ? null : v)
+              }
+            />
           </div>
 
           <p className="w-full text-left text-sm font-medium">말투</p>
@@ -2008,6 +2079,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 options={DIRECTION_VARIETIES}
                 value={directionVariety}
                 onChange={setDirectionVariety}
+              />
+              <CtaPurposeSelect
+                id="conti-cta-purpose"
+                preset={preset}
+                ctaStrength={ctaStrength}
+                value={ctaPurposeChoice ?? preset?.rules.cta_format ?? ""}
+                onChange={handleContiCtaPurpose}
               />
             </div>
           </div>
