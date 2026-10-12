@@ -2,29 +2,33 @@
 // 백엔드(lib/openai/generate.ts, POST /api/generate)는 PR #80으로 이미 실제
 // OpenAI 호출로 붙어 있었는데 화면이 그 라우트를 안 타고 있던 게 이 이슈의 문제였다.
 //
-// PRD.md 6절: "표지컷만 3안, 나머지 3컷은 선택 후 생성한다. 표지 3안은 독립
-// 호출이고, 나머지 3컷은 previous_response_id로 이전 turn 응답을 체이닝해
-// 생성한다." 표지 3안은 kind: 'cover_variants'(서버가 3회 병렬 호출을 대신
-// 해준다), 나머지 3컷은 kind: 'cut'을 continueFrom으로 체이닝하며 순차 호출한다.
+// #326 절충안: 기준 컷 1장을 먼저 만들고(컷 1 고정), 나머지 컷은 previous_response_id로
+// 이전 turn 응답을 체이닝해 순차 호출한다. 기준 컷은 kind: 'cover_variants'(서버가
+// 1장 호출을 대신해준다), 나머지 컷은 kind: 'cut'을 continueFrom으로 체이닝한다.
 
 import type { Preset } from "@/lib/llm/preset-guard";
 import { fetchAssetUrl } from "../../asset-url";
 import type { DemoManifest } from "../../demo-mode";
-import type { Storyboard } from "./storyboard-types";
+import type { Storyboard, TimeOfDay } from "./storyboard-types";
 
 export interface GeneratedCut {
   /** 저장용 참조. storyboard.schema.json의 generated_image 패턴(^asset://)과 동일. */
   asset: string;
   /** 화면 표시용으로 리졸브한 공개 URL. 저장하지 않는다 — 매번 asset-url로 다시 받는다. */
   image: string;
-  /** 다음 컷 체이닝에 쓸 토큰(provider의 previous_response_id). 표지 3안엔 없다. */
+  /** 다음 컷 체이닝에 쓸 토큰(provider의 previous_response_id). 없을 수 있다(데모 캐시 등). */
   continuationToken?: string;
   /**
-   * #326 S6: 표지 안의 실제 연출(서버가 결과에 실어 보낸 경우).
-   * 없으면(데모 캐시·이전 버전 결과) 컷1 값을 바꾸지 않는다.
+   * #326: 기준 컷 결과의 실제 연출(서버가 실어 보낸 경우, bust·eye 고정).
+   * 없으면(데모 캐시 등) 컷1 값을 바꾸지 않는다.
    */
   shot_type?: string;
   camera_angle?: string;
+  /**
+   * ③ 기준 컷 다시 만들기 시간대. 서버가 돌려주지 않아 화면이 요청 때 찍는다 —
+   * 후보 확정·넘겨 보기 때 컷1 time_of_day에 함께 적용한다. 없으면 기존값 유지.
+   */
+  time_of_day?: TimeOfDay;
 }
 
 function referenceAssetsOf(preset: Preset): string[] {
@@ -96,7 +100,7 @@ export interface CoverVariantsResult {
   requested?: number;
 }
 
-// 표지 3안 — 독립 호출(PRD 6절: 체이닝하면 2안이 1안에 끌려가 서로 닮아버림).
+// 기준 컷 1장 — 독립 호출(체이닝하면 뒤 컷이 이 그림에 끌려가 서로 닮아버림).
 // storyboard는 cuts[0].generated_image가 아직 null인 상태로 넘겨야 한다.
 // #326 구조변경: 레퍼런스 1장 용도로 count 1을 보낼 수 있다(1~3, 기본 3).
 export async function generateCoverVariants(
@@ -127,7 +131,7 @@ export async function generateCoverVariants(
     requested?: number;
   };
 
-  // Promise.all이면 3안 중 URL 리졸브 하나만 실패해도 즉시 reject되어 이미
+  // Promise.all이면 후보 중 URL 리졸브 하나만 실패해도 즉시 reject되어 이미
   // 유료로 생성된 나머지 성공분까지 통째로 버려진다(PR #124 리뷰 지적) —
   // 서버가 generateCoverVariants에서 allSettled로 성공분을 지키는 것(#104)과
   // 같은 이유로, 여기서도 리졸브 실패 하나가 나머지를 끌고 내려가지 않게 한다.
@@ -195,8 +199,8 @@ export async function generateChainedCuts(
     cuts[i] = { ...cuts[i], generated_image: raw.asset };
     continueFrom = raw.continuationToken ?? continueFrom;
 
-    // URL 리졸브만 실패해도 여기서 던지면 이 컷과 앞서 성공한 컷들까지
-    // handleSelectCover의 catch에서 통째로 버려진다(#104). 리졸브 실패는
+    // URL 리졸브만 실패해도 여기서 던지면 호출부(runChainedCuts)의 catch에서
+    // 실패로 처리된다(#104). 리졸브 실패는
     // 이 컷의 표시용 image만 비우고(저장은 asset 기준이라 영향 없음) 계속한다.
     let image = "";
     try {
@@ -251,9 +255,9 @@ export function generateDemoCuts(
   return results;
 }
 
-// #326 S9: 한 컷만 다시 그리기. 호출부는 요청용 storyboard 복사본(대상 컷의
-// generated_image만 비우고 모달 연출값으로 덮어쓴 것)과 앞 컷 체이닝 토큰·
-// 자유 입력만 넘긴다. nextUngeneratedCut이 비워진 대상 컷을 고른다.
+// #326: 한 컷만 다시 그리기. 호출부는 요청용 storyboard 복사본(대상 컷의
+// generated_image만 비우고 모달 연출값으로 덮어쓴 것)과 기준 컷 asset·
+// 자유 입력만 넘긴다(앞 컷 이어받기는 R5에서 쓰지 않음). nextUngeneratedCut이 비워진 대상 컷을 고른다.
 export async function generateRedrawnCut(input: {
   storyboard: Storyboard;
   preset: Preset;

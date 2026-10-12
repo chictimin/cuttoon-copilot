@@ -52,6 +52,7 @@ import {
 // 순수 헬퍼라 클라이언트에서 값으로 import해도 된다(서버 모듈·DB import 없음, #207).
 import {
   createSelectionLog,
+  markRegenerated,
   markSelected,
   recordRound,
   toPayload,
@@ -112,7 +113,7 @@ function supportingIdField(storyboard: Storyboard): { supporting_id?: string } {
   return supporting ? { supporting_id: supporting.character_id } : {};
 }
 
-// #326 S2·S6: 컷 연출 셀렉트 선택지와 서버 연출값 판정. 값 목록은
+// #326: 컷 연출 셀렉트 선택지와 서버 연출값 판정. 값 목록은
 // storyboard-types.ts의 유니언과 같은 집합이다(스키마 enum과 동일).
 const SHOT_TYPE_OPTIONS: { id: ShotType; label: string }[] = [
   { id: "closeup", label: "클로즈업" },
@@ -382,8 +383,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [checkingExisting, setCheckingExisting] = useState(true);
   const [isRestoredView, setIsRestoredView] = useState(false);
   const [subject, setSubject] = useState("");
-  // #307: 데모 캐시 모드(?demo=1). 켜져 있으면 표지·컷 이미지 생성 두 곳만 manifest 이미지로 대체하고,
-  // 대사·저장·Export는 평소처럼 실행한다. 이 경로는 표지 선택 기록을 남기지 않는다(리허설 판정 제외, #307 합의).
+  // #307: 데모 캐시 모드(?demo=1). 켜져 있으면 기준 컷·컷 이미지 생성 두 곳만 manifest 이미지로 대체하고,
+  // 대사·저장·Export는 평소처럼 실행한다. 이 경로는 선택 기록을 남기지 않는다(리허설 판정 제외, #307 합의).
   const demoMode = useDemoMode();
   const [demoManifest, setDemoManifest] = useState<DemoManifest | null>(null);
   const [demoManifestError, setDemoManifestError] = useState(false);
@@ -427,9 +428,6 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [redrawError, setRedrawError] = useState<string | null>(null);
   const [redrawCandidates, setRedrawCandidates] = useState<Record<number, RedrawCandidate[]>>({});
   const [redrawShown, setRedrawShown] = useState<Record<number, number>>({});
-  // #326 S9: 컷별 체이닝 토큰(그 컷을 만들 때 쓴 continueFrom). 컷2는 표지 토큰.
-  // 없으면 다시 그리기 요청에서 continueFrom을 생략한다.
-  const chainTokensRef = useRef<Record<number, string>>({});
   const redrawOriginalsRef = useRef<Record<number, RedrawOriginal>>({});
   // F2: 이미지 호출 전 생성 대사의 상태. "idle"이면 captions 단계 진입 시 1회 호출.
   const [captionStatus, setCaptionStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -463,7 +461,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // 나머지 3컷 체이닝의 진행 상태 — 중간 실패 뒤 "이어서 만들기"가 이미 만든 컷과
   // 다음 컷 체이닝 토큰에서 재개하도록 렌더와 무관하게 들고 있는다(#104).
   const chainRef = useRef<{ storyboard: Board; token: string } | null>(null);
-  // #207: 표지 3안을 보여줄 때마다 한 라운드씩 쌓아 두었다가 "저장" 때 selections로
+  // #207: 기준 컷 후보를 보여줄 때마다 한 라운드씩 쌓아 두었다가 "저장" 때 selections로
   // 함께 보낸다. 화면에 그리지 않는 기록이라 state가 아니라 ref로 든다.
   const selectionLogRef = useRef<SelectionLog>(createSelectionLog());
   // #207: 세션은 저장됐지만 선택 기록만 실패한 경우(selectionsSaved: false)의 비차단 안내.
@@ -482,8 +480,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   // #259: 4컷을 만드는 중이거나 만든 뒤 저장 전이면, 새로고침·탭 닫기 때 브라우저 확인창을 띄운다.
   // 이미 저장된 세션을 다시 연 화면(isRestoredView)과 저장 완료(saved)는 잃을 것이 없다.
-  // #297: 표지 단계도 같다 — 3안을 만드는 중이거나 만든 뒤 고르기 전에 나가면 화면의 3안과
-  // 선택 기록이 사라져 다시 만들어야 한다(이미지 3장 재과금). 생성이 실패해 아무것도 없을 땐(genError) 제외한다.
+  // #297: 기준 컷 단계도 같다 — 1장을 만드는 중이거나 만든 뒤 고르기 전에 나가면 화면의 후보와
+  // 선택 기록이 사라져 다시 만들어야 한다(이미지 재과금). 생성이 실패해 아무것도 없을 땐(genError) 제외한다.
   const hasUnsavedResult =
     step === "generating" || (step === "cover" && !genError) || (step === "cuts" && !isRestoredView);
   useEffect(() => {
@@ -1043,7 +1041,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     }
   }
 
-  // #307: 표지 생성이 실패했을 때 사용자가 확인을 눌러야만 데모 캐시로 바꾼다(자동 전환 없음).
+  // #307: 기준 컷 생성이 실패했을 때 사용자가 확인을 눌러야만 데모 캐시로 바꾼다(자동 전환 없음).
   // 캐시 그림은 정해 둔 소재 기준이라 소재가 다르면 바꾸지 않는다.
   async function switchToDemoCache() {
     if (!storyboard) return;
@@ -1061,7 +1059,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       setGenError("데모 캐시를 불러오지 못했어요");
       return;
     }
-    // #307: 표지를 한 번 뽑은 뒤 전환해도 캐시 경로는 선택 기록을 남기지 않는다 — 쌓인 기록을 비운다.
+    // #307: 기준 컷을 한 번 뽑은 뒤 전환해도 캐시 경로는 선택 기록을 남기지 않는다 — 쌓인 기록을 비운다.
     selectionLogRef.current = createSelectionLog();
     setSelectionNotice(null);
     setDemoMode(true);
@@ -1091,6 +1089,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   }
 
   // #326 절충안: 후보 그림을 컷1에 입힌다(shot/camera는 bust/eye 고정).
+  // ③ 후보에 찍힌 시간대가 있으면 컷1 time_of_day도 함께 바꾼다. 없으면 기존값 유지.
   function applyCut1Candidate(candidate: GeneratedCut) {
     const cutKey = storyboard?.cuts[0]?.cut_index;
     if (cutKey == null) return;
@@ -1105,6 +1104,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 generated_image: candidate.asset,
                 shot_type: "bust",
                 camera_angle: "eye",
+                ...(candidate.time_of_day ? { time_of_day: candidate.time_of_day } : {}),
                 prompt_used: promptForCut(prev.subject, { ...c, shot_type: "bust", camera_angle: "eye" }),
               }
             : c
@@ -1129,11 +1129,6 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   async function runChainedCuts(startStoryboard: Board, token: string, refAsset?: string) {
     if (!preset) return;
     chainRef.current = { storyboard: startStoryboard, token };
-    // #326 S9: 첫 미생성 컷의 체이닝 토큰을 기록한다 — 구조변경 뒤에는 컷1(레퍼런스 토큰)이다.
-    if (token) {
-      const firstPending = startStoryboard.cuts.find((cut) => !cut.generated_image);
-      if (firstPending) chainTokensRef.current[firstPending.cut_index] = token;
-    }
     setStep("generating");
     setGenError(null);
     setGenProgress(null);
@@ -1158,11 +1153,6 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             storyboard: { ...chain.storyboard, cuts },
             token: generated.continuationToken ?? chain.token,
           };
-          // #326 S9: 다음 컷을 만들 때 쓸 토큰(이번 컷 결과 토큰)을 기록한다.
-          const nextCut = cuts[i + 1];
-          if (nextCut && generated.continuationToken) {
-            chainTokensRef.current[nextCut.cut_index] = generated.continuationToken;
-          }
           setStoryboard(chainRef.current.storyboard);
           setCutImageUrls((prev) => ({ ...prev, [cuts[i].cut_index]: generated.image }));
         },
@@ -1174,7 +1164,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       }
       setStep("cuts");
     } catch {
-      // step은 generating에 둔다 — 표지로 돌아가면 만든 컷이 버려진다.
+      // step은 generating에 둔다 — 기준 컷으로 돌아가면 만든 컷이 버려진다.
       // chainRef는 메모리 상태라 새로고침·탭 닫기 시 사라진다 — 문구에 그 한계를 밝힌다.
       // #326 구조변경: "나머지 컷" 문구를 전 컷 기준으로 바꾼다.
       setGenError(
@@ -1393,10 +1383,23 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         note ? note : undefined
       );
       if (variants.length === 0) throw new Error("empty");
-      const list = [...refCandidates, variants[0]];
+      // ③ 이 후보를 만든 요청 시간대를 찍는다 — 서버가 돌려주지 않으므로 화면이
+      // 기억했다 확정·넘겨 보기 때 컷1에 함께 적용한다. auto면 요청 때 원본값이
+      // 그대로 쓰였으므로 찍지 않고 기존값을 유지한다.
+      const stamped = {
+        ...variants[0],
+        ...(refTimeOfDay !== "auto" ? { time_of_day: refTimeOfDay } : {}),
+      };
+      const list = [...refCandidates, stamped];
       setRefCandidates(list);
       setRefShown(list.length - 1);
-      applyCut1Candidate(variants[0]);
+      applyCut1Candidate(stamped);
+      // ① 이전에 열린 라운드는 다시 뽑기로 버려진 것으로 닫고, 새 후보 1장으로
+      // 새 라운드를 연다 — 확정 때 마지막 라운드가 확정 후보를 갖게 하려는 것이다.
+      if (!demoMode) {
+        selectionLogRef.current = markRegenerated(selectionLogRef.current);
+        selectionLogRef.current = recordRound(selectionLogRef.current, [variants[0]], 1);
+      }
     } catch {
       setRefError("기준 컷을 다시 만들지 못했어요. 다시 시도해주세요");
     } finally {
@@ -1412,7 +1415,22 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     const token = refCandidates[refShown]?.continuationToken ?? "";
     if (!cut1 || typeof cut1.generated_image !== "string") return;
     // #326 통합②: 데모 모드에서는 선택 기록을 남기지 않는다(#307 합의).
-    if (!demoMode) selectionLogRef.current = markSelected(selectionLogRef.current, 0);
+    // ① 마지막 라운드는 최신 후보 1장이라 그걸 확정하면 index 0 선택,
+    // 이전 후보로 돌아가 확정하면 라운드를 닫고 확정 자산 1장으로 새 라운드를
+    // 열어 선택한다 — 전송 라운드의 selected asset이 실제 확정한 후보와 같아진다.
+    if (!demoMode) {
+      if (refShown === refCandidates.length - 1) {
+        selectionLogRef.current = markSelected(selectionLogRef.current, 0);
+      } else {
+        selectionLogRef.current = markRegenerated(selectionLogRef.current);
+        selectionLogRef.current = recordRound(
+          selectionLogRef.current,
+          [{ asset: cut1.generated_image }],
+          1
+        );
+        selectionLogRef.current = markSelected(selectionLogRef.current, 0);
+      }
+    }
     void runChainedCuts(storyboard, token, cut1.generated_image);
   }
 
@@ -1458,12 +1476,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           : c
       );
       const requestBoard: Board = { ...storyboard, cuts: requestCuts };
-      const token = chainTokensRef.current[cut.cut_index];
+      // ② 명세 R5: 컷 2~4 다시 그리기는 컷 1 참조와 무관하게 앞 컷 이어받기를
+      // 쓰지 않는다 — continueFrom을 보내지 않고 reference_asset·target_cut_index만
+      // 보낸다. 기준 컷 다시 만들기(handleRefGenerate) 경로는 그대로 둔다.
       const cut1Asset = storyboard.cuts[0]?.generated_image;
       const generated = await generateRedrawnCut({
         storyboard: requestBoard,
         preset,
-        ...(token ? { continueFrom: token } : {}),
         ...(form.note.trim() ? { regenNote: form.note.trim() } : {}),
         // #326 절충안: 컷1(기준컷) asset을 컷 다시 그리기에도 싣는다.
         ...(typeof cut1Asset === "string" ? { referenceAsset: cut1Asset } : {}),
@@ -1881,7 +1900,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       const res = await fetch("/api/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // 닫힌 라운드가 없으면(표지 기록 없음) 키를 빼 기존 응답 형태를 유지한다.
+        // 닫힌 라운드가 없으면(선택 기록 없음) 키를 빼 기존 응답 형태를 유지한다.
         body: JSON.stringify({
           projectId,
           presetId,
@@ -2316,20 +2335,34 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           <h1 className="text-xl font-semibold">콘티를 확인해주세요</h1>
           <p className="text-sm text-zinc-500">고른 것을 눌러 되돌아가 바꿀 수 있어요</p>
           <div className="flex w-full flex-col gap-2 text-left">
-            <button
-              type="button"
-              onClick={() => backToBrainstorm("protagonist")}
-              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
-            >
-              주인공: {answers.protagonist ?? ""}
-            </button>
-            <button
-              type="button"
-              onClick={() => backToBrainstorm("supporting")}
-              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
-            >
-              조연: {answers.supporting ?? ""}
-            </button>
+            {/* #331: 서버가 소재에서 건너뛴 턴(resolvedSlots)은 값만 보여주고
+                되돌아가기 대상에서 뺀다. 서버가 빼먹어 직접 답한 턴(#247)은 기존 버튼 그대로. */}
+            {resolvedSlots.some((slot) => slot.key === "protagonist") ? (
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-500">
+                주인공: {answers.protagonist ?? ""} (소재에서 파악)
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => backToBrainstorm("protagonist")}
+                className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+              >
+                주인공: {answers.protagonist ?? ""}
+              </button>
+            )}
+            {resolvedSlots.some((slot) => slot.key === "supporting") ? (
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-500">
+                조연: {answers.supporting ?? ""} (소재에서 파악)
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => backToBrainstorm("supporting")}
+                className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+              >
+                조연: {answers.supporting ?? ""}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => backToBrainstorm("flow")}
@@ -2548,7 +2581,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           >
             {step === "generating" ? "이어서 만들기" : "다시 시도"}
           </button>
-          {/* #326 통합: 데모 모드 표지 실패 후 캐시 전환 진입(R1 연결 전까지 기존 동작). */}
+          {/* #326 통합: 데모 모드 기준 컷 실패 후 캐시 전환 진입(R1 연결 전까지 기존 동작). */}
           {step === "cover" && !demoMode && (
             <button
               type="button"
