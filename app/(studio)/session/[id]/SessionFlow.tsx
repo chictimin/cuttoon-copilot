@@ -131,6 +131,52 @@ function isCameraAngle(value: unknown): value is CameraAngle {
   );
 }
 
+// #326 S4 수정: 3단 슬라이더 핸들 공용(tone 화면·콘티 확인에서 재사용).
+function ThreeStepHandle<T extends string>({
+  id,
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  options: { id: T; label: string }[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="text-sm font-medium">
+        {label}
+      </label>
+      <input
+        id={id}
+        type="range"
+        min={0}
+        max={options.length - 1}
+        step={1}
+        value={options.findIndex((s) => s.id === value)}
+        onChange={(e) => onChange(options[Number(e.target.value)].id)}
+        aria-valuetext={options.find((s) => s.id === value)?.label}
+        className="w-full"
+      />
+      <div className="flex justify-between text-xs">
+        {options.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onChange(s.id)}
+            className={s.id === value ? "font-semibold text-zinc-900" : "text-zinc-400"}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // #326 S9: 다시 그리기 모달 선택지. 값 목록은 storyboard-types.ts의 유니언과
 // 같은 집합이다(스키마 enum과 동일). 라벨은 화면 표시용이다.
 const TIME_OF_DAY_OPTIONS: { id: TimeOfDay; label: string }[] = [
@@ -316,6 +362,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [directionVariety, setDirectionVariety] = useState<DirectionVariety>("normal");
   // #326 S2: "디테일 수정" 토글(기본 꺼짐). 끄는 것은 숨김 — 바꾼 값은 유지된다.
   const [showDetailEdit, setShowDetailEdit] = useState(false);
+  // #326 S4 수정: 콘티 확인에서 항목을 눌러 돌아간 상태. 이게 true면 선택
+  // 단계에서 값을 하나 고르는 즉시 재조립 → 콘티 확인으로 복귀한다.
+  const [returnToConti, setReturnToConti] = useState(false);
   // #326 S9: 한 컷 다시 그리기. 모달 대상은 cuts 배열 인덱스, 후보 목록·표시
   // 위치는 cut_index 키. 후보·원본은 메모리에만 둔다(저장 전 이탈 시 사라짐).
   const [redrawCutIndex, setRedrawCutIndex] = useState<number | null>(null);
@@ -472,6 +521,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     setIsCustomOpen(false);
     setCustomText("");
 
+    // #326 S4 수정: 콘티 확인에서 돌아온 한 턴 수정이면 뒤 턴을 다시 거치지
+    // 않고 바로 재조립 → 콘티 확인으로 복귀한다. 다른 턴 답은 answers에 그대로 있다.
+    if (returnToConti) {
+      setReturnToConti(false);
+      setStep("assembling");
+      return;
+    }
     if (turnIndex < turns.length - 1) {
       setTurnIndex(turnIndex + 1);
     } else {
@@ -495,6 +551,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     setCaptionStatus("idle");
     setCaptionError(null);
     setDefaultCutIndexes([]);
+    // #326 S4 수정: 콘티 복귀 중이면 assembling이 conti로 돌아간다.
+    setReturnToConti(false);
     setStep("assembling");
   }
 
@@ -980,10 +1038,33 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   }
 
   // #326 S4: 콘티 확인에서 항목을 눌러 해당 선택 단계로 돌아간다.
-  // brainstorm으로 가면 그 턴부터 다시 답하고 tone을 거쳐 재조립 뒤 conti로 복귀한다.
+  // 한 항목만 고르고 바로 재조립 → 콘티 확인으로 복귀한다(returnToConti).
+  // 3턴 선택지는 1회 fetch로 고정되어 답변별로 재생성되지 않으므로, 한 턴만
+  // 바꿔도 뒤 턴 선택이 어긋나지 않는다(loadTurns는 subject+context만 보낸다).
   function backToBrainstorm(key: BrainstormTurn["key"]) {
     setTurnIndex(Math.max(0, TURN_ORDER.indexOf(key)));
+    setReturnToConti(true);
     setStep("brainstorm");
+  }
+
+  // #326 S4 수정: 말투·마무리·구도 변화 항목용. tone 단계에서 값을 고르면
+  // 바로 재조립 → 콘티 확인으로 복귀한다.
+  function backToTone() {
+    setReturnToConti(true);
+    setStep("tone");
+  }
+
+  // #326 S4 수정: 콘티 확인 자리에서 마무리 강도를 바꾸면 재조립한다.
+  // CTA 강도는 조립 결과에 들어간다(beats 시퀀스·cta_strength·cta_override) —
+  // 구도 변화와 달리 대사 요청값만이 아니다. 목적 선택값은 유지한다.
+  function handleContiCtaStrength(choice: CtaStrength) {
+    setCtaStrengthChoice(choice);
+    setSessionCta(
+      choice === "none"
+        ? { strength: "none" }
+        : { strength: choice, purpose_id: ctaPurposeChoice }
+    );
+    setStep("assembling");
   }
 
   // #326 S4: "이대로 만들기" — 콘티 확인 화면까지 대사 생성 호출 0회,
@@ -1703,64 +1784,22 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
           {/* #205: 마무리 강도·이번 편 목적은 기본값이 채워져 있어 말투만 눌러도 넘어간다. */}
           <div className="flex w-full flex-col gap-4 rounded-md border border-zinc-200 px-4 py-3 text-left">
-            <div className="flex flex-col gap-1">
-              <label htmlFor="cta-strength" className="text-sm font-medium">
-                마무리 강도
-              </label>
-              <input
-                id="cta-strength"
-                type="range"
-                min={0}
-                max={CTA_STRENGTHS.length - 1}
-                step={1}
-                value={CTA_STRENGTHS.findIndex((s) => s.id === ctaStrength)}
-                onChange={(e) => setCtaStrengthChoice(CTA_STRENGTHS[Number(e.target.value)].id)}
-                aria-valuetext={CTA_STRENGTHS.find((s) => s.id === ctaStrength)?.label}
-                className="w-full"
-              />
-              <div className="flex justify-between text-xs">
-                {CTA_STRENGTHS.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setCtaStrengthChoice(s.id)}
-                    className={s.id === ctaStrength ? "font-semibold text-zinc-900" : "text-zinc-400"}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <ThreeStepHandle
+              id="cta-strength"
+              label="마무리 강도"
+              options={CTA_STRENGTHS}
+              value={ctaStrength}
+              onChange={setCtaStrengthChoice}
+            />
 
             {/* #326 S1: 구도 변화 핸들(기본 보통). CTA 강도와 같은 3단 슬라이더 형태. */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="direction-variety" className="text-sm font-medium">
-                구도 변화
-              </label>
-              <input
-                id="direction-variety"
-                type="range"
-                min={0}
-                max={DIRECTION_VARIETIES.length - 1}
-                step={1}
-                value={DIRECTION_VARIETIES.findIndex((s) => s.id === directionVariety)}
-                onChange={(e) => setDirectionVariety(DIRECTION_VARIETIES[Number(e.target.value)].id)}
-                aria-valuetext={DIRECTION_VARIETIES.find((s) => s.id === directionVariety)?.label}
-                className="w-full"
-              />
-              <div className="flex justify-between text-xs">
-                {DIRECTION_VARIETIES.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setDirectionVariety(s.id)}
-                    className={s.id === directionVariety ? "font-semibold text-zinc-900" : "text-zinc-400"}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <ThreeStepHandle
+              id="direction-variety"
+              label="구도 변화"
+              options={DIRECTION_VARIETIES}
+              value={directionVariety}
+              onChange={setDirectionVariety}
+            />
 
             <div className="flex flex-col gap-1">
               <label htmlFor="cta-purpose" className="text-sm font-medium">
@@ -1819,6 +1858,20 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           >
             알아서 해줘
           </button>
+          {/* #326 S4 수정: 콘티 복귀 중이면 말투를 고르지 않고 강도·목적·구도만
+              바꿔 돌아갈 수 있다. 말투 버튼을 누르면 그 말투로 확정하고 복귀한다. */}
+          {returnToConti && (
+            <button
+              type="button"
+              onClick={() => {
+                setReturnToConti(false);
+                setStep("assembling");
+              }}
+              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm font-medium hover:bg-zinc-50"
+            >
+              이대로 콘티로 돌아가기
+            </button>
+          )}
         </div>
       )}
 
@@ -1854,34 +1907,28 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             </button>
             <button
               type="button"
-              onClick={() => setStep("tone")}
+              onClick={() => backToTone()}
               className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
             >
               말투: {CAPTION_TONES.find((tone) => tone.id === toneId)?.label ?? toneId ?? ""}
             </button>
-            <button
-              type="button"
-              onClick={() => setStep("tone")}
-              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
-            >
-              마무리: {CTA_STRENGTHS.find((s) => s.id === ctaStrength)?.label ?? ctaStrength}
-            </button>
-            <button
-              type="button"
-              onClick={() => setStep("tone")}
-              className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
-            >
-              구도 변화:{" "}
-              {DIRECTION_VARIETIES.find((s) => s.id === directionVariety)?.label ?? directionVariety}
-            </button>
-          </div>
-          <div className="flex w-full flex-col gap-2 rounded-md border border-zinc-200 px-4 py-3 text-left">
-            <p className="text-sm font-medium">컷 흐름</p>
-            {storyboard.cuts.map((cut) => (
-              <p key={cut.cut_index} className="text-sm text-zinc-600">
-                {cut.cut_index}컷 · {beatLabel(cut.narrative_beat)}
-              </p>
-            ))}
+            {/* #326 S4 수정: 마무리·구도 변화는 되돌아가지 않고 이 자리에서 바꾼다. */}
+            <div className="flex w-full flex-col gap-4 rounded-md border border-zinc-200 px-4 py-3 text-left">
+              <ThreeStepHandle
+                id="conti-cta-strength"
+                label="마무리 강도"
+                options={CTA_STRENGTHS}
+                value={ctaStrength}
+                onChange={handleContiCtaStrength}
+              />
+              <ThreeStepHandle
+                id="conti-direction-variety"
+                label="구도 변화"
+                options={DIRECTION_VARIETIES}
+                value={directionVariety}
+                onChange={setDirectionVariety}
+              />
+            </div>
           </div>
           <button
             type="button"
@@ -1896,7 +1943,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       {step === "captions" && storyboard && (
         <div className="flex w-full max-w-2xl flex-col items-center gap-4">
           <h1 className="text-xl font-semibold">대사를 확인하고 다듬어주세요</h1>
-          {/* #326 S2: "디테일 수정" 켜기/끄기(기본 꺼짐). 끄면 셀렉트가 숨겨진다. */}
+          {/* #326 S2 수정: "디테일 수정"은 대사 생성 완료 뒤에만 보인다. 생성 중·실패에는 숨김. */}
+          {captionStatus === "ready" && (
           <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-600">
             <input
               type="checkbox"
@@ -1905,6 +1953,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             />
             디테일 수정
           </label>
+          )}
           {captionStatus === "loading" && <Spinner text="대사를 만들고 있어요..." />}
           {captionError && (
             <div className="flex w-full flex-col items-center gap-3 rounded-md bg-red-50 px-4 py-3 text-center">
@@ -1951,9 +2000,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                         {regenCutIndex === cut.cut_index ? "뽑는 중…" : "다시 뽑기"}
                       </button>
                     </div>
-                    {/* #326 S2: 켰을 때만 컷 카드마다 구도·앵글 셀렉트. 바꾸면
+                    {/* #326 S2 수정: 켰을 때만 + 생성 완료 상태에서만 셀렉트. 바꾸면
                         그 컷의 shot_type·camera_angle만 바뀌고 대사는 그대로 둔다. */}
-                    {showDetailEdit && (
+                    {showDetailEdit && captionStatus === "ready" && (
                       <div className="flex w-full gap-2">
                         <label className="flex flex-1 items-center gap-2 text-xs text-zinc-600">
                           구도
