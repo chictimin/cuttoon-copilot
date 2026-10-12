@@ -16,6 +16,7 @@ import { readAsset, uploadAsset } from '../asset-store'
 import { elapsedSeconds, imageQuality, imageSetting, settingTag, timeImageCall, type ImageSetting } from './image-setting'
 import { generateWithComfyui } from './comfyui'
 import { projectForModel, type SubjectTag } from '../llm/subject-tags'
+import { cutReferenceMode } from '../cut-reference-mode'
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -135,6 +136,8 @@ interface MinimalPreset {
   // 시트의 비중이 그만큼 묽어진다. 스타일은 프롬프트의 Style 문장이 담당한다.
   assets?: {
     character_sheet?: string
+    // #326 실험 A'(chain-nostyle): 이어 그리는 컷에서 이 목록을 첨부에서 뺀다.
+    style_refs?: string[]
   }
   // #150: 프로젝트 고정 마스코트(preset.schema.json 최상위 선택 필드). 있으면 캐릭터
   // 시트가 이 인물을 그리고, 컷에서는 이 label 을 character_id 로 가진 인물만 시트와
@@ -237,7 +240,8 @@ export function buildCutPrompt(
   preset: MinimalPreset,
   cut?: MinimalCut,
   // 이 호출이 previous_response_id 로 앞 컷(표지 포함)을 이어받는가. generateCut 이 정한다.
-  opts: { continuesChain?: boolean } = {}
+  // coverReference: #326 실험 C — 고른 표지 그림을 시트 뒤에 첨부했는가(이어받기 없음).
+  opts: { continuesChain?: boolean; coverReference?: boolean } = {}
 ): string {
   const s = preset.style
   // character_ratio 만 라벨이 뒤에 붙는 형태였다 — `${값} body proportions`. 힌트
@@ -322,7 +326,23 @@ export function buildCutPrompt(
       : `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
         `attached reference sheet, but the person in this panel is a different character from ` +
         `the one drawn on that sheet — follow the character description below for who they are.`
-  const parts = [sheetSentence, `Style: ${styleStr}.`]
+  const parts = [sheetSentence]
+  // #326 실험 C(cover-ref): 첨부가 시트 + 표지 두 장이면 모델이 어느 것이 무엇인지
+  // 모른다 — 순서로 짚어 준다. 인물 0명 컷은 generateCut 이 시트를 빼므로 표지 한
+  // 장뿐이다. 표지 구도는 따라 하지 말라고 적는다 — 이 컷의 구도는 아래 Framing 이 정한다.
+  if (opts.coverReference) {
+    parts.push(
+      noPeopleInFrame
+        ? `The attached image is the chosen cover panel of this same comic — use the same ` +
+            `setting and color palette as in it, but compose this panel as described below, ` +
+            `not as a copy of the cover's framing.`
+        : `The second attached image is the chosen cover panel of this same comic — draw the ` +
+            `same people (face, hair color, hairstyle, skin tone and outfit), the same setting and ` +
+            `the same color palette as in it, but compose this panel as described below, not as a ` +
+            `copy of the cover's framing.`
+    )
+  }
+  parts.push(`Style: ${styleStr}.`)
 
   // extract.ts(B②)의 캐릭터 시트 프롬프트와 같은 문구를 쓴다. 시트와 컷이 문자
   // 그대로 같은 지시를 받아야 스타일이 어긋나지 않는다.
@@ -489,6 +509,16 @@ function nextUngeneratedCut(cuts?: MinimalCut[]): MinimalCut | undefined {
   return cuts?.find((c) => !c.generated_image)
 }
 
+// #326 실험 C: 컷을 동시에 그리므로 "그림 빈 첫 컷" 으로는 대상을 못 고른다(4컷 모두
+// 비어 있다). 요청이 cut_index 를 직접 주면 그 컷을 쓰고, 없거나 못 찾으면 기존 규칙.
+function targetCut(cuts: MinimalCut[] | undefined, cutIndex: unknown): MinimalCut | undefined {
+  if (typeof cutIndex === 'number') {
+    const hit = cuts?.find((c) => c.cut_index === cutIndex)
+    if (hit) return hit
+  }
+  return nextUngeneratedCut(cuts)
+}
+
 // 캐릭터 시트는 4컷 동일성(P0 게이트)의 유일한 방어선이다 — 스파이크 결론이
 // "체이닝만으로는 부족, 시트를 매 컷 넣어야 한다" 였다. 그래서 호출부가
 // referenceAssets 를 빼먹어도 preset.assets.character_sheet 로 채운다. 방어선이
@@ -637,9 +667,27 @@ async function resizeToOutput(
 export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const storyboard = (input.storyboard ?? {}) as MinimalStoryboard
   const preset = (input.preset ?? {}) as MinimalPreset
-  const cut = nextUngeneratedCut(storyboard.cuts)
+  const cut = targetCut(storyboard.cuts, input.target_cut_index)
   // 유료 호출 전에 읽어 모르는 값이면 여기서 멈춘다(#190).
   const setting = imageSetting()
+
+  // #326 비교 실험 스위치(lib/cut-reference-mode.ts). 기본 chain 은 아래가 전부 기존과 같다.
+  // - cover-ref(C): 표지 asset 이 오면 참조는 [시트, 표지]만, 이어받기는 쓰지 않는다
+  //   (화면이 continueFrom 을 안 보내지만, 와도 버린다 — 체인 문장도 빠진다).
+  // - chain-nostyle(A'): 이어 그리는 컷이면 style_refs 를 빼고 시트만 보낸다(#328 1번).
+  const mode = cutReferenceMode()
+  const coverRef =
+    mode === 'cover-ref' && typeof input.cover_reference === 'string' && input.cover_reference
+      ? input.cover_reference
+      : undefined
+  const continueFrom = coverRef ? undefined : input.continueFrom
+  const styleRefs = preset.assets?.style_refs ?? []
+  const referenceAssets = coverRef
+    ? [preset.assets?.character_sheet ?? input.referenceAssets.find((a) => !styleRefs.includes(a as string)), coverRef]
+        .filter((a): a is string => typeof a === 'string')
+    : mode === 'chain-nostyle' && continueFrom
+      ? input.referenceAssets.filter((a) => !styleRefs.includes(a as string))
+      : input.referenceAssets
 
   // #326 S9: 다시 그리기 자유 입력. 대상 컷(nextUngeneratedCut) 프롬프트의
   // direction_note 자리에 덮어쓴다 — 정리·100자 상한·브랜드 투영은
@@ -655,15 +703,16 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
 
   // ComfyUI 는 체이닝이 없어 앞 컷을 모른다(comfyui.ts 머리말) — 그때는 연속 문장을 넣지 않는다.
   const prompt = buildCutPrompt(storyboard, preset, promptCut, {
-    continuesChain: !!input.continueFrom && setting !== 'comfyui',
+    continuesChain: !!continueFrom && setting !== 'comfyui',
+    ...(coverRef && setting !== 'comfyui' ? { coverReference: true } : {}),
   })
   const { base64, responseId } = await callImageGeneration(
     prompt,
-    input.referenceAssets,
+    referenceAssets,
     preset,
     setting,
     'cut',
-    input.continueFrom,
+    continueFrom,
     // #326 S10 후속: 대상 컷 인물 0명이면 시트 첨부를 뺀다(그 컷만).
     // promptCut이 아니라 cut 기준 — regen_note 덮어씀과 무관하게 인원만 본다.
     { excludeSheet: !!cut && (cut.characters_in_frame ?? []).length === 0 }

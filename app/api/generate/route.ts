@@ -6,7 +6,7 @@ import type { PresetInput } from '@/lib/openai/extract'
 // POST /api/generate
 // body: { kind: 'character_sheet', preset }
 //     | { kind: 'cover_variants', storyboard, preset, referenceAssets }
-//     | { kind: 'cut', storyboard, preset, referenceAssets, continueFrom?, regen_note? }
+//     | { kind: 'cut', storyboard, preset, referenceAssets, continueFrom?, regen_note?, target_cut_index?, cover_reference? }
 export async function POST(request: Request) {
   let body: unknown
   try {
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   if (typeof body !== 'object' || body === null) {
     return Response.json({ error: '본문은 객체여야 합니다' }, { status: 400 })
   }
-  const { kind, preset, storyboard, referenceAssets, continueFrom, regen_note, count } = body as Record<string, unknown>
+  const { kind, preset, storyboard, referenceAssets, continueFrom, regen_note, count, target_cut_index, cover_reference } = body as Record<string, unknown>
 
   if (!preset) {
     return Response.json({ error: 'preset이 필요합니다' }, { status: 400 })
@@ -77,6 +77,12 @@ export async function POST(request: Request) {
             regen_note:
               typeof regen_note === 'string' && regen_note.trim()
                 ? regen_note.trim()
+                : undefined,
+            // #326 비교 실험(POC): 대상 컷 번호·고른 표지(C). 형식이 맞지 않으면 버린다.
+            target_cut_index: Number.isInteger(target_cut_index) ? (target_cut_index as number) : undefined,
+            cover_reference:
+              typeof cover_reference === 'string' && cover_reference.startsWith('asset://')
+                ? cover_reference
                 : undefined,
           }),
         })
