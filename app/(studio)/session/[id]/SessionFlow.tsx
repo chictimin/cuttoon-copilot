@@ -251,7 +251,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   // #259: 4컷을 만드는 중이거나 만든 뒤 저장 전이면, 새로고침·탭 닫기 때 브라우저 확인창을 띄운다.
   // 이미 저장된 세션을 다시 연 화면(isRestoredView)과 저장 완료(saved)는 잃을 것이 없다.
-  const hasUnsavedResult = step === "generating" || (step === "cuts" && !isRestoredView);
+  // #297: 표지 단계도 같다 — 3안을 만드는 중이거나 만든 뒤 고르기 전에 나가면 화면의 3안과
+  // 선택 기록이 사라져 다시 만들어야 한다(이미지 3장 재과금). 생성이 실패해 아무것도 없을 땐(genError) 제외한다.
+  const hasUnsavedResult =
+    step === "generating" || (step === "cover" && !genError) || (step === "cuts" && !isRestoredView);
   useEffect(() => {
     if (!hasUnsavedResult) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
