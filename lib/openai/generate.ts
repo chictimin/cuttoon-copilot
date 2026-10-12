@@ -408,7 +408,8 @@ export function buildCutPrompt(
     // 글자 금지, Do not include)은 그대로 맨 뒤에 둔다.
     if (typeof cut.direction_note === 'string') {
       const projected = project(sanitizeDirectionNote(cut.direction_note))
-      const note = Array.from(projected).slice(0, 100).join('').trim()
+      // 끝 마침표는 걷는다 — 아래에서 `.` 을 붙이므로 "웃기." 가 "웃기.." 로 나간다.
+      const note = Array.from(projected).slice(0, 100).join('').trim().replace(/[.。\s]+$/, '')
       if (note) parts.push(`Director's note: ${note}.`)
     }
     const time = hint('time_of_day', cut.time_of_day)
