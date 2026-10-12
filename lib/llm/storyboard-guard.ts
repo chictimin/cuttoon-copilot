@@ -634,7 +634,8 @@ function collectProblems(sb: unknown, demoCacheValues?: ReadonlySet<string>): Co
       } else if (!Array.isArray(fr)) {
         problems.push({ rule: "A5", locator: floc, kind: "type", cause: fr });
       } else {
-        if (fr.length < 1 || fr.length > 2) {
+        // POC S10: 인물 0명 허용. 3명 이상만 위반이다.
+        if (fr.length > 2) {
           problems.push({
             rule: "A5",
             locator: floc,

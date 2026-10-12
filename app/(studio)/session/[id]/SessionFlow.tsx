@@ -55,7 +55,7 @@ import {
   fetchSubjectSuggestions,
   hasSuggestionContext,
 } from "./subject-suggestions";
-import type { CameraAngle, Cut, CutCharacter, Expression, Pose, ShotType, Storyboard, TimeOfDay } from "./storyboard-types";
+import type { CameraAngle, CastMember, Cut, CutCharacter, Expression, Pose, ShotType, Storyboard, TimeOfDay } from "./storyboard-types";
 
 type Step = "subject" | "brainstorm" | "tone" | "assembling" | "conti" | "captions" | "cover" | "generating" | "cuts" | "saved";
 
@@ -231,21 +231,46 @@ interface RedrawFormState {
   shot_type: ShotType;
   camera_angle: CameraAngle;
   time_of_day: TimeOfDay | "auto";
-  characters: { character_id: string; expression: Expression; pose: Pose }[];
+  characters: RedrawFormCharacter[];
   note: string;
 }
 
+/** #326 S10: 모달 인물 행. included가 꺼진 인물은 요청·후보에서 빠진다. */
+interface RedrawFormCharacter {
+  character_id: string;
+  expression: Expression;
+  pose: Pose;
+  included: boolean;
+}
+
 // #326 S9: 모달을 열 때 컷 현재 값으로 폼을 채운다.
-function redrawFormFor(cut: Cut): RedrawFormState {
+// #326 S10: cast 전원(주인공·조연)을 행으로 두고 컷에 있는 인물만 included.
+// 새로 넣는 인물의 표정·포즈 기본값은 neutral·stand이다.
+function redrawFormFor(cut: Cut, cast: CastMember[]): RedrawFormState {
+  const inFrame = new Map(cut.characters_in_frame.map((c) => [c.character_id, c]));
   return {
     shot_type: cut.shot_type,
     camera_angle: cut.camera_angle,
     time_of_day: cut.time_of_day ?? "auto",
-    characters: cut.characters_in_frame.map((c) => ({
-      character_id: c.character_id,
-      expression: c.expression,
-      pose: c.pose,
-    })),
+    characters: [
+      ...cast.map((m) => {
+        const current = inFrame.get(m.character_id);
+        return {
+          character_id: m.character_id,
+          expression: current?.expression ?? ("neutral" as Expression),
+          pose: current?.pose ?? ("stand" as Pose),
+          included: current !== undefined,
+        };
+      }),
+      ...cut.characters_in_frame
+        .filter((c) => !cast.some((m) => m.character_id === c.character_id))
+        .map((c) => ({
+          character_id: c.character_id,
+          expression: c.expression,
+          pose: c.pose,
+          included: true,
+        })),
+    ],
     note: "",
   };
 }
@@ -1078,7 +1103,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   }
 
   // #326 S9: cuts 배열 인덱스의 컷에 후보(원본=0, 재생성n=1..n) 값을 입힌다.
-  // 대사·말풍선 위치·reserved_zone은 건드리지 않는다. 저장은 storyboard
+  // #326 S10: 인물 구성도 함께 바뀌고, 화자는 remapSpeaker로 다시 매긴다.
+  // 대사 텍스트·말풍선 위치·reserved_zone은 건드리지 않는다. 저장은 storyboard
   // 그대로 하므로 표시 중인 후보가 곧 확정 값이다.
   function materializeCandidate(
     board: Board,
@@ -1088,6 +1114,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   ): Board {
     const cut = board.cuts[arrayIndex];
     if (!cut) return board;
+    // #326 S10: 지금 컷의 화자 인물 id. 후보 인물 구성에 없을 수 있다.
+    const speakerId =
+      cut.caption.speaker_index === 0 || cut.caption.speaker_index === 1
+        ? cut.characters_in_frame[cut.caption.speaker_index]?.character_id
+        : undefined;
     if (shown === 0) {
       const orig = redrawOriginalsRef.current[cut.cut_index];
       if (!orig) return board;
@@ -1095,9 +1126,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         ...board,
         cuts: board.cuts.map((c, idx) =>
           idx === arrayIndex
-            ? {
-                ...c,
-                generated_image: orig.asset,
+            ? remapSpeaker(
+                {
+                  ...cut,
+                  generated_image: orig.asset,
                 shot_type: orig.shot_type,
                 camera_angle: orig.camera_angle,
                 time_of_day: orig.time_of_day,
@@ -1106,8 +1138,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   ...c,
                   shot_type: orig.shot_type,
                   camera_angle: orig.camera_angle,
-                }),
-              }
+                  })
+                },
+                speakerId
+              )
             : c
         ),
       };
@@ -1117,21 +1151,24 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     return {
       ...board,
       cuts: board.cuts.map((c, idx) =>
-        idx === arrayIndex
-          ? {
-              ...c,
-              generated_image: cand.asset,
+          idx === arrayIndex
+            ? remapSpeaker(
+                {
+                  ...cut,
+                  generated_image: cand.asset,
               shot_type: cand.shot_type,
               camera_angle: cand.camera_angle,
               time_of_day: cand.time_of_day,
               characters_in_frame: cand.characters.map((ch) => ({ ...ch })),
               prompt_used: promptForCut(board.subject, {
                 ...c,
-                shot_type: cand.shot_type,
-                camera_angle: cand.camera_angle,
-              }),
-            }
-          : c
+                  shot_type: cand.shot_type,
+                  camera_angle: cand.camera_angle,
+                  })
+                },
+                speakerId
+              )
+            : c
       ),
     };
   }
@@ -1160,9 +1197,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // #326 S9: 모달 열기 — 폼을 컷 현재 값으로 채운다.
   function openRedrawModal(arrayIndex: number) {
     const cut = storyboard?.cuts[arrayIndex];
-    if (!cut) return;
+    if (!cut || !storyboard) return;
     setRedrawCutIndex(arrayIndex);
-    setRedrawForm(redrawFormFor(cut));
+    setRedrawForm(redrawFormFor(cut, storyboard.cast));
     setRedrawError(null);
   }
 
@@ -1183,15 +1220,45 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     );
   }
 
+  // #326 S10: 인물 넣기/빼기. 빼도 폼 값은 남긴다(다시 넣으면 이전 선택 유지).
+  function updateRedrawIncluded(characterId: string, included: boolean) {
+    setRedrawForm((prev) =>
+      prev
+        ? {
+            ...prev,
+            characters: prev.characters.map((c) =>
+              c.character_id === characterId ? { ...c, included } : c
+            ),
+          }
+        : prev
+    );
+  }
+
+  // #326 S10: 후보 인물 구성에 맞춰 화자를 다시 매긴다. 화자였던 인물이 빠지면
+  // 남은 첫 인물로, 0명이면 화자 없음. 순번·키 삭제는 setCaptionSpeaker가 처리한다.
+  function remapSpeaker(cut: Cut, speakerId: string | undefined): Cut {
+    const frame = cut.characters_in_frame;
+    if (frame.length === 0) return setCaptionSpeaker(cut, undefined);
+    if (speakerId === undefined) return setCaptionSpeaker(cut, undefined);
+    const nextId = frame.some((c) => c.character_id === speakerId)
+      ? speakerId
+      : frame[0].character_id;
+    return setCaptionSpeaker(cut, nextId);
+  }
+
   // #326 S9: 모달에서 [다시 그리기] — 그 컷 한 장만 생성한다. 요청용 복사본은
   // 대상 컷 generated_image만 비우고 모달 연출값을 덮어쓴다. 자유 입력은 이번
   // 요청에만 싣고 스토리보드에 저장하지 않는다. 만든 후보를 표시 후보로 둔다.
+  // #326 S10: 인물은 included만 싣는다 — 둘 다 빼면 0명 컷 요청이 된다.
   async function handleRedrawGenerate() {
     if (!storyboard || !preset || redrawCutIndex === null || !redrawForm) return;
     const cut = storyboard.cuts[redrawCutIndex];
     if (!cut) return;
     const arrayIndex = redrawCutIndex;
     const form = redrawForm;
+    const formFrame = form.characters
+      .filter((ch) => ch.included)
+      .map((ch) => ({ character_id: ch.character_id, expression: ch.expression, pose: ch.pose }));
     setRedrawing(true);
     setRedrawError(null);
     try {
@@ -1203,7 +1270,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               shot_type: form.shot_type,
               camera_angle: form.camera_angle,
               ...(form.time_of_day !== "auto" ? { time_of_day: form.time_of_day } : {}),
-              characters_in_frame: form.characters.map((ch) => ({ ...ch })),
+              characters_in_frame: formFrame.map((ch) => ({ ...ch })),
             }
           : c
       );
@@ -1231,7 +1298,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         shot_type: form.shot_type,
         camera_angle: form.camera_angle,
         time_of_day: form.time_of_day === "auto" ? cut.time_of_day : form.time_of_day,
-        characters: form.characters.map((c) => ({ ...c })),
+        characters: formFrame.map((c) => ({ ...c })),
       };
       const list = [...(redrawCandidates[cut.cut_index] ?? []), candidate];
       const active = { ...redrawCandidates, [cut.cut_index]: list };
@@ -1293,10 +1360,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     const cut = storyboard.cuts[redrawCutIndex];
     if (!cut) return null;
     const form = redrawForm;
-    const roleName = (id: string) =>
-      storyboard.cast.find((m) => m.character_id === id)?.role === "supporting"
-        ? "조연"
-        : "주인공";
+    const roleName = (id: string) => {
+      const role = storyboard.cast.find((m) => m.character_id === id)?.role;
+      if (role === "supporting") return "조연";
+      if (role === "protagonist") return "주인공";
+      return "인물";
+    };
     const currentTimeLabel =
       cut.time_of_day != null
         ? (TIME_OF_DAY_OPTIONS.find((o) => o.id === cut.time_of_day)?.label ?? cut.time_of_day)
@@ -1362,41 +1431,53 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               ))}
             </select>
           </label>
+          {/* #326 S10: 인물별 넣기/빼기. 둘 다 빼면 0명 컷 요청이 된다. */}
           {form.characters.map((ch) => (
             <div key={ch.character_id} className="flex items-center gap-2">
               <span className="shrink-0 text-xs text-zinc-600">
                 {roleName(ch.character_id)} · {ch.character_id}
               </span>
-              <select
-                aria-label={`${ch.character_id} 표정`}
-                value={ch.expression}
-                onChange={(e) =>
-                  updateRedrawCharacter(ch.character_id, {
-                    expression: e.target.value as Expression,
-                  })
-                }
-                className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+              <button
+                type="button"
+                onClick={() => updateRedrawIncluded(ch.character_id, !ch.included)}
+                className="shrink-0 rounded-md border border-zinc-300 px-2 py-1.5 text-xs hover:bg-zinc-50"
               >
-                {EXPRESSION_OPTIONS.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label={`${ch.character_id} 포즈`}
-                value={ch.pose}
-                onChange={(e) =>
-                  updateRedrawCharacter(ch.character_id, { pose: e.target.value as Pose })
-                }
-                className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
-              >
-                {POSE_OPTIONS.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                {ch.included ? "빼기" : "넣기"}
+              </button>
+              {ch.included && (
+                <>
+                  <select
+                    aria-label={`${ch.character_id} 표정`}
+                    value={ch.expression}
+                    onChange={(e) =>
+                      updateRedrawCharacter(ch.character_id, {
+                        expression: e.target.value as Expression,
+                      })
+                    }
+                    className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  >
+                    {EXPRESSION_OPTIONS.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label={`${ch.character_id} 포즈`}
+                    value={ch.pose}
+                    onChange={(e) =>
+                      updateRedrawCharacter(ch.character_id, { pose: e.target.value as Pose })
+                    }
+                    className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  >
+                    {POSE_OPTIONS.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
             </div>
           ))}
           <label className="flex items-center gap-2 text-xs text-zinc-600">

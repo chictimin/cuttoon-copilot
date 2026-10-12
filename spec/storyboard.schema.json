@@ -129,9 +129,9 @@
         },
         "characters_in_frame": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 2,
-          "description": "cast 중 이 컷에 실제로 등장하는 인물. character_id는 cast[].character_id 중 하나와 일치해야 한다. 배열 순서는 인물의 표시 순서를 정하며, 순서·구성 변경은 컷 다시 뽑기(그림 재생성)로만 한다.",
+          "description": "cast 중 이 컷에 실제로 등장하는 인물. character_id는 cast[].character_id 중 하나와 일치해야 한다. 배열 순서는 인물의 표시 순서를 정하며, 순서·구성 변경은 컷 다시 뽑기(그림 재생성)로만 한다. POC S10에서 인물 0명 허용(빈 배열) — 그 컷은 배경·소품 중심 그림이 된다.",
           "items": {
             "type": "object",
             "required": ["character_id", "expression", "pose"],
@@ -168,7 +168,7 @@
             "speaker_index": {
               "type": "integer",
               "enum": [0, 1],
-              "description": "2인 컷에서 대사를 말하는 인물의 characters_in_frame 순번. 1인 컷에는 두지 않는다. 대사 생성이 정하지 못하면 생략한다. 인물 구성·순서 변경은 컷 다시 뽑기(그림 재생성)로만 한다. Export는 과거·범위 밖 값을 무시하고 기본 목표점으로 그린다."
+              "description": "2인 컷에서 대사를 말하는 인물의 characters_in_frame 순번. 1인 이하 컷(인물 0명 포함)에는 두지 않는다. 대사 생성이 정하지 못하면 생략한다. 인물 구성·순서 변경은 컷 다시 뽑기(그림 재생성)로만 한다. Export는 과거·범위 밖 값을 무시하고 기본 목표점으로 그린다."
             },
             "anchor": {
               "type": "object",
@@ -213,7 +213,7 @@
         {
           "if": { "properties": { "characters_in_frame": { "maxItems": 1 } } },
           "then": { "properties": { "caption": { "not": { "required": ["speaker_index"] } } } },
-          "description": "1인 컷에는 speaker_index를 두지 않는다(화자는 2인 컷 전용)."
+          "description": "1인 이하 컷에는 speaker_index를 두지 않는다(화자는 2인 컷 전용)."
         },
         {
           "if": { "properties": { "narrative_beat": { "const": "cta" } } },

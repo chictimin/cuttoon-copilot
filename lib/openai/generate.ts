@@ -299,19 +299,29 @@ export function buildCutPrompt(
   const mascotInFrame =
     !!mascot && (cut?.characters_in_frame ?? []).some((c) => c.character_id === mascot.label)
   const mascotWho = mascot ? project(mascot.description).replace(/[.\s]+$/, '') : ''
-  const sheetSentence = mascotInFrame
-    ? `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
-      `attached reference sheet. The sheet shows only the mascot (${mascotWho}) — draw the mascot ` +
-      `with the same face, hairstyle, outfit and body proportions as on the sheet. Everyone else ` +
-      `in this panel is a different person and must not take the sheet character's face, ` +
-      `hairstyle or outfit; ` +
-      (opts.continuesChain
-        ? `keep them looking exactly as they did in the earlier panels of this conversation ` +
-          `(same face, hairstyle and outfit) and follow the character descriptions below.`
-        : `follow the character descriptions below for who they are.`)
-    : `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
-      `attached reference sheet, but the person in this panel is a different character from ` +
-      `the one drawn on that sheet — follow the character description below for who they are.`
+  // #326 S10: 인물 0명 컷. 시트 인물 매칭 문장·인물 서술을 빼고 장면·소품
+  // 중심으로 그린다. 첨부 시트는 스타일 앵커로만 쓴다 — reference를 통째로
+  // 빼면 toInputImages가 0장으로 던져 생성이 안 되므로(P0 게이트) 문구만
+  // 바꾼다. 뒷부분 이야기 문장의 "인물 몸으로 보여주라" 지시와 부딪히므로
+  // 여기서 명시적으로 덮어쓴다. 이 분기는 그 컷 인물 0명일 때만 탄다.
+  const noPeopleInFrame = !!cut && (cut.characters_in_frame ?? []).length === 0
+  const sheetSentence = noPeopleInFrame
+    ? `Single webtoon/comic panel with no people in it. Match the art style, line weight and coloring of the ` +
+      `attached reference sheet. Carry the story only through the setting, objects and atmosphere — ` +
+      `ignore any instruction below to show it through a character's body, gesture or expression.`
+    : mascotInFrame
+      ? `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
+        `attached reference sheet. The sheet shows only the mascot (${mascotWho}) — draw the mascot ` +
+        `with the same face, hairstyle, outfit and body proportions as on the sheet. Everyone else ` +
+        `in this panel is a different person and must not take the sheet character's face, ` +
+        `hairstyle or outfit; ` +
+        (opts.continuesChain
+          ? `keep them looking exactly as they did in the earlier panels of this conversation ` +
+            `(same face, hairstyle and outfit) and follow the character descriptions below.`
+          : `follow the character descriptions below for who they are.`)
+      : `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
+        `attached reference sheet, but the person in this panel is a different character from ` +
+        `the one drawn on that sheet — follow the character description below for who they are.`
   const parts = [sheetSentence, `Style: ${styleStr}.`]
 
   // extract.ts(B②)의 캐릭터 시트 프롬프트와 같은 문구를 쓴다. 시트와 컷이 문자
@@ -483,14 +493,26 @@ function nextUngeneratedCut(cuts?: MinimalCut[]): MinimalCut | undefined {
 // "체이닝만으로는 부족, 시트를 매 컷 넣어야 한다" 였다. 그래서 호출부가
 // referenceAssets 를 빼먹어도 preset.assets.character_sheet 로 채운다. 방어선이
 // 켜져 있는지가 호출부의 실수 하나에 달려 있으면 안 된다.
-function referenceUris(referenceAssets: unknown[], preset: MinimalPreset): string[] {
+function referenceUris(
+  referenceAssets: unknown[],
+  preset: MinimalPreset,
+  // #326 S10 후속: 인물 0명 컷은 시트 첨부를 뺀다(그 컷만). 시트와 별개인
+  // 스타일 참고 이미지는 유지한다 — 빼는 것은 시트 URI와 같은 값뿐이다.
+  excludeSheet = false
+): string[] {
   const uris = referenceAssets.filter((a): a is string => typeof a === 'string')
   const sheet = preset.assets?.character_sheet
-  if (sheet && !uris.includes(sheet)) uris.push(sheet)
-  return uris
+  const kept = excludeSheet && sheet ? uris.filter((u) => u !== sheet) : uris
+  if (!excludeSheet && sheet && !kept.includes(sheet)) kept.push(sheet)
+  return kept
 }
 
-async function toInputImages(uris: string[]): Promise<Array<{ type: 'input_image'; image_url: string }>> {
+async function toInputImages(
+  uris: string[],
+  // allowEmpty는 excludeSheet(인물 0명 컷)일 때만 true로 온다 — 지킬 인물이
+  // 없어 P0 동일성 게이트가 필요 없기 때문이다. 읽기 실패 로그는 그대로 남긴다.
+  opts: { allowEmpty?: boolean } = {}
+): Promise<Array<{ type: 'input_image'; image_url: string }>> {
   const images: Array<{ type: 'input_image'; image_url: string }> = []
   for (const uri of uris) {
     const buf = await readAsset(uri)
@@ -506,7 +528,8 @@ async function toInputImages(uris: string[]): Promise<Array<{ type: 'input_image
 
   // 유료 호출 전에 막는다. reference 가 하나도 없으면 P0 게이트를 통과할 수 없는
   // 이미지에 생성비를 쓰는 것이고, 4컷이 다 나온 뒤에야 드러난다.
-  if (images.length === 0) {
+  // 단 excludeSheet(인물 0명 컷)는 빈 채로 진행한다 — 위 opts 주석 참조.
+  if (images.length === 0 && !opts.allowEmpty) {
     throw new Error(
       '캐릭터 시트를 읽을 수 없어 생성을 중단했습니다 — referenceAssets 와 preset.assets.character_sheet 를 확인하세요'
     )
@@ -520,7 +543,11 @@ async function callImageGeneration(
   preset: MinimalPreset,
   setting: ImageSetting,
   kind: 'cover_variant' | 'cut',
-  previousResponseId?: string
+  previousResponseId?: string,
+  // excludeSheet: 인물 0명 컷에서 시트 첨부를 뺀다. previous_response_id
+  // 체이닝은 그대로 둔다 — 체인 컨텍스트에 앞 패널(시트 참조 포함)이 이미
+  // 들어있을 수 있으나, 첨부 목록에서 빼는 것과 충돌하지 않는다.
+  opts: { excludeSheet?: boolean } = {}
 ): Promise<{ base64: string; responseId: string }> {
   // ComfyUI 는 시트를 reference 로 받지 않고 체이닝도 없다(comfyui.ts 머리말). 아래
   // reference 0장 차단은 유료 호출을 막는 장치라 여기서는 읽지 않는다.
@@ -528,7 +555,10 @@ async function callImageGeneration(
 
   // reference 읽기는 시간 측정 밖에 둔다 — 여기서 막히면 생성 호출이 나가지 않으므로
   // "호출 1회 = 로그 1줄" 에 넣지 않는다(실패는 toInputImages 가 따로 로그를 남긴다).
-  const inputImages = await toInputImages(referenceUris(referenceAssets, preset))
+  const excludeSheet = opts.excludeSheet === true
+  const inputImages = await toInputImages(referenceUris(referenceAssets, preset, excludeSheet), {
+    allowEmpty: excludeSheet,
+  })
   const quality = imageQuality(setting)
 
   return timeImageCall(kind, settingTag(setting), async () => {
@@ -633,7 +663,10 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
     preset,
     setting,
     'cut',
-    input.continueFrom
+    input.continueFrom,
+    // #326 S10 후속: 대상 컷 인물 0명이면 시트 첨부를 뺀다(그 컷만).
+    // promptCut이 아니라 cut 기준 — regen_note 덮어씀과 무관하게 인원만 본다.
+    { excludeSheet: !!cut && (cut.characters_in_frame ?? []).length === 0 }
   )
 
   const { buffer, width, height } = await resizeToOutput(base64, cut?.reserved_zone)
