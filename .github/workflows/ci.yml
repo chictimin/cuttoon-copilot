@@ -55,7 +55,8 @@ jobs:
             lib/openai/prompt.demo.ts \
             lib/render/compose.demo.ts \
             lib/render/font.demo.ts \
-            lib/render/demo-cache.demo.ts \r
+            lib/render/demo-cache.demo.ts \
+            "app/(studio)/session/[id]/demo-cache-client.demo.ts" \
             "app/(studio)/api-error.demo.ts"
           do
             echo "::group::$f"

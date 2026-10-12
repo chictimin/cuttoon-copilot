@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { assertValidPreset, type Preset } from "@/lib/llm/preset-guard";
 import { resolvePresetStyle } from "@/lib/llm/style-resolve";
@@ -89,6 +89,15 @@ export default function OnboardingFlow() {
   const [isDragging, setIsDragging] = useState(false);
   const [confirmedName, setConfirmedName] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // #297: 캐릭터 시트 생성(이미지 1장)·프로젝트 저장 중에는 새로고침·탭 닫기 때 브라우저 확인창을 띄운다.
+  // 나가면 요청이 끊겨 다시 만들어야 한다(시트 재과금). 앱 안 링크 이동은 막지 않는다(세션·에디터와 같은 방침).
+  useEffect(() => {
+    if (!saving) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [saving]);
   // #150: 상세 정보를 확정한 뒤 마스코트 단계를 거쳐 시트를 만든다 — 그 사이 값을 든다.
   const [pendingDetails, setPendingDetails] = useState<DetailsFormValue | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
