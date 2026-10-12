@@ -42,7 +42,6 @@ import { DIRECTION_VARIETIES } from "../../direction-variety-options";
 import { beatLabel } from "../../ui-labels";
 import { fetchDemoManifest, setDemoMode, useDemoMode, type DemoManifest } from "../../demo-mode";
 import {
-  demoCoverVariants,
   generateChainedCuts,
   generateCoverVariants,
   generateDemoCuts,
@@ -53,7 +52,6 @@ import {
 // 순수 헬퍼라 클라이언트에서 값으로 import해도 된다(서버 모듈·DB import 없음, #207).
 import {
   createSelectionLog,
-  markRegenerated,
   markSelected,
   recordRound,
   toPayload,
@@ -441,9 +439,6 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // #326 절충안: 컷1=기준컷. 후보 목록·표시 위치(확정은 컷1에 바로 입힌다).
   const [refCandidates, setRefCandidates] = useState<GeneratedCut[]>([]);
   const [refShown, setRefShown] = useState(0);
-  // #326 통합: 데모 모드 표지 흐름 상태(R1 연결 전까지 기존 동작 유지).
-  const [coverVariants, setCoverVariants] = useState<GeneratedCut[] | null>(null);
-  const [coverRequested, setCoverRequested] = useState<number | undefined>(undefined);
   // #326 구조변경: 레퍼런스 모달 입력. 구도·앵글은 bust·eye 고정, 인물 구성 고정.
   const [refModalOpen, setRefModalOpen] = useState(false);
   const [refTimeOfDay, setRefTimeOfDay] = useState<TimeOfDay | "auto">("auto");
@@ -1008,42 +1003,31 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   }
 
   useEffect(() => {
-    if (step !== "cover" || !storyboard) return;
-    // #326 통합: 데모 모드는 기존 표지 흐름, 아니면 기준컷 흐름으로 나눈다.
+    if (step !== "cover" || !storyboard || refCandidates.length > 0) return;
+    // #326 통합②: 데모 모드도 기준컷 흐름 — manifest cover_pick 1장이 컷 1이다.
     if (demoMode) {
-      if (!coverVariants) void loadCoverVariants();
-    } else if (refCandidates.length === 0) {
+      void loadDemoCut1();
+    } else {
       void loadReference();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, storyboard, demoMode]);
+  }, [step, storyboard]);
 
-  // #326 통합: 데모 모드 표지 흐름은 main 그대로 둔다(R1 연결은 내일).
-  // forceDemo: 표지 생성이 실패해 "데모 캐시로 바꾸기"를 누른 직후처럼, 모드 상태가 아직 반영되기 전에 부를 때.
-  async function loadCoverVariants(forceDemo = false) {
-    // preset은 assembling effect가 "cover"로 넘어가기 전에 이미 기다렸으므로
-    // 이 시점엔 항상 준비돼 있다 — 여기서 다시 fetch하지 않는다(issue #123).
-    if (!storyboard || !preset) return;
+  // #326 통합②: 데모 모드 기준컷 — manifest cover_pick 1장을 컷 1로 입힌다.
+  // 다시 만들기는 없고 확정만 있다. 선택 기록은 남기지 않는다(#307 합의).
+  async function loadDemoCut1() {
+    if (!storyboard) return;
     setGenError(null);
-
-    if (demoMode || forceDemo) {
-      try {
-        const { variants, requested } = demoCoverVariants(await ensureDemoManifest());
-        setCoverVariants(variants);
-        setCoverRequested(requested);
-      } catch {
-        setGenError("데모 캐시를 불러오지 못했어요. 데모를 끄고 다시 시도해주세요");
-      }
-      return;
-    }
-
     try {
-      const { variants, requested } = await generateCoverVariants(storyboard, preset);
-      setCoverVariants(variants);
-      setCoverRequested(requested);
-      selectionLogRef.current = recordRound(selectionLogRef.current, variants, requested ?? variants.length);
+      const manifest = await ensureDemoManifest();
+      const src = manifest.covers[manifest.cover_pick - 1] ?? manifest.covers[0];
+      if (!src) throw new Error("empty");
+      const candidate = { asset: src, image: src };
+      setRefCandidates([candidate]);
+      setRefShown(0);
+      applyCut1Candidate(candidate);
     } catch {
-      setGenError("표지를 만드는 데 실패했어요. 다시 시도해주세요");
+      setGenError("데모 캐시를 불러오지 못했어요. 데모를 끄고 다시 시도해주세요");
     }
   }
 
@@ -1069,9 +1053,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     selectionLogRef.current = createSelectionLog();
     setSelectionNotice(null);
     setDemoMode(true);
-    setCoverVariants(null);
-    setCoverRequested(undefined);
-    void loadCoverVariants(true);
+    setRefCandidates([]);
+    setRefShown(0);
+    void loadDemoCut1();
   }
 
   // #326 절충안: 컷1=기준컷 1장(상반신·눈높이 고정, 프롬프트는 서버가 처리).
@@ -1124,29 +1108,6 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     if (!candidate) return;
     setRefShown(index);
     applyCut1Candidate(candidate);
-  }
-
-  // #326 통합: 데모 모드 표지 선택 흐름(R1 연결 전까지 유지). 기준컷 흐름에서는 호출하지 않는다.
-  // S6 연출 반영(표지 안 shot/camera를 컷1에 입히기)은 제거 — R1이 대체한다.
-  async function handleSelectCover(variant: GeneratedCut, index: number) {
-    if (!storyboard || !preset) return;
-    if (!demoMode) selectionLogRef.current = markSelected(selectionLogRef.current, index);
-    const firstCutIndex = storyboard.cuts[0].cut_index;
-    const updated: Board = {
-      ...storyboard,
-      cuts: storyboard.cuts.map((cut, i) =>
-        i === 0
-          ? {
-              ...cut,
-              generated_image: variant.asset,
-              prompt_used: promptForCut(storyboard.subject, cut),
-            }
-          : cut
-      ),
-    };
-    setStoryboard(updated);
-    setCutImageUrls((prev) => ({ ...prev, [firstCutIndex]: variant.image }));
-    void runChainedCuts(updated, variant.continuationToken ?? "");
   }
 
   // 컷이 하나 끝날 때마다 storyboard·이미지 URL을 바로 반영한다. 다음 컷이 실패해도
@@ -1438,7 +1399,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     const cut1 = storyboard.cuts[0];
     const token = refCandidates[refShown]?.continuationToken ?? "";
     if (!cut1 || typeof cut1.generated_image !== "string") return;
-    selectionLogRef.current = markSelected(selectionLogRef.current, 0);
+    // #326 통합②: 데모 모드에서는 선택 기록을 남기지 않는다(#307 합의).
+    if (!demoMode) selectionLogRef.current = markSelected(selectionLogRef.current, 0);
     void runChainedCuts(storyboard, token, cut1.generated_image);
   }
 
@@ -2507,10 +2469,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           )}
         </div>
       )}
-      {/* #326 통합: 데모 모드는 표지 흐름 스피너, 아니면 기준컷 스피너. */}
-      {step === "cover" && !genError && (demoMode
-        ? (!coverVariants && <Spinner text="표지 3안을 그리고 있어요..." />)
-        : (refCandidates.length === 0 && <Spinner text="기준 컷을 그리고 있어요..." />))}
+      {step === "cover" && !genError && refCandidates.length === 0 && (
+        <Spinner text={demoMode ? "데모 캐시를 불러오고 있어요..." : "기준 컷을 그리고 있어요..."} />
+      )}
       {step === "generating" && !genError && (
         <Spinner
           text={
@@ -2537,15 +2498,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 return;
               }
               setGenError(null);
+              setRefCandidates([]);
+              setRefShown(0);
+              setStep("cover");
               if (demoMode) {
-                setCoverVariants(null);
-                setCoverRequested(undefined);
-                setStep("cover");
-                void loadCoverVariants();
+                void loadDemoCut1();
               } else {
-                setRefCandidates([]);
-                setRefShown(0);
-                setStep("cover");
                 void loadReference();
               }
             }}
@@ -2566,50 +2524,32 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
-      {/* #326 통합: 데모 모드는 기존 표지 3안 흐름(R1 연결 전까지 유지). */}
-      {step === "cover" && demoMode && coverVariants && storyboard && !genError && (
-        <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
-          <h1 className="text-xl font-semibold">마음에 드는 표지를 골라주세요</h1>
-          {/* #259 4번: 카드 자체가 버튼이고 확인 단계가 없다 — 누르면 바로 나머지 컷 생성이 시작되는 것을 미리 알린다. */}
-          <p className="text-sm text-zinc-500">표지를 누르면 바로 나머지 컷을 만들기 시작해요</p>
-          {demoMode && demoManifest && (
-            <p className="text-sm text-amber-700">
-              데모 캐시에서는 {demoManifest.cover_pick}번 표지만 고를 수 있어요(나머지 컷이 이 표지로 만들어져 있어요)
-            </p>
+      {/* #326 통합②: 데모 모드도 기준컷 확정 화면 — cover_pick 1장이 컷 1이다. */}
+      {step === "cover" && demoMode && refCandidates.length > 0 && storyboard && !genError && (
+        <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
+          <h1 className="text-xl font-semibold">컷 1(기준 컷)입니다. 나머지 컷을 만들까요?</h1>
+          <p className="text-sm text-amber-700">데모 캐시 1장 확정 — 이 그림이 컷 1이 돼요</p>
+          {refCandidates[refShown]?.image ? (
+            // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
+            <img
+              src={refCandidates[refShown].image}
+              alt="컷 1 기준 컷"
+              className="aspect-square w-full max-w-md rounded-md object-cover"
+            />
+          ) : (
+            <div className="flex aspect-square w-full max-w-md flex-col items-center justify-center gap-1 rounded-md bg-zinc-100 text-center">
+              <span className="text-xs text-zinc-400">이미지를 불러오지 못했어요</span>
+            </div>
           )}
-          {coverRequested != null && coverVariants.length < coverRequested && (
-            <p className="w-full max-w-md rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-700">
-              {coverRequested}안 중 {coverVariants.length}안만 만들어졌어요. 다시 뽑기를 눌러보세요
-            </p>
-          )}
-          <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
-            {coverVariants.map((variant, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => handleSelectCover(variant, i)}
-                disabled={demoMode && (demoManifest == null || i !== demoManifest.cover_pick - 1)}
-                className="overflow-hidden rounded-lg border border-zinc-200 hover:border-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-zinc-200"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element -- mock placeholder, next/image 불필요 */}
-                <img src={variant.image} alt={`표지 안 ${i + 1}`} className="aspect-square w-full object-cover" />
-              </button>
-            ))}
-          </div>
-          {!demoMode && (
+          <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => {
-                selectionLogRef.current = markRegenerated(selectionLogRef.current);
-                setCoverVariants(null);
-                setCoverRequested(undefined);
-                void loadCoverVariants();
-              }}
-              className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
+              onClick={handleConfirmReference}
+              className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
             >
-              다시 뽑기
+              이 컷 1로 진행
             </button>
-          )}
+          </div>
         </div>
       )}
 
