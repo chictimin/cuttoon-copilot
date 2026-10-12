@@ -345,13 +345,17 @@ export function buildCutPrompt(
             `copy of the reference's framing.`
     )
   }
-  // #326 레퍼런스 1장: 이후 모든 컷이 인물·배경·색감을 여기서 가져간다. 그래서 인물만
+  // #326 기준 컷: 이후 모든 컷이 인물·배경·색감을 여기서 가져간다. 그래서 인물만
   // 크게 두지 말고 이야기 장소가 뒤에 보이게 한다(빈 배경이면 컷이 배경을 지어낸다).
+  // 예전 문장("This is the reference panel for the whole comic")은 기준 컷에만 검은 패널
+  // 테두리를 만들었다(세션 06f1a01d) — "panel" 을 그림 바깥 틀로 읽은 것으로 본다. 그래서
+  // panel 이라는 말을 빼고, 가장자리까지 채우고 테두리·틀을 그리지 말라고 명시한다.
   if (opts.referencePanel) {
     parts.push(
-      `This is the reference panel for the whole comic: every later panel copies the people, ` +
-        `outfits, setting and colors from it. Show the setting of the story clearly behind the ` +
-        `characters — a recognizable, detailed background, not a plain or blurred one.`
+      `The later images of this comic will copy the people, outfits, setting and colors from ` +
+        `this one, so show the setting of the story clearly behind the characters — a ` +
+        `recognizable, detailed background, not a plain or blurred one. Fill the whole image ` +
+        `edge to edge with no border, frame or outline around it.`
     )
   }
   parts.push(`Style: ${styleStr}.`)
@@ -746,32 +750,21 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   }
 }
 
-// #326 POC: 레퍼런스 1장(표지). 표지 3안 대신 세션의 기준 그림을 1장 그리고, 컷 1~4가
-// 이것을 참조한다(실험 C·C´). 구도는 고정 — 상반신(bust)·눈높이(eye) + 배경이 보이게.
-// 인물·옷·배경·색감을 가장 많이 담는 구도라서다.
+// #326 POC: 기준 컷(레퍼런스 1장). 절충안(14f33ba)에서는 기준 컷이 곧 결과물 컷 1이다 —
+// 컷 1을 먼저 1장 그리고, 컷 2~4가 이것을 참조한다(C´ 계열). 구도만 상반신(bust)·눈높이(eye)로
+// 고정한다. 인물·옷·배경·색감을 가장 많이 담는 구도라서다.
 //
-// 등장인물은 cast 전원(최대 2명, 주인공 먼저)이다. 컷 1에 없는 조연도 뒤 컷에서 이
-// 그림을 기준으로 삼으므로 함께 그린다. 표정은 컷 1 값이 있으면 그것, 없으면 neutral.
-// 컷 1의 narrative_beat 는 넣지 않는다 — 이야기 한 장면이 아니라 기준 그림이다.
-// reserved_zone 도 넣지 않는다: 레퍼런스에는 대사가 없어 말풍선 자리를 비울 이유가 없고,
-// 비우면 인물·배경 정보가 그만큼 줄어든다. 크롭도 가운데 기준이다(Export 표지는 그림만).
+// 나머지는 컷 1 그대로다: 등장인물(characters_in_frame, 표정·포즈 포함 — 2인이면 #242 좌우
+// 규칙), narrative_beat(결과물 컷이라 이야기 역할도 실린다), time_of_day, reserved_zone(컷 1
+// 대사의 말풍선 자리, 명세 R1 — 크롭도 그 쪽 기준). 예전엔 cast 전원·대사 자리 없음으로 그려
+// 컷 1에 없는 조연이 나오고 말풍선 자리가 없었다(세션 06f1a01d).
+// 다시 생성 자유 입력은 regenNote 가 있으면 그것, 없으면 컷 1 direction_note(화면이 복사본에 싣는다).
 export function referenceCut(storyboard: MinimalStoryboard, regenNote?: string): MinimalCut {
   const cut1 = storyboard.cuts?.[0]
-  const cast = [...(storyboard.cast ?? [])]
-    .filter((m) => m.character_id)
-    .sort((a, b) => Number(b.role === 'protagonist') - Number(a.role === 'protagonist'))
-    .slice(0, 2)
-  const expressionOf = (id: string) =>
-    cut1?.characters_in_frame?.find((c) => c.character_id === id)?.expression ?? 'neutral'
-  const characters_in_frame = cast.length
-    ? cast.map((m) => ({ character_id: m.character_id!, expression: expressionOf(m.character_id!), pose: 'stand' }))
-    : (cut1?.characters_in_frame ?? [])
   return {
-    cut_index: cut1?.cut_index ?? 1,
+    ...(cut1 ?? { cut_index: 1 }),
     shot_type: 'bust',
     camera_angle: 'eye',
-    ...(cut1?.time_of_day ? { time_of_day: cut1.time_of_day } : {}),
-    characters_in_frame,
     ...(regenNote ? { direction_note: regenNote } : {}),
   }
 }
@@ -812,9 +805,11 @@ export async function generateReference(input: {
     setting,
     'cover_variant'
   )
-  const { buffer, width, height } = await resizeToOutput(base64)
+  // 크롭은 컷 1 말풍선 자리 기준(기준 컷 = 컷 1).
+  const zone = storyboard.cuts?.[0]?.reserved_zone
+  const { buffer, width, height } = await resizeToOutput(base64, zone)
   const { assetUri } = await uploadAsset(buffer, 'image/png', 'reference.png')
-  return { asset: assetUri, width, height, continuationToken: responseId, prompt, shot_type: 'bust', camera_angle: 'eye' }
+  return { asset: assetUri, width, height, reserved_zone: zone, continuationToken: responseId, prompt, shot_type: 'bust', camera_angle: 'eye' }
 }
 
 // #118: 부족분 재시도 on/off. 기본은 on 이다 — 정상 경로에서는 재시도가 아예
@@ -912,13 +907,13 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   // #325 POC: 3안이 같은 프롬프트를 쓰면 구도 비교가 안 된다. 안마다 컷 1
   // 연출을 덮어쓴 복사본으로 프롬프트를 만든다(배정은 coverVariantDirections).
   //
-  // #326 POC: count 1 은 레퍼런스 1장이다(화면이 표지 3안 대신 보낸다). 레퍼런스 프롬프트
-  // (buildReferencePrompt — bust·eye 고정, 배경이 보이게, cast 전원, narrative_beat 없음)를
-  // 쓰고, 말풍선 자리가 없으니 크롭도 가운데 기준이다. 다시 생성 자유 입력은 화면이 컷 1
-  // 복사본의 direction_note 로 싣는다. 첨부는 3안과 같은 [시트, ...style_refs].
+  // #326 POC: count 1 은 기준 컷(= 컷 1) 1장이다(화면이 표지 3안 대신 보낸다). 기준 컷
+  // 프롬프트(buildReferencePrompt — 컷 1 그대로에 bust·eye 고정, 배경이 보이게)를 쓰고,
+  // 크롭은 컷 1 reserved_zone 기준이다. 다시 생성 자유 입력은 화면이 컷 1 복사본의
+  // direction_note 로 싣는다. 첨부는 3안과 같은 [시트, ...style_refs].
   const specs: Array<{ shot_type?: string; camera_angle?: string; prompt: string; zone?: ReservedZone }> =
     input.count === 1
-      ? [{ shot_type: 'bust', camera_angle: 'eye', prompt: buildReferencePrompt(storyboard, preset, cut?.direction_note) }]
+      ? [{ shot_type: 'bust', camera_angle: 'eye', prompt: buildReferencePrompt(storyboard, preset), zone: cut?.reserved_zone }]
       : coverDirectionsForMode(cut).map((d) => {
           const variantCut: MinimalCut | undefined = cut
             ? { ...cut, shot_type: d.shot_type ?? cut.shot_type, camera_angle: d.camera_angle ?? cut.camera_angle }

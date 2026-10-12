@@ -228,7 +228,8 @@ function framingCamera(prompt: string): string {
 
 const CHAIN = "This panel continues the earlier panels of this conversation.";
 const REF_IMAGE = "reference panel of this same comic";
-const REF_PANEL = "This is the reference panel for the whole comic";
+const REF_PANEL = "will copy the people, outfits, setting and colors from this one";
+const NO_BORDER = "with no border, frame or outline around it";
 const ZONE = "A speech bubble is composited there later.";
 
 async function main(): Promise<void> {
@@ -361,8 +362,11 @@ async function main(): Promise<void> {
   ]);
   if (reference) {
     checks.push([
-      "레퍼런스: 기준 그림 문장 있음·말풍선 자리 없음·bust·eye",
-      reference.prompt.includes(REF_PANEL) && !reference.prompt.includes(ZONE) && framingCamera(reference.prompt) === framingCamera(build({ cut_index: 0, shot_type: "bust", camera_angle: "eye" }, {})),
+      "기준 컷: 기준 문장·테두리 금지 있음, 말풍선 자리는 컷 1 값대로, bust·eye",
+      reference.prompt.includes(REF_PANEL) &&
+        reference.prompt.includes(NO_BORDER) &&
+        reference.prompt.includes(ZONE) === !!cutOf(1).reserved_zone &&
+        framingCamera(reference.prompt) === framingCamera(build({ cut_index: 0, shot_type: "bust", camera_angle: "eye" }, {})),
     ]);
   }
   checks.push(["레퍼런스 외 요청에 기준 그림 문장 0", reqs.every((r) => r.kind === "reference" || !r.prompt.includes(REF_PANEL))]);
