@@ -12,7 +12,7 @@ import { useSyncExternalStore } from "react";
 
 const STORAGE_KEY = "cuttoon.demoCache";
 const CHANGE_EVENT = "cuttoon-demo-mode-change";
-const MANIFEST_URL = "/demo-cache/manifest.json";
+export const MANIFEST_URL = "/demo-cache/manifest.json";
 
 /** public/demo-cache/manifest.json 중 화면이 쓰는 부분(#240). */
 export interface DemoManifest {
