@@ -25,7 +25,9 @@ export default function ProjectList() {
   const [deleteError, setDeleteError] = useState(false);
   // #311: 데모 캐시 기준 프로젝트는 삭제 버튼을 숨긴다. manifest를 못 읽으면
   // 빈 집합으로 두고 모든 카드에 삭제 버튼을 보인다(오류 안내 없음).
+  // 조회가 끝날 때까지(manifestLoaded=false) 삭제 버튼을 렌더하지 않는다(보호 경합 방지).
   const [protectedIds, setProtectedIds] = useState<ReadonlySet<string>>(new Set());
+  const [manifestLoaded, setManifestLoaded] = useState(false);
   const router = useRouter();
   // #307: ?demo=1로 들어오면 여기서 기억해 두어 세션 화면까지 이어진다.
   const demoMode = useDemoMode();
@@ -64,7 +66,8 @@ export default function ProjectList() {
     (async () => {
       try {
         const res = await fetch(MANIFEST_URL, { cache: "no-store" });
-        if (cancelled || !res.ok) return;
+        if (cancelled) return;
+        if (!res.ok) return;
         const raw = (await res.json()) as {
           generated?: { project_id?: unknown };
         } | null;
@@ -72,9 +75,15 @@ export default function ProjectList() {
         if (cancelled) return;
         if (typeof projectId === "string" && projectId.length > 0) {
           setProtectedIds(new Set([projectId]));
+          // #311: 보호 목록이 갱신됐을 때 열린 확인 창의 대상이 보호 id면 창을 닫는다.
+          setConfirmTarget((prev) =>
+            prev && prev.projectId === projectId ? null : prev
+          );
         }
       } catch {
         // 못 읽으면 보호 목록은 빈 것으로 보고 오류 안내는 띄우지 않는다.
+      } finally {
+        if (!cancelled) setManifestLoaded(true);
       }
     })();
 
@@ -96,6 +105,11 @@ export default function ProjectList() {
   async function handleConfirmDelete() {
     if (!confirmTarget || deletingId) return;
     const targetId = confirmTarget.projectId;
+    // #311: 조회 완료 후 보호 대상으로 판명되면 요청하지 않고 창을 닫는다.
+    if (protectedIds.has(targetId)) {
+      setConfirmTarget(null);
+      return;
+    }
     setDeletingId(targetId);
     setDeleteError(false);
     try {
@@ -190,8 +204,9 @@ export default function ProjectList() {
                     {new Date(project.updatedAt).toLocaleDateString("ko-KR")}
                   </span>
                 </Link>
-                {/* #311: 데모 캐시 기준 프로젝트에는 삭제 버튼을 렌더하지 않는다. */}
-                {!protectedIds.has(project.projectId) && (
+                {/* #311: manifest 조회 중에는 삭제 버튼을 렌더하지 않고,
+                    조회 완료 후 데모 캐시 기준 프로젝트에는 렌더하지 않는다. */}
+                {manifestLoaded && !protectedIds.has(project.projectId) && (
                   <button
                     type="button"
                     onClick={() => {
