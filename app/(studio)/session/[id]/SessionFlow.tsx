@@ -1834,12 +1834,26 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     );
   }
 
+  // #326 통합⑤ R6: 열린 대사 입력칸 값을 저장 payload에 합친다.
+  // 에디터 #289 pendingBoard 방식 — "완료"를 안 눌러도 고친 대사가 저장된다.
+  function boardWithOpenCaption(): Board | null {
+    if (!storyboard) return null;
+    if (editingCutIndex === null) return storyboard;
+    return {
+      ...storyboard,
+      cuts: storyboard.cuts.map((cut, i) =>
+        i === editingCutIndex ? { ...cut, caption: { ...cut.caption, text: draftCaption } } : cut
+      ),
+    };
+  }
+
   async function handleSave() {
-    if (!storyboard) return;
+    const saveBoard = boardWithOpenCaption();
+    if (!saveBoard) return;
 
     try {
       // #205: 강도를 함께 넘겨야 none(CTA 컷 0개)이 기존 규칙(CTA 1개)에 막히지 않는다.
-      assertStoryboardRuntimeInvariants(storyboard.cuts, storyboard.cta_strength);
+      assertStoryboardRuntimeInvariants(saveBoard.cuts, saveBoard.cta_strength);
     } catch {
       setSaveError("컷 구성에 문제가 있어요. 처음부터 다시 시도해주세요");
       return;
@@ -1869,7 +1883,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         body: JSON.stringify({
           projectId,
           presetId,
-          storyboard,
+          storyboard: saveBoard,
           ...(selections.length > 0 ? { selections } : {}),
         }),
       });
@@ -1918,12 +1932,13 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // subject_tags 키를 뺀 사본이고 화면 상태는 아직 바꾸지 않는다. 실패하면 원본
   // 유지·에러 표시·버튼 재사용, 성공할 때만 사본으로 교체한다.
   async function handleRecoverSave() {
-    if (!storyboard || saveLockRef.current) return;
+    const saveBoard = boardWithOpenCaption();
+    if (!saveBoard || saveLockRef.current) return;
     saveLockRef.current = true;
     setRecovering(true);
     setSaveError(null);
     try {
-      const stripped = stripSubjectTags(storyboard);
+      const stripped = stripSubjectTags(saveBoard);
       const projectId = window.sessionStorage.getItem("cuttoon:project-id");
       const presetId = window.sessionStorage.getItem("cuttoon:preset-id");
       if (!projectId || !presetId) {
