@@ -32,16 +32,16 @@
       "lie_down": "lying flat on back or side, body horizontal, relaxed limbs"
     },
     "shot_type": {
-      "closeup": "framing from shoulders up, face fills most of the frame",
-      "bust":    "framing from chest up, showing upper body and face",
-      "waist":   "framing from waist up, showing torso and arms",
-      "full":    "full body visible from head to toe, some space around the figure",
-      "wide":    "character small in frame, environment dominates the composition"
+      "closeup": "face and shoulders only, everything below the chest stays outside the frame",
+      "bust":    "head and chest down to the mid-torso only, everything below the mid-torso stays outside the frame",
+      "waist":   "head, arms and torso down to the belt line, hips and legs stay outside the frame",
+      "full":    "entire figure from the top of the head to the soles of the feet inside the frame, feet never cropped, some space around the figure",
+      "wide":    "surroundings dominate the composition, the person no taller than one third of the frame height"
     },
     "camera_angle": {
-      "eye":  "camera at eye level, straight-on perspective, neutral angle",
-      "high": "camera looking down from above, character appears smaller",
-      "low":  "camera looking up from below, character appears taller and imposing"
+      "eye":  "straight-on view at the subject's own height, horizon level with the face, neutral perspective",
+      "high": "view looking steeply down from above, the top of the head and shoulders visible, the figure appears smaller",
+      "low":  "view looking steeply up from below, the chin and jaw prominent, the figure appears taller and imposing"
     },
     "time_of_day": {
       "morning": "warm golden sunrise light, soft long shadows from the left",

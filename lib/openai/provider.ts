@@ -24,6 +24,11 @@ export interface GeneratedImageResult {
   // 화면이 진짜 프롬프트를 받을 방법이 없어서 요약 문자열을 그 자리에 대신
   // 채워 넣던 문제를 없앤다.
   prompt?: string
+  // #325 POC: 표지 3안이 안마다 다른 연출로 생성되므로, 그 안에 실제로 쓴 연출을
+  // 함께 돌려준다. 호출부가 고른 안의 연출을 컷 1에 반영할 수 있게 선택 필드로
+  // 추가한다 — 기존 호출부는 이 필드를 읽지 않아도 그대로 동작한다.
+  shot_type?: string
+  camera_angle?: string
 }
 
 export interface ImageProvider {

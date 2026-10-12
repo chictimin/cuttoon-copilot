@@ -64,6 +64,9 @@ interface MinimalCut {
   shot_type?: string
   camera_angle?: string
   time_of_day?: string
+  // #325 POC: 컷별 연출 메모(선택). 스키마는 바꾸지 않고 타입만 받는다 —
+  // storyboard.schema.json cuts 에 추가하지 않으므로 저장·검증 경로에 닿지 않는다.
+  direction_note?: string
   reserved_zone?: ReservedZone
   characters_in_frame?: MinimalCharacterInFrame[]
   generated_image?: string | null
@@ -171,6 +174,17 @@ function reservedZoneHint(zone: ReservedZone): string {
   )
 }
 
+// #325 POC: 연출 메모 정리. 줄바꿈·따옴표를 정리하고 100자를 넘기면 잘라낸다.
+// 따옴표를 걷는 이유: 메모는 사람이 쓰는 자유 문장이라 큰따옴표가 들어오면
+// 프롬프트 안의 다른 인용과 어긋나 모델이 문장 경계를 잘못 읽는다.
+function sanitizeDirectionNote(note: string): string {
+  const cleaned = note
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/["“”]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+  return Array.from(cleaned).slice(0, 100).join('')
+}
 // enum 토큰을 그대로 넣으면 모델이 못 알아듣는다 — codex 4회 검증에서
 // "Shot type: closeup." 이 4/4 전신으로 나왔다. spec/vocabulary.json 의
 // prompt_hints 가 각 enum 값의 영어 서술문을 갖고 있으므로 그것을 쓴다.
@@ -384,6 +398,14 @@ export function buildCutPrompt(
     if (shot) parts.push(`Framing: ${shot}.`)
     const angle = hint('camera_angle', cut.camera_angle)
     if (angle) parts.push(`Camera: ${angle}.`)
+    // #325 POC: 연출 메모. Framing·Camera 문장 바로 뒤에 붙인다 — 구도·앵글
+    // 지시와 한 덩어리로 읽히게 하려는 자리다. 사람이 쓰는 자유 문장이라
+    // 소재 쪽과 같은 브랜드 투영(projectForModel)을 거친다. 고정 규칙(말풍선·
+    // 글자 금지, Do not include)은 그대로 맨 뒤에 둔다.
+    if (typeof cut.direction_note === 'string') {
+      const note = project(sanitizeDirectionNote(cut.direction_note))
+      if (note) parts.push(`Director's note: ${note}.`)
+    }
     const time = hint('time_of_day', cut.time_of_day)
     if (time) parts.push(`Lighting: ${time}.`)
 
@@ -648,18 +670,50 @@ async function generateOneVariant(
   }
 }
 
+// #325 POC: 표지 3안의 안별 연출 배정. 1안은 컷 1 연출 그대로, 2안은 다른
+// 구도(기준이 closeup·bust면 full, 아니면 closeup), 3안은 같은 구도·다른 앵글
+// (eye면 high, 아니면 eye)이다. "구도를 바꾸면 그림이 달라지는가" 를 3안
+// 안에서 바로 비교하려는 배정이다.
+//
+// 순수 함수로 둔 이유: generateCoverVariants(유료 경로)와 direction-check
+// 스크립트(--dry-run 무과금 경로)가 같은 배정을 쓰게 하려는 것이다. 두 곳에
+// 복사하면 한쪽만 바뀌어 "확인한 것과 다른 것을 생성" 하게 된다.
+// export 하는 이유도 같다 — 스크립트가 배정을 재현이 아니라 호출로 쓴다.
+export function coverVariantDirections(base?: {
+  shot_type?: string
+  camera_angle?: string
+}): Array<{ shot_type?: string; camera_angle?: string }> {
+  const shot = base?.shot_type
+  const angle = base?.camera_angle
+  return [
+    { shot_type: shot, camera_angle: angle },
+    { shot_type: shot === 'closeup' || shot === 'bust' ? 'full' : 'closeup', camera_angle: angle },
+    { shot_type: shot, camera_angle: angle === 'eye' ? 'high' : 'eye' },
+  ]
+}
+
 // 표지 3안. 독립 호출이므로 체이닝 토큰을 받지 않는다(PRD 6절) — 세션에 누적하면
 // 2안이 1안에 끌려가 서로 비슷해지기 때문. 3개를 병렬로 호출한다.
 export const generateCoverVariants: ImageProvider['generateCoverVariants'] = async (input) => {
   const storyboard = (input.storyboard ?? {}) as MinimalStoryboard
   const preset = (input.preset ?? {}) as MinimalPreset
   const cut = storyboard.cuts?.[0]
-  const prompt = buildCutPrompt(storyboard, preset, cut)
+  // #325 POC: 3안이 같은 프롬프트를 쓰면 구도 비교가 안 된다. 안마다 컷 1
+  // 연출을 덮어쓴 복사본으로 프롬프트를 만든다(배정은 coverVariantDirections).
+  const specs = coverVariantDirections(cut).map((d) => {
+    const variantCut: MinimalCut | undefined = cut
+      ? { ...cut, shot_type: d.shot_type ?? cut.shot_type, camera_angle: d.camera_angle ?? cut.camera_angle }
+      : { shot_type: d.shot_type, camera_angle: d.camera_angle }
+    return { ...d, prompt: buildCutPrompt(storyboard, preset, variantCut) }
+  })
   // allSettled 안에서 읽으면 모르는 값이 "3안 모두 실패"로 뭉개진다 — 배치 전에 읽어
   // 설정 오류로 바로 던진다(#190).
   const setting = imageSetting()
 
-  const variants: GeneratedImageResult[] = []
+  // 안 번호 자리 고정. 재시도 뒤에도 1안 결과가 2안 자리로 밀리지 않게 인덱스
+  // 자리(byIndex)에 채우고 마지막에 순서대로 펼친다.
+  const byIndex: (GeneratedImageResult | undefined)[] = specs.map(() => undefined)
+  const pending: number[] = specs.slice(0, input.count).map((_, i) => i)
   // 재시도를 켜면 count(3)만큼 더 실패해도 채울 수 있게 여유를 둔다 — 무한 재시도로
   // 인한 과금 폭주는 막으면서, 가끔 한두 개 실패하는 정도는 채운다.
   //
@@ -676,28 +730,39 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   // retry 불리언만으로는 아래 미달 로그의 원인 라벨이 갈리지 않는다.
   let abortedOnDeadBatch = false
 
-  while (variants.length < input.count && attemptsLeft > 0) {
-    const needed = input.count - variants.length
-    const batch = Math.min(needed, attemptsLeft)
-    attemptsLeft -= batch
-    attempts += batch
+  while (pending.length > 0 && attemptsLeft > 0) {
+    const batch = pending.splice(0, Math.min(pending.length, attemptsLeft))
+    attemptsLeft -= batch.length
+    attempts += batch.length
 
     // allSettled 인 이유: 각 안이 별도 유료 호출이다. Promise.all 이면 한 안이
     // 후처리(sharp·업로드)에서 실패할 때 이미 성공한 나머지 안까지 같이 버려져
     // 성공분 생성비가 그대로 날아간다 (#104). 성공한 것만 살려서 이어붙인다.
+    // 재시도도 같은 배정(batch의 안 인덱스)으로 다시 호출한다 — 다른 안의
+    // 프롬프트로 채우면 3안 비교가 깨진다.
     const settled = await Promise.allSettled(
-      Array.from({ length: batch }, () => generateOneVariant(prompt, input.referenceAssets, preset, setting, cut?.reserved_zone))
+      batch.map((i) =>
+        generateOneVariant(specs[i].prompt, input.referenceAssets, preset, setting, cut?.reserved_zone)
+      )
     )
 
     let gained = 0
-    for (const r of settled) {
+    const failed: number[] = []
+    settled.forEach((r, k) => {
       if (r.status === 'fulfilled') {
-        variants.push(r.value)
+        byIndex[batch[k]] = {
+          ...r.value,
+          shot_type: specs[batch[k]].shot_type,
+          camera_angle: specs[batch[k]].camera_angle,
+        }
         gained++
       } else {
         console.error('[generate] 표지 안 하나 실패', r.reason)
+        failed.push(batch[k])
       }
-    }
+    })
+    // 실패한 안 인덱스를 앞에 되돌린다 — 다음 배치가 원래 안 순서대로 채운다.
+    pending.unshift(...failed)
 
     // 한 배치가 통째로 실패하면 재시도를 멈춘다. 남은 실패 원인은 업로드 계열인데
     // (모델 호출이 실패하면 생성비가 안 나가고, sharp 는 PR #110 이후 원본으로
@@ -713,6 +778,8 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   }
 
   // 재시도로 호출이 늘었는지 한눈에 보이게 묶음 끝에 1줄 남긴다(전부 실패해도 찍는다).
+  // 안 순서대로 펼친다 — 재시도로 늦게 온 안이 앞자리로 밀리지 않는다.
+  const variants: GeneratedImageResult[] = byIndex.filter((v): v is GeneratedImageResult => !!v)
   console.info(
     `[image] cover_variants done ${variants.length}/${input.count} attempts=${attempts} ${elapsedSeconds(startedAt)}s`
   )
