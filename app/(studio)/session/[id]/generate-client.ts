@@ -9,6 +9,7 @@
 
 import type { Preset } from "@/lib/llm/preset-guard";
 import { fetchAssetUrl } from "../../asset-url";
+import type { DemoManifest } from "../../demo-mode";
 import type { Storyboard } from "./storyboard-types";
 
 export interface GeneratedCut {
@@ -167,5 +168,39 @@ export async function generateChainedCuts(
     onProgress?.(++done, total);
   }
 
+  return results;
+}
+
+// #307: 데모 캐시 모드 — 생성(유료 호출) 없이 public/demo-cache/의 미리 만든 이미지를 같은 모양으로 돌려준다.
+// asset은 manifest에 적힌 /demo-cache/… 경로 그대로다(서버·Export가 manifest 정확 일치로 허용, #305·#310).
+// 화면 표시용 image도 같은 경로라 resolveImageUrl이 그대로 쓴다.
+export function demoCoverVariants(manifest: DemoManifest): CoverVariantsResult {
+  return {
+    variants: manifest.covers.map((src) => ({ asset: src, image: src })),
+    requested: manifest.covers.length,
+  };
+}
+
+// 표지 이후 컷을 manifest에서 채운다. generateChainedCuts와 같은 규칙: 이미 이미지가 있는 컷은 건너뛰고,
+// 컷마다 onCut·onProgress를 부른다. manifest에 없는 컷이 있으면 던진다(호출부가 안내 문구를 정한다).
+export function generateDemoCuts(
+  storyboard: Storyboard,
+  manifest: DemoManifest,
+  { onCut, onProgress }: ChainedCutsCallbacks = {}
+): GeneratedCut[] {
+  const total = storyboard.cuts.length - 1;
+  let done = storyboard.cuts.slice(1).filter((c) => c.generated_image).length;
+  onProgress?.(done, total);
+  const results: GeneratedCut[] = [];
+  for (let i = 1; i < storyboard.cuts.length; i++) {
+    const cut = storyboard.cuts[i];
+    if (cut.generated_image) continue;
+    const src = manifest.cuts[String(cut.cut_index)];
+    if (!src) throw new Error(`demo manifest에 ${cut.cut_index}번 컷이 없습니다`);
+    const generated: GeneratedCut = { asset: src, image: src };
+    results.push(generated);
+    onCut?.(i, generated);
+    onProgress?.(++done, total);
+  }
   return results;
 }

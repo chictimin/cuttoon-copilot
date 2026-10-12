@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { setDemoMode, useDemoMode } from "./demo-mode";
 
 interface ProjectSummary {
   projectId: string;
@@ -20,6 +21,8 @@ export default function ProjectList() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const router = useRouter();
+  // #307: ?demo=1로 들어오면 여기서 기억해 두어 세션 화면까지 이어진다.
+  const demoMode = useDemoMode();
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +71,19 @@ export default function ProjectList() {
           새 프로젝트 만들기
         </Link>
       </div>
+
+      {demoMode && (
+        <div className="flex w-full max-w-2xl flex-wrap items-center justify-between gap-3 rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          <span>데모 캐시 사용 중 — 새 컷툰의 표지·컷 그림이 미리 만들어 둔 이미지로 채워져요</span>
+          <button
+            type="button"
+            onClick={() => setDemoMode(false)}
+            className="rounded-md border border-amber-300 px-3 py-1 text-xs font-medium hover:bg-amber-100"
+          >
+            데모 끄기
+          </button>
+        </div>
+      )}
 
       {phase === "loading" && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">

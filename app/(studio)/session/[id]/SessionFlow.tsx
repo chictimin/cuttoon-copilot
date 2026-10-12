@@ -36,7 +36,15 @@ import {
 import { resolveImageUrl } from "../../asset-url";
 import { CTA_STRENGTHS } from "../../cta-strength-options";
 import { beatLabel } from "../../ui-labels";
-import { generateChainedCuts, generateCoverVariants, type GeneratedCut } from "./generate-client";
+import { fetchDemoManifest, setDemoMode, useDemoMode, type DemoManifest } from "../../demo-mode";
+import {
+  demoCoverVariants,
+  generateChainedCuts,
+  generateCoverVariants,
+  generateDemoCuts,
+  type ChainedCutsCallbacks,
+  type GeneratedCut,
+} from "./generate-client";
 // 순수 헬퍼라 클라이언트에서 값으로 import해도 된다(서버 모듈·DB import 없음, #207).
 import {
   createSelectionLog,
@@ -183,6 +191,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   const [checkingExisting, setCheckingExisting] = useState(true);
   const [isRestoredView, setIsRestoredView] = useState(false);
   const [subject, setSubject] = useState("");
+  // #307: 데모 캐시 모드(?demo=1). 켜져 있으면 표지·컷 이미지 생성 두 곳만 manifest 이미지로 대체하고,
+  // 대사·저장·Export는 평소처럼 실행한다. 이 경로는 표지 선택 기록을 남기지 않는다(리허설 판정 제외, #307 합의).
+  const demoMode = useDemoMode();
+  const [demoManifest, setDemoManifest] = useState<DemoManifest | null>(null);
+  const [demoManifestError, setDemoManifestError] = useState(false);
   // 2차 4번: 소재 후보(preset.context 기반 LLM 제안, #181). 후보는 선택지로만 보여주고
   // 자동으로 채택하지 않는다 — 누르면 입력창에 채워져 수정할 수 있다.
   const [subjectSuggestions, setSubjectSuggestions] = useState<string[] | null>(null);
@@ -700,17 +713,56 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     return () => window.clearTimeout(timer);
   }, [selectionNotice]);
 
+  // #307: 데모 모드가 켜지면 manifest를 읽어 둔다(소재 확인·표지 번호 안내에 쓴다).
+  useEffect(() => {
+    if (!demoMode || demoManifest) return;
+    let cancelled = false;
+    fetchDemoManifest()
+      .then((manifest) => {
+        if (cancelled) return;
+        setDemoManifest(manifest);
+        setDemoManifestError(false);
+      })
+      .catch((err) => {
+        console.warn("[demo] manifest를 읽지 못했습니다:", err);
+        if (!cancelled) setDemoManifestError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [demoMode, demoManifest]);
+
+  // manifest를 이미 읽었으면 그대로, 아니면 읽어서 상태에 둔다. 못 읽으면 던진다.
+  async function ensureDemoManifest(): Promise<DemoManifest> {
+    if (demoManifest) return demoManifest;
+    const manifest = await fetchDemoManifest();
+    setDemoManifest(manifest);
+    return manifest;
+  }
+
   useEffect(() => {
     if (step !== "cover" || !storyboard || coverVariants) return;
     void loadCoverVariants();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, storyboard]);
 
-  async function loadCoverVariants() {
+  // forceDemo: 표지 생성이 실패해 "데모 캐시로 바꾸기"를 누른 직후처럼, 모드 상태가 아직 반영되기 전에 부를 때.
+  async function loadCoverVariants(forceDemo = false) {
     // preset은 assembling effect가 "cover"로 넘어가기 전에 이미 기다렸으므로
     // 이 시점엔 항상 준비돼 있다 — 여기서 다시 fetch하지 않는다(issue #123).
     if (!storyboard || !preset) return;
     setGenError(null);
+
+    if (demoMode || forceDemo) {
+      try {
+        const { variants, requested } = demoCoverVariants(await ensureDemoManifest());
+        setCoverVariants(variants);
+        setCoverRequested(requested);
+      } catch {
+        setGenError("데모 캐시를 불러오지 못했어요. 데모를 끄고 다시 시도해주세요");
+      }
+      return;
+    }
 
     try {
       const { variants, requested } = await generateCoverVariants(storyboard, preset);
@@ -722,9 +774,30 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     }
   }
 
+  // #307: 표지 생성이 실패했을 때 사용자가 확인을 눌러야만 데모 캐시로 바꾼다(자동 전환 없음).
+  // 캐시 그림은 정해 둔 소재 기준이라 소재가 다르면 바꾸지 않는다.
+  async function switchToDemoCache() {
+    if (!storyboard) return;
+    try {
+      const manifest = await fetchDemoManifest();
+      if (storyboard.subject.trim() !== manifest.subject) {
+        setGenError(`데모 캐시는 소재가 "${manifest.subject}"일 때만 쓸 수 있어요`);
+        return;
+      }
+      setDemoManifest(manifest);
+    } catch {
+      setGenError("데모 캐시를 불러오지 못했어요");
+      return;
+    }
+    setDemoMode(true);
+    setCoverVariants(null);
+    setCoverRequested(undefined);
+    void loadCoverVariants(true);
+  }
+
   async function handleSelectCover(variant: GeneratedCut, index: number) {
     if (!storyboard || !preset) return;
-    selectionLogRef.current = markSelected(selectionLogRef.current, index);
+    if (!demoMode) selectionLogRef.current = markSelected(selectionLogRef.current, index);
     const firstCutIndex = storyboard.cuts[0].cut_index;
     const updated: Board = {
       ...storyboard,
@@ -749,7 +822,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     setGenProgress(null);
 
     try {
-      await generateChainedCuts(startStoryboard, preset, token, {
+      const callbacks: ChainedCutsCallbacks = {
         onProgress: (done, total) => setGenProgress({ done, total }),
         onCut: (i, generated) => {
           const chain = chainRef.current;
@@ -770,7 +843,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           setStoryboard(chainRef.current.storyboard);
           setCutImageUrls((prev) => ({ ...prev, [cuts[i].cut_index]: generated.image }));
         },
-      });
+      };
+      if (demoMode) {
+        generateDemoCuts(startStoryboard, await ensureDemoManifest(), callbacks);
+      } else {
+        await generateChainedCuts(startStoryboard, preset, token, callbacks);
+      }
       setStep("cuts");
     } catch {
       // step은 generating에 둔다 — 표지로 돌아가면 만든 컷이 버려진다.
@@ -941,6 +1019,21 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
+      {demoMode && (
+        <div className="flex w-full max-w-xl flex-wrap items-center justify-center gap-3 rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          <span>데모 캐시 사용 중 — 표지·컷 그림은 미리 만들어 둔 이미지예요(생성 비용 없음)</span>
+          {step === "subject" && (
+            <button
+              type="button"
+              onClick={() => setDemoMode(false)}
+              className="rounded-md border border-amber-300 px-3 py-1 text-xs font-medium hover:bg-amber-100"
+            >
+              데모 끄기
+            </button>
+          )}
+        </div>
+      )}
+
       {/* issue #123: preset을 마운트 시점에 미리 받는데, 그 실패는 storyboard가
           조립되기 전(subject·brainstorm·assembling 단계 전부) 어디서든 보여줘야
           한다 — assembling까지 3턴을 다 진행한 뒤에야 알리면 너무 늦다.
@@ -976,6 +1069,23 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             className="w-full rounded-md border border-zinc-300 px-4 py-3 text-sm"
           />
 
+          {demoMode && demoManifestError && (
+            <p className="rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">
+              데모 캐시 목록을 읽지 못했어요. 데모 끄기를 누르고 평소 방식으로 진행해주세요
+            </p>
+          )}
+          {demoMode && demoManifest && subject.trim() !== demoManifest.subject && (
+            <div className="flex w-full flex-col items-center gap-2 rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <p>데모 캐시는 정해 둔 소재로만 진행할 수 있어요: {demoManifest.subject}</p>
+              <button
+                type="button"
+                onClick={() => changeSubject(demoManifest.subject)}
+                className="rounded-md border border-amber-300 px-3 py-1 text-xs font-medium hover:bg-amber-100"
+              >
+                데모 소재 넣기
+              </button>
+            </div>
+          )}
           {preset && !hasSuggestionContext(preset) ? (
             <p className="text-sm text-zinc-500">{EMPTY_CONTEXT_HINT}</p>
           ) : null}
@@ -1011,7 +1121,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
           <button
             type="button"
-            disabled={subject.trim().length === 0}
+            disabled={
+              subject.trim().length === 0 ||
+              (demoMode && (!demoManifest || subject.trim() !== demoManifest.subject))
+            }
             onClick={startBrainstorm}
             className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-40"
           >
@@ -1323,6 +1436,15 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           >
             {step === "generating" ? "이어서 만들기" : "다시 시도"}
           </button>
+          {step === "cover" && !demoMode && (
+            <button
+              type="button"
+              onClick={() => void switchToDemoCache()}
+              className="rounded-md border border-amber-300 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-50"
+            >
+              데모 캐시로 바꿔서 진행
+            </button>
+          )}
         </div>
       )}
 
@@ -1331,6 +1453,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           <h1 className="text-xl font-semibold">마음에 드는 표지를 골라주세요</h1>
           {/* #259 4번: 카드 자체가 버튼이고 확인 단계가 없다 — 누르면 바로 나머지 컷 생성이 시작되는 것을 미리 알린다. */}
           <p className="text-sm text-zinc-500">표지를 누르면 바로 나머지 컷을 만들기 시작해요</p>
+          {demoMode && demoManifest && (
+            <p className="text-sm text-amber-700">
+              데모 캐시에서는 {demoManifest.cover_pick}번 표지만 고를 수 있어요(나머지 컷이 이 표지로 만들어져 있어요)
+            </p>
+          )}
           {coverRequested != null && coverVariants.length < coverRequested && (
             <p className="w-full max-w-md rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-700">
               {coverRequested}안 중 {coverVariants.length}안만 만들어졌어요. 다시 뽑기를 눌러보세요
@@ -1342,25 +1469,28 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 key={i}
                 type="button"
                 onClick={() => handleSelectCover(variant, i)}
-                className="overflow-hidden rounded-lg border border-zinc-200 hover:border-zinc-900"
+                disabled={demoMode && demoManifest != null && i !== demoManifest.cover_pick - 1}
+                className="overflow-hidden rounded-lg border border-zinc-200 hover:border-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-zinc-200"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- mock placeholder, next/image 불필요 */}
                 <img src={variant.image} alt={`표지 안 ${i + 1}`} className="aspect-square w-full object-cover" />
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              selectionLogRef.current = markRegenerated(selectionLogRef.current);
-              setCoverVariants(null);
-              setCoverRequested(undefined);
-              void loadCoverVariants();
-            }}
-            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
-          >
-            다시 뽑기
-          </button>
+          {!demoMode && (
+            <button
+              type="button"
+              onClick={() => {
+                selectionLogRef.current = markRegenerated(selectionLogRef.current);
+                setCoverVariants(null);
+                setCoverRequested(undefined);
+                void loadCoverVariants();
+              }}
+              className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50"
+            >
+              다시 뽑기
+            </button>
+          )}
         </div>
       )}
 
