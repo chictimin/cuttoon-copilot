@@ -20,6 +20,9 @@ type Phase = "loading" | "error" | "ready";
 export default function ProjectList() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [confirmTarget, setConfirmTarget] = useState<ProjectSummary | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState(false);
   const router = useRouter();
   // #307: ?demo=1로 들어오면 여기서 기억해 두어 세션 화면까지 이어진다.
   const demoMode = useDemoMode();
@@ -58,6 +61,31 @@ export default function ProjectList() {
     window.sessionStorage.setItem("cuttoon:project-id", project.projectId);
     window.sessionStorage.setItem("cuttoon:preset-id", project.presetId);
     router.push(`/session/${crypto.randomUUID()}`);
+  }
+
+  // #311: 목록에서 숨기기(서버는 archived_at 소프트 삭제). 성공하면 목록에서
+  // 카드를 빼고, 실패하면 카드를 유지하고 짧은 안내만 보인다(서버 error 원문 노출 금지).
+  async function handleConfirmDelete() {
+    if (!confirmTarget || deletingId) return;
+    const targetId = confirmTarget.projectId;
+    setDeletingId(targetId);
+    setDeleteError(false);
+    try {
+      const res = await fetch(
+        `/api/preset?projectId=${encodeURIComponent(targetId)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        setDeleteError(true);
+        return;
+      }
+      setProjects((prev) => prev.filter((p) => p.projectId !== targetId));
+      setConfirmTarget(null);
+    } catch {
+      setDeleteError(true);
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -119,28 +147,88 @@ export default function ProjectList() {
           {projects.map((project) => (
             <div
               key={project.projectId}
-              className="flex items-center justify-between rounded-lg border border-zinc-200 p-4"
+              className="rounded-lg border border-zinc-200 p-4"
             >
-              <Link href={`/projects/${project.projectId}`} className="flex flex-col gap-1">
-                <span className="font-medium hover:underline">{project.projectName}</span>
-                <span className="text-xs text-zinc-500">
-                  {project.sessionCount > 0
-                    ? `컷툰 ${project.sessionCount}편`
-                    : "아직 만든 컷툰 없음"}
-                  {" · "}
-                  {new Date(project.updatedAt).toLocaleDateString("ko-KR")}
-                </span>
-              </Link>
-              <button
-                type="button"
-                onClick={() => handleStartSession(project)}
-                disabled={!project.presetId}
-                className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
-              >
-                새 컷툰 만들기
-              </button>
+              {/* #311: 삭제 버튼은 "새 컷툰 만들기" 버튼과 같은 줄에 두지 않고
+                  카드 우측 상단의 작은 보조 버튼으로 둔다(오클릭 방지). */}
+              <div className="flex items-start justify-between gap-3">
+                <Link href={`/projects/${project.projectId}`} className="flex flex-col gap-1">
+                  <span className="font-medium hover:underline">{project.projectName}</span>
+                  <span className="text-xs text-zinc-500">
+                    {project.sessionCount > 0
+                      ? `컷툰 ${project.sessionCount}편`
+                      : "아직 만든 컷툰 없음"}
+                    {" · "}
+                    {new Date(project.updatedAt).toLocaleDateString("ko-KR")}
+                  </span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmTarget(project);
+                    setDeleteError(false);
+                  }}
+                  aria-label={`${project.projectName} 삭제`}
+                  className="shrink-0 rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600"
+                >
+                  삭제
+                </button>
+              </div>
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => handleStartSession(project)}
+                  disabled={!project.presetId}
+                  className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
+                >
+                  새 컷툰 만들기
+                </button>
+              </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* #311: 삭제 확인 창. 화면 안 모달(OnboardingFlow의 unmapped 확인 창과 같은 패턴). */}
+      {confirmTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-delete-title"
+            className="w-full max-w-md rounded-lg bg-white p-6 text-left shadow-lg"
+          >
+            <h2 id="project-delete-title" className="text-base font-semibold">
+              &ldquo;{confirmTarget.projectName}&rdquo;을(를) 삭제할까요?
+            </h2>
+            <p className="mt-2 text-sm text-zinc-600">
+              목록에서 사라지고, 화면에서는 되돌릴 수 없어요
+            </p>
+            {deleteError && (
+              <p className="mt-2 text-sm text-red-600">
+                삭제하지 못했어요. 다시 시도해 주세요
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setConfirmTarget(null)}
+                disabled={deletingId !== null}
+                className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deletingId !== null}
+                className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-40"
+              >
+                {deletingId !== null ? "삭제 중..." : "삭제"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </main>
