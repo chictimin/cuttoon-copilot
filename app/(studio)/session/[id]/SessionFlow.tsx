@@ -1825,7 +1825,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               onClick={() => setRefModalOpen(false)}
               className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
             >
-              이 결과로 확정
+              {/* #326 통합④ JEON 2번: "이 결과 선택". */}
+              이 결과 선택
             </button>
           </div>
         </div>
@@ -2317,7 +2318,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               onClick={() => backToBrainstorm("flow")}
               className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
             >
-              흐름: {answers.flow ?? ""}
+              흐름: {displayFlowLabel(answers.flow ?? "")}
             </button>
             <button
               type="button"
@@ -2576,7 +2577,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       {step === "cover" && !demoMode && refCandidates.length > 0 && storyboard && !genError && (
         <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
           <h1 className="text-xl font-semibold">컷 1(기준 컷)입니다. 나머지 컷을 만들까요?</h1>
-          <p className="text-sm text-zinc-500">확정하면 컷 2부터 순서대로 만들어요. 컷 1은 확정이 기준 그림이에요</p>
+          {/* #326 통합④ JEON 1번: 부제 수정 + 명세 R1 문구를 함께 둔다. */}
+          <p className="text-sm text-zinc-500">확정하면 컷 2부터 순서대로 만들어요. 확정한 그림이 기준 그림이에요</p>
+          <p className="text-sm text-zinc-500">이 그림이 컷 1이 돼요. 이 그림의 인물·배경·색감으로 나머지 컷을 그려요.</p>
           {refCandidates[refShown]?.image ? (
             // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
             <img
@@ -2684,6 +2687,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   )}
                   <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
                     {cut.cut_index}컷 · {beatLabel(cut.narrative_beat)}
+                    {/* #326 통합④ JEON 3번: 완료 화면 컷 1에 "기준 컷" 배지. */}
+                    {i === 0 && " · 기준 컷"}
                   </span>
                 </div>
                 {/* 복원 뷰에는 저장 수단(handleSave)이 없어 여기서 고치면 그냥
