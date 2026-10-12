@@ -67,8 +67,8 @@ export interface ImageProvider {
     // #326 비교 실험(POC): 그릴 컷의 cut_index. 없으면 "그림 빈 첫 컷" 규칙.
     // C(cover-ref)는 4컷을 동시에 그려 그 규칙으로는 대상을 못 고른다.
     target_cut_index?: number
-    // #326 실험 C(cover-ref): 고른 표지 asset. 모드가 cover-ref일 때만 읽고,
-    // 그때 참조는 [시트, 표지]이고 continueFrom 은 쓰지 않는다.
-    cover_reference?: string
+    // #326 실험 C·C´(cover-ref·cover-ref-chain): 레퍼런스 1장의 asset. 그 모드일 때만
+    // 읽고, 참조는 [시트, 레퍼런스]. C는 continueFrom 을 버리고 C´는 쓴다.
+    reference_asset?: string
   }): Promise<GeneratedImageResult>
 }

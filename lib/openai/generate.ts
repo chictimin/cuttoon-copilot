@@ -240,8 +240,9 @@ export function buildCutPrompt(
   preset: MinimalPreset,
   cut?: MinimalCut,
   // 이 호출이 previous_response_id 로 앞 컷(표지 포함)을 이어받는가. generateCut 이 정한다.
-  // coverReference: #326 실험 C — 고른 표지 그림을 시트 뒤에 첨부했는가(이어받기 없음).
-  opts: { continuesChain?: boolean; coverReference?: boolean } = {}
+  // referenceImage: #326 실험 C·C´ — 레퍼런스 그림(표지)을 시트 뒤에 첨부했는가.
+  // referencePanel: #326 레퍼런스 1장 자체를 그리는가(배경이 보이는 기준 그림 문장을 붙인다).
+  opts: { continuesChain?: boolean; referenceImage?: boolean; referencePanel?: boolean } = {}
 ): string {
   const s = preset.style
   // character_ratio 만 라벨이 뒤에 붙는 형태였다 — `${값} body proportions`. 힌트
@@ -327,19 +328,30 @@ export function buildCutPrompt(
         `attached reference sheet, but the person in this panel is a different character from ` +
         `the one drawn on that sheet — follow the character description below for who they are.`
   const parts = [sheetSentence]
-  // #326 실험 C(cover-ref): 첨부가 시트 + 표지 두 장이면 모델이 어느 것이 무엇인지
-  // 모른다 — 순서로 짚어 준다. 인물 0명 컷은 generateCut 이 시트를 빼므로 표지 한
-  // 장뿐이다. 표지 구도는 따라 하지 말라고 적는다 — 이 컷의 구도는 아래 Framing 이 정한다.
-  if (opts.coverReference) {
+  // #326 실험 C·C´: 첨부가 시트 + 레퍼런스 두 장이면 모델이 어느 것이 무엇인지
+  // 모른다 — 순서로 짚어 준다. 인물 0명 컷은 generateCut 이 시트를 빼므로 레퍼런스 한
+  // 장뿐이다. 레퍼런스 구도는 따라 하지 말라고 적는다 — 이 컷의 구도는 아래 Framing 이 정한다.
+  // C´(이어받기 있음)에서는 아래 체인 문장("앞 컷과 똑같이")과 함께 나간다. 앞 컷들도 같은
+  // 레퍼런스를 보고 그렸으므로 두 기준이 같은 인물을 가리켜 서로 어긋나지 않는다.
+  if (opts.referenceImage) {
     parts.push(
       noPeopleInFrame
-        ? `The attached image is the chosen cover panel of this same comic — use the same ` +
+        ? `The attached image is the reference panel of this same comic — use the same ` +
             `setting and color palette as in it, but compose this panel as described below, ` +
-            `not as a copy of the cover's framing.`
-        : `The second attached image is the chosen cover panel of this same comic — draw the ` +
+            `not as a copy of the reference's framing.`
+        : `The second attached image is the reference panel of this same comic — draw the ` +
             `same people (face, hair color, hairstyle, skin tone and outfit), the same setting and ` +
             `the same color palette as in it, but compose this panel as described below, not as a ` +
-            `copy of the cover's framing.`
+            `copy of the reference's framing.`
+    )
+  }
+  // #326 레퍼런스 1장: 이후 모든 컷이 인물·배경·색감을 여기서 가져간다. 그래서 인물만
+  // 크게 두지 말고 이야기 장소가 뒤에 보이게 한다(빈 배경이면 컷이 배경을 지어낸다).
+  if (opts.referencePanel) {
+    parts.push(
+      `This is the reference panel for the whole comic: every later panel copies the people, ` +
+        `outfits, setting and colors from it. Show the setting of the story clearly behind the ` +
+        `characters — a recognizable, detailed background, not a plain or blurred one.`
     )
   }
   parts.push(`Style: ${styleStr}.`)
@@ -672,18 +684,21 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const setting = imageSetting()
 
   // #326 비교 실험 스위치(lib/cut-reference-mode.ts). 기본 chain 은 아래가 전부 기존과 같다.
-  // - cover-ref(C): 표지 asset 이 오면 참조는 [시트, 표지]만, 이어받기는 쓰지 않는다
-  //   (화면이 continueFrom 을 안 보내지만, 와도 버린다 — 체인 문장도 빠진다).
+  // - cover-ref(C)·cover-ref-chain(C´)·cover-fixed(D): reference_asset(레퍼런스 1장, D는
+  //   고른 표지)이 오면 참조는 [시트, 레퍼런스]만. C는 이어받기를 쓰지 않는다(와도 버린다 —
+  //   체인 문장도 빠진다), C´·D는 continueFrom 이 오면 이어받는다. reference_asset 이 없으면 A와 같다.
   // - chain-nostyle(A'): 이어 그리는 컷이면 style_refs 를 빼고 시트만 보낸다(#328 1번).
   const mode = cutReferenceMode()
-  const coverRef =
-    mode === 'cover-ref' && typeof input.cover_reference === 'string' && input.cover_reference
-      ? input.cover_reference
+  const refAsset =
+    (mode === 'cover-ref' || mode === 'cover-ref-chain' || mode === 'cover-fixed') &&
+    typeof input.reference_asset === 'string' &&
+    input.reference_asset
+      ? input.reference_asset
       : undefined
-  const continueFrom = coverRef ? undefined : input.continueFrom
+  const continueFrom = refAsset && mode === 'cover-ref' ? undefined : input.continueFrom
   const styleRefs = preset.assets?.style_refs ?? []
-  const referenceAssets = coverRef
-    ? [preset.assets?.character_sheet ?? input.referenceAssets.find((a) => !styleRefs.includes(a as string)), coverRef]
+  const referenceAssets = refAsset
+    ? [preset.assets?.character_sheet ?? input.referenceAssets.find((a) => !styleRefs.includes(a as string)), refAsset]
         .filter((a): a is string => typeof a === 'string')
     : mode === 'chain-nostyle' && continueFrom
       ? input.referenceAssets.filter((a) => !styleRefs.includes(a as string))
@@ -704,7 +719,7 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
   // ComfyUI 는 체이닝이 없어 앞 컷을 모른다(comfyui.ts 머리말) — 그때는 연속 문장을 넣지 않는다.
   const prompt = buildCutPrompt(storyboard, preset, promptCut, {
     continuesChain: !!continueFrom && setting !== 'comfyui',
-    ...(coverRef && setting !== 'comfyui' ? { coverReference: true } : {}),
+    ...(refAsset && setting !== 'comfyui' ? { referenceImage: true } : {}),
   })
   const { base64, responseId } = await callImageGeneration(
     prompt,
@@ -729,6 +744,62 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
     continuationToken: responseId,
     prompt,
   }
+}
+
+// #326 POC: 레퍼런스 1장(표지). 표지 3안 대신 세션의 기준 그림을 1장 그리고, 컷 1~4가
+// 이것을 참조한다(실험 C·C´). 구도는 고정 — 상반신(bust)·눈높이(eye) + 배경이 보이게.
+// 인물·옷·배경·색감을 가장 많이 담는 구도라서다.
+//
+// 등장인물은 cast 전원(최대 2명, 주인공 먼저)이다. 컷 1에 없는 조연도 뒤 컷에서 이
+// 그림을 기준으로 삼으므로 함께 그린다. 표정은 컷 1 값이 있으면 그것, 없으면 neutral.
+// 컷 1의 narrative_beat 는 넣지 않는다 — 이야기 한 장면이 아니라 기준 그림이다.
+// reserved_zone 도 넣지 않는다: 레퍼런스에는 대사가 없어 말풍선 자리를 비울 이유가 없고,
+// 비우면 인물·배경 정보가 그만큼 줄어든다. 크롭도 가운데 기준이다(Export 표지는 그림만).
+export function referenceCut(storyboard: MinimalStoryboard, regenNote?: string): MinimalCut {
+  const cut1 = storyboard.cuts?.[0]
+  const cast = [...(storyboard.cast ?? [])]
+    .filter((m) => m.character_id)
+    .sort((a, b) => Number(b.role === 'protagonist') - Number(a.role === 'protagonist'))
+    .slice(0, 2)
+  const expressionOf = (id: string) =>
+    cut1?.characters_in_frame?.find((c) => c.character_id === id)?.expression ?? 'neutral'
+  const characters_in_frame = cast.length
+    ? cast.map((m) => ({ character_id: m.character_id!, expression: expressionOf(m.character_id!), pose: 'stand' }))
+    : (cut1?.characters_in_frame ?? [])
+  return {
+    cut_index: cut1?.cut_index ?? 1,
+    shot_type: 'bust',
+    camera_angle: 'eye',
+    ...(cut1?.time_of_day ? { time_of_day: cut1.time_of_day } : {}),
+    characters_in_frame,
+    ...(regenNote ? { direction_note: regenNote } : {}),
+  }
+}
+
+// 순수 함수로 내보낸다 — direction-check 스크립트(--dry-run)가 같은 프롬프트를 쓴다.
+export function buildReferencePrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, regenNote?: string): string {
+  return buildCutPrompt(storyboard, preset, referenceCut(storyboard, regenNote), { referencePanel: true })
+}
+
+// 첨부는 표지 3안과 같은 [시트, ...style_refs] — 레퍼런스는 그림체의 기준이기도 하다.
+// 이어받기 없음(세션의 첫 그림). 돌려주는 continuationToken 은 C´에서 컷 1이 이어받을
+// 수 있게 둔다(쓸지는 화면이 정한다).
+export async function generateReference(input: {
+  storyboard: unknown
+  preset: unknown
+  referenceAssets: unknown[]
+  regen_note?: string
+}): Promise<GeneratedImageResult> {
+  const storyboard = (input.storyboard ?? {}) as MinimalStoryboard
+  const preset = (input.preset ?? {}) as MinimalPreset
+  const setting = imageSetting()
+  const regenNote =
+    typeof input.regen_note === 'string' && input.regen_note.trim() ? input.regen_note : undefined
+  const prompt = buildReferencePrompt(storyboard, preset, regenNote)
+  const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, preset, setting, 'cover_variant')
+  const { buffer, width, height } = await resizeToOutput(base64)
+  const { assetUri } = await uploadAsset(buffer, 'image/png', 'reference.png')
+  return { asset: assetUri, width, height, continuationToken: responseId, prompt, shot_type: 'bust', camera_angle: 'eye' }
 }
 
 // #118: 부족분 재시도 on/off. 기본은 on 이다 — 정상 경로에서는 재시도가 아예
@@ -806,6 +877,17 @@ export function coverVariantDirections(base?: {
   ]
 }
 
+// #326 실험 D(cover-fixed): 표지가 컷 1이면서 컷 2~4의 기준 그림이므로 3안 모두 기준용
+// 구도(bust·eye)로 고정한다 — 3안은 구도가 아니라 같은 구도 안의 그림 차이로 고른다.
+// 그 밖의 모드는 S5 배정(coverVariantDirections) 그대로. 스크립트도 이 함수를 부른다.
+export function coverDirectionsForMode(base?: {
+  shot_type?: string
+  camera_angle?: string
+}): Array<{ shot_type?: string; camera_angle?: string }> {
+  if (cutReferenceMode() === 'cover-fixed') return [0, 1, 2].map(() => ({ shot_type: 'bust', camera_angle: 'eye' }))
+  return coverVariantDirections(base)
+}
+
 // 표지 3안. 독립 호출이므로 체이닝 토큰을 받지 않는다(PRD 6절) — 세션에 누적하면
 // 2안이 1안에 끌려가 서로 비슷해지기 때문. 3개를 병렬로 호출한다.
 export const generateCoverVariants: ImageProvider['generateCoverVariants'] = async (input) => {
@@ -814,7 +896,7 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   const cut = storyboard.cuts?.[0]
   // #325 POC: 3안이 같은 프롬프트를 쓰면 구도 비교가 안 된다. 안마다 컷 1
   // 연출을 덮어쓴 복사본으로 프롬프트를 만든다(배정은 coverVariantDirections).
-  const specs = coverVariantDirections(cut).map((d) => {
+  const specs = coverDirectionsForMode(cut).map((d) => {
     const variantCut: MinimalCut | undefined = cut
       ? { ...cut, shot_type: d.shot_type ?? cut.shot_type, camera_angle: d.camera_angle ?? cut.camera_angle }
       : { shot_type: d.shot_type, camera_angle: d.camera_angle }
