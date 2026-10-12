@@ -60,6 +60,7 @@ import {
   hasSuggestionContext,
 } from "./subject-suggestions";
 import type { Cut, Storyboard } from "./storyboard-types";
+import { apiErrorText } from "../../api-error";
 
 type Step = "subject" | "brainstorm" | "tone" | "assembling" | "captions" | "cover" | "generating" | "cuts" | "saved";
 
@@ -926,7 +927,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           setSaveError("소재 태그를 저장하지 못했어요");
           setSaveRecovery(true);
         } else {
-          setSaveError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+          setSaveError(apiErrorText(res.status, body, "저장에 실패했어요. 다시 시도해주세요"));
         }
         return;
       }
@@ -987,7 +988,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setSaveError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+        setSaveError(apiErrorText(res.status, body, "저장에 실패했어요. 다시 시도해주세요"));
         return;
       }
 
