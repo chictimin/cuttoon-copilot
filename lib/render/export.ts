@@ -42,7 +42,17 @@ export async function exportCuts(
       continue;
     }
     // #242: 2인 컷은 화자 쪽(가로 30%/70%), wide 컷은 꼬리 목표점을 아래로. 그 밖에는 기본 목표점.
-    const composed = await composeCut(imageBuffer, [cut.caption], [headTargetForCut(cut)], font);
+    // #326: 인물 0명 컷(과거·외부 데이터 대비)은 꼬리 생략. 스키마 minItems 1이라
+    // 정상 경로에서는 안 나온다.
+    const noTail =
+      Array.isArray(cut.characters_in_frame) && cut.characters_in_frame.length === 0;
+    const composed = await composeCut(
+      imageBuffer,
+      [cut.caption],
+      [headTargetForCut(cut)],
+      font,
+      [noTail]
+    );
     entries.push({ name: `cut_${cut.cut_index}.png`, data: composed });
     included.push(cut.cut_index);
   }
