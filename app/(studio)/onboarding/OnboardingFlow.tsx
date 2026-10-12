@@ -9,6 +9,7 @@ import DetailsStep, { type DetailsFormValue } from "./DetailsStep";
 import MascotStep, { type MascotValue } from "./MascotStep";
 import { parseTags } from "./parse-tags";
 import { bubbleStyleLabel, characterRatioLabel, lineWeightLabel } from "../ui-labels";
+import { apiErrorText } from "../api-error";
 
 type Step = "upload" | "analyzing" | "result" | "details" | "mascot" | "confirmed";
 
@@ -216,7 +217,7 @@ export default function OnboardingFlow() {
       });
       if (!sheetRes.ok) {
         const body = await sheetRes.json().catch(() => null);
-        setError(body?.error ?? "캐릭터 시트 생성에 실패했어요. 다시 시도해주세요");
+        setError(apiErrorText(sheetRes.status, body, "캐릭터 시트 생성에 실패했어요. 다시 시도해주세요"));
         return;
       }
       const { result } = (await sheetRes.json()) as { result: { asset: string } };
@@ -263,7 +264,7 @@ export default function OnboardingFlow() {
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+        setError(apiErrorText(res.status, body, "저장에 실패했어요. 다시 시도해주세요"));
         return;
       }
 
