@@ -226,7 +226,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 `referenceUris`(`generate.ts`)가 호출부의 `referenceAssets` 에 `preset.assets.character_sheet` 를 합친다 — 호출부가 빼먹어도 시트가 들어간다. `toInputImages`(`generate.ts`)가 `readAsset` 으로 읽고, **못 읽은 것은 로그에 남기고**, 결과가 0장이면 **유료 호출 전에 던진다.** 시트 없이 만든 이미지는 P0 게이트를 통과할 수 없어 생성비만 버리는 것이기 때문이다.
 
-`style_refs` 는 일부러 넣지 않는다 — reference 이미지를 늘리면 시트의 비중이 묽어진다. 스타일은 프롬프트의 `Style:` 문장이 담당한다.
+화면(`app/(studio)/session/[id]/generate-client.ts` 의 `referenceAssetsOf`)은 시트와 `style_refs`(온보딩 참고 그림 원본)를 **함께** 보낸다 — 참고 그림을 올린 프로젝트는 표지·컷마다 둘 다 들어간다. `referenceUris` 는 받은 목록을 그대로 쓰고 시트가 빠졌을 때만 덧붙이며, 폴백으로 `style_refs` 를 읽지는 않는다. 그래서 참고 그림의 글자·로고가 결과에 따라 나올 수 있다. 참고 그림을 빼는 쪽으로 바꿀지는 발표 이후 과제다(#317). 스타일 서술은 프롬프트의 `Style:` 문장이 담당한다.
 
 **체이닝**
 
