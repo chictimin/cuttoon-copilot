@@ -30,7 +30,15 @@
  *
  * 옵션: --session <id>(--run 필수, --dry-run은 생략 시 fake) · --cut2/--cut3/--cut4 <shot,angle> ·
  *   --note "<문장>" · --note-cut <2|3|4, 기본 3> · --out <폴더>(기본 tmp/direction-check, 아래 시각 하위폴더) ·
- *   --dry-run(기본) · --run
+ *   --dry-run(기본) · --run ·
+ *   --mode <chain|chain-nostyle|cover-ref, 기본 chain> · --cover-pick <1|2|3, 기본 1>
+ *
+ * #326 비교 실험 --mode(lib/cut-reference-mode.ts 와 같은 값, 제품 화면은 NEXT_PUBLIC_CUT_REFERENCE_MODE):
+ * - chain(A): 표지 3안 → 고른 표지(--cover-pick)에서 컷 2~4 이어받기, 컷 첨부 [시트, ...style_refs]. 6장.
+ * - chain-nostyle(A'): A와 같되 컷 2~4 첨부는 시트만. 6장.
+ * - cover-ref(C): 표지 3안 → 고른 표지를 기준 그림으로, 컷 1~4를 [시트, 표지]만 첨부해 이어받기 없이
+ *   동시 생성. 7장.
+ * 어느 모드든 인물 0명 컷은 제품(generateCut)처럼 시트를 첨부에서 뺀다.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -57,7 +65,12 @@ interface Args {
   noteCut: 2 | 3 | 4;
   outBase: string;
   run: boolean;
+  mode: Mode;
+  coverPick: 1 | 2 | 3;
 }
+
+type Mode = "chain" | "chain-nostyle" | "cover-ref";
+const MODES: readonly Mode[] = ["chain", "chain-nostyle", "cover-ref"];
 
 type CastMember = { character_id?: string; role?: string; description?: string };
 type FrameMember = { character_id?: string; expression?: string; pose?: string };
@@ -99,7 +112,17 @@ function parseArgs(argv: string[]): Args {
   if (noteCutRaw !== "2" && noteCutRaw !== "3" && noteCutRaw !== "4") {
     throw new Error(`--note-cut 은 2|3|4 중 하나여야 합니다(받음: ${noteCutRaw})`);
   }
+  const modeRaw = get("--mode") ?? "chain";
+  if (!(MODES as readonly string[]).includes(modeRaw)) {
+    throw new Error(`--mode 는 ${MODES.join("|")} 중 하나여야 합니다(받음: ${modeRaw})`);
+  }
+  const pickRaw = get("--cover-pick") ?? "1";
+  if (pickRaw !== "1" && pickRaw !== "2" && pickRaw !== "3") {
+    throw new Error(`--cover-pick 은 1|2|3 중 하나여야 합니다(받음: ${pickRaw})`);
+  }
   return {
+    mode: modeRaw as Mode,
+    coverPick: Number(pickRaw) as 1 | 2 | 3,
     session,
     cutSpecs: {
       2: parseCutSpec(get("--cut2") ?? "full,eye", "--cut2"),
@@ -144,8 +167,12 @@ async function loadDry(): Promise<Loaded> {
       cast: [{ character_id: "protagonist", role: "protagonist", description: "하루 종일 서서 일하는 40대 카페 사장님, 상의 #e8734a" }],
       cuts: [1, 2, 3, 4].map(one),
     },
-    preset: { style: { line_weight: "medium", saturation: "pastel", character_ratio: "2.5head" }, assets: { character_sheet: "asset://dry-sheet", style_refs: [] } },
-    readAsset: async (uri) => (uri === "asset://dry-sheet" ? sheet : null),
+    // 참고 그림 1장을 둔다 — #326 실험(A/A'/C)은 참고 그림이 있는 조건에서 첨부 차이를 본다.
+    preset: {
+      style: { line_weight: "medium", saturation: "pastel", character_ratio: "2.5head" },
+      assets: { character_sheet: "asset://dry-sheet", style_refs: ["asset://dry-style"] },
+    },
+    readAsset: async (uri) => (uri === "asset://dry-sheet" || uri === "asset://dry-style" ? sheet : null),
   };
 }
 
@@ -188,7 +215,8 @@ async function main(): Promise<void> {
   const setting = imageSetting();
   if (setting === "comfyui") throw new Error("이 확인은 OpenAI 이미지로 한다 — IMAGE_PROVIDER 를 비우거나 openai 로 두세요");
   const quality = imageQuality(setting);
-  const totalImages = 3 + 3; // 표지 3안 + 컷 2~4
+  // 표지 3안 + 컷 2~4(A·A') 또는 컷 1~4(C)
+  const totalImages = 3 + (args.mode === "cover-ref" ? 4 : 3);
   if (totalImages > MAX_IMAGES) throw new Error(`1회 ${totalImages}장은 상한(${MAX_IMAGES}장)을 넘겨 거부합니다`);
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -198,6 +226,7 @@ async function main(): Promise<void> {
     `${args.run ? "[--run, 유료] " : "[--dry-run, 이미지 호출 0] "}표지 3안 + 컷 2~4 체이닝 — 모델 ${RESPONSES_MODEL} + image_generation, ` +
       `크기 ${IMAGE_SIZE}, 품질 ${quality ?? "기본(지정 안 함)"} (IMAGE_PROVIDER=${setting}), 결과 ${out}/`
   );
+  console.log(`모드: ${args.mode} · 기준 표지 ${args.coverPick}안 · 이미지 ${totalImages}장`);
   console.log(
     `연출: 컷 2 ${args.cutSpecs[2].shot}·${args.cutSpecs[2].angle} / 컷 3 ${args.cutSpecs[3].shot}·${args.cutSpecs[3].angle} / ` +
       `컷 4 ${args.cutSpecs[4].shot}·${args.cutSpecs[4].angle}` +
@@ -224,6 +253,8 @@ async function main(): Promise<void> {
     // generate.ts 동적 import용 키만 없을 때 가짜를 깐다. 이 키로는 호출하지 않는다.
     process.env.OPENAI_API_KEY = "sk-dry-fake";
   }
+  // 제품 코드와 같은 스위치 값을 깔아 둔다(스크립트는 요청을 재현하므로 직접 읽지는 않는다).
+  process.env.NEXT_PUBLIC_CUT_REFERENCE_MODE = args.mode;
   const { OUTPUT_SIZE, buildCutPrompt, coverVariantDirections } = await import("../lib/openai/generate");
   if (`${OUTPUT_SIZE.width}x${OUTPUT_SIZE.height}` !== IMAGE_SIZE) throw new Error("OUTPUT_SIZE 가 바뀌었습니다 — 이 스크립트의 IMAGE_SIZE 를 맞추세요");
 
@@ -241,11 +272,37 @@ async function main(): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return buildCutPrompt(loaded.storyboard as any, loaded.preset as any, variantCut);
   });
-  // 컷 2~4 프롬프트 — 실제와 같이 체이닝 표시(continuesChain)를 켠다.
-  const cutPrompts = ([2, 3, 4] as const).map((i) =>
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    buildCutPrompt(storyboard as any, loaded.preset as any, cuts[i] as any, { continuesChain: true })
+  // 컷 프롬프트. A·A'는 컷 2~4를 체이닝 표시(continuesChain)로, C는 컷 1~4를 표지 참조
+  // 표시(coverReference)로 만든다 — generateCut 이 모드별로 넘기는 opts 와 같다.
+  const coverRef = args.mode === "cover-ref";
+  const cutIndexes: number[] = coverRef ? [1, 2, 3, 4] : [2, 3, 4];
+  const cutOf = (i: number): Cut =>
+    i === 1 ? (cut1 ?? { cut_index: 1 }) : cuts[i as 2 | 3 | 4];
+  const cutPrompts = cutIndexes.map((i) =>
+    buildCutPrompt(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      storyboard as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      loaded.preset as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      cutOf(i) as any,
+      coverRef ? { coverReference: true } : { continuesChain: true }
+    )
   );
+  // 요청별 첨부 — generateCut 의 참조 목록 고르기를 그대로 옮긴 것(라벨로만 기록).
+  const sheetUri = loaded.preset.assets?.character_sheet;
+  const styleUris = (loaded.preset.assets?.style_refs ?? []).filter((u) => u !== sheetUri);
+  const coverLabel = `cover-${args.coverPick}`;
+  const attachOf = (i: number): string[] => {
+    const noPeople = (cutOf(i).characters_in_frame ?? []).length === 0;
+    const base = coverRef
+      ? [sheetUri, coverLabel]
+      : args.mode === "chain-nostyle"
+        ? [sheetUri]
+        : [sheetUri, ...styleUris];
+    return base.filter((u): u is string => typeof u === "string" && !(noPeople && u === sheetUri));
+  };
+  const coverAttach = [sheetUri, ...styleUris].filter((u): u is string => typeof u === "string");
 
   // ── 점검 ──
   const checks: [string, boolean][] = [];
@@ -257,11 +314,22 @@ async function main(): Promise<void> {
   const raws = parseSubjectTags(storyboard.subject ?? "").map((t) => normalizeTagText(t.raw)).filter(Boolean);
   const allPrompts = [...coverPrompts, ...cutPrompts];
   const leaked = allPrompts.filter((p) => raws.some((r) => normalizeTagText(p).includes(r))).length;
-  checks.push(["소재 [태그] 원문 0회(6개 프롬프트 전부)", leaked === 0]);
+  checks.push([`소재 [태그] 원문 0회(${allPrompts.length}개 프롬프트 전부)`, leaked === 0]);
   const noted = allPrompts.filter((p) => p.includes("Director's note:"));
   if (args.note !== undefined) {
-    checks.push([`메모가 지정 컷(컷 ${args.noteCut}) 프롬프트에만`, noted.length === 1 && cutPrompts[args.noteCut - 2].includes("Director's note:")]);
+    checks.push([
+      `메모가 지정 컷(컷 ${args.noteCut}) 프롬프트에만`,
+      noted.length === 1 && cutPrompts[cutIndexes.indexOf(args.noteCut)].includes("Director's note:"),
+    ]);
   }
+  const CHAIN = "This panel continues the earlier panels of this conversation.";
+  const COVER = "chosen cover panel of this same comic";
+  if (coverRef) {
+    checks.push(["C: 컷 1~4 모두 표지 안내 문장, 체인 문장 0", cutPrompts.every((p) => p.includes(COVER) && !p.includes(CHAIN))]);
+  } else {
+    checks.push(["A·A': 표지 안내 문장 0", allPrompts.every((p) => !p.includes(COVER))]);
+  }
+  checks.push(["표지 3안에는 체인·표지 안내 문장 0", coverPrompts.every((p) => !p.includes(CHAIN) && !p.includes(COVER))]);
   for (const p of noted) {
     const iNote = p.indexOf("Director's note:");
     const iCamera = p.indexOf("Camera:");
@@ -279,15 +347,25 @@ async function main(): Promise<void> {
   mkdirSync(out, { recursive: true });
   const manifest = {
     session: args.session,
+    mode: args.mode,
+    coverPick: args.coverPick,
+    requests: [
+      ...coverPrompts.map((_, k) => ({ file: `cover-${k + 1}`, attach: coverAttach, previous_response_id: null })),
+      ...cutIndexes.map((i) => ({
+        file: `cut-${i}`,
+        attach: attachOf(i),
+        previous_response_id: coverRef ? null : i === 2 ? coverLabel : `cut-${i - 1}`,
+      })),
+    ],
     dryRun: !args.run,
     model: RESPONSES_MODEL,
     size: IMAGE_SIZE,
     cover: directions.map((d, i) => ({ variant: i + 1, shot_type: d.shot_type, camera_angle: d.camera_angle })),
-    cuts: ([2, 3, 4] as const).map((i) => ({
+    cuts: cutIndexes.map((i) => ({
       cut_index: i,
-      shot_type: cuts[i].shot_type,
-      camera_angle: cuts[i].camera_angle,
-      direction_note: cuts[i].direction_note ?? null,
+      shot_type: cutOf(i).shot_type,
+      camera_angle: cutOf(i).camera_angle,
+      direction_note: cutOf(i).direction_note ?? null,
     })),
   };
   writeFileSync(path.join(out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -296,14 +374,17 @@ async function main(): Promise<void> {
     writeFileSync(path.join(out, `cover-${i + 1}.txt`), `variant: ${i + 1}, shot_type=${d.shot_type}, camera_angle=${d.camera_angle}\n\n${p}\n`);
   });
   cutPrompts.forEach((p, k) => {
-    const i = [2, 3, 4][k] as 2 | 3 | 4;
+    const i = cutIndexes[k];
+    const c = cutOf(i);
     writeFileSync(
       path.join(out, `cut-${i}.txt`),
-      `cut: ${i}, shot_type=${cuts[i].shot_type}, camera_angle=${cuts[i].camera_angle}, note=${cuts[i].direction_note ?? "(없음)"}\n\n${p}\n`
+      `cut: ${i}, mode=${args.mode}, shot_type=${c.shot_type}, camera_angle=${c.camera_angle}, note=${c.direction_note ?? "(없음)"}, attach=${attachOf(i).join(",")}\n\n${p}\n`
     );
   });
 
   // ── 출력 ──
+  console.log("--- 요청별 첨부·이어받기");
+  for (const r of manifest.requests) console.log(`  ${r.file}: [${r.attach.join(", ")}] prev=${r.previous_response_id ?? "없음"}`);
   console.log("--- 표지 3안 Framing/Camera");
   pairs.forEach((pair, i) => console.log(`  ${i + 1}안: ${pair}`));
   if (noted.length) {
@@ -320,10 +401,10 @@ async function main(): Promise<void> {
   writeFileSync(
     path.join(out, "result.md"),
     [
-      `# #325 연출 확인 (${args.run ? `세션 ${args.session}` : "--dry-run"})`,
+      `# #325 연출 확인 (${args.run ? `세션 ${args.session}` : "--dry-run"}, 모드 ${args.mode})`,
       "",
       `- 표지 3안: ${pairs.map((pair, i) => `${i + 1}안(${pair})`).join(" / ")}`,
-      `- 컷 2~4: ${([2, 3, 4] as const).map((i) => `${i}(${cuts[i].shot_type}·${cuts[i].camera_angle})`).join(" / ")}`,
+      `- 컷: ${cutIndexes.map((i) => `${i}(${cutOf(i).shot_type}·${cutOf(i).camera_angle})`).join(" / ")}`,
       `- 메모: ${args.note !== undefined ? `컷 ${args.noteCut}에 "${args.note}"` : "없음"}`,
       `- 점검: ${checks.filter(([, p]) => p).length}/${checks.length} 통과`,
       ...checks.map(([name, pass]) => `  - ${pass ? "ok" : "FAIL"} ${name}`),
@@ -350,79 +431,93 @@ async function main(): Promise<void> {
   }
 
   // ── --run (유료) ──
-  // SDK 자동 재시도를 끈다(maxRetries 0) — 실제 HTTP 생성 시도는 표지 3 + 컷 3 = 최대 6회로
-  // 고정돼 상한(MAX_IMAGES 8)을 넘을 수 없다. 실패한 이미지는 재시도하지 않고 에러로 멈춘다.
+  // SDK 자동 재시도를 끈다(maxRetries 0) — 실제 HTTP 생성 시도는 표지 3 + 컷 3(C는 4) = 최대
+  // 6(7)회로 고정돼 상한(MAX_IMAGES 8)을 넘을 수 없다. 실패한 이미지는 재시도하지 않고 에러로 멈춘다.
   console.log(`OpenAI SDK 재시도 없음(maxRetries 0) — 실제 HTTP 생성 시도 최대 ${totalImages}회`);
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0 });
-  // reference: 생성 화면(generate-client referenceAssetsOf)과 같은 [시트, ...style_refs], 중복 제거.
-  const uris = [...new Set([loaded.preset.assets?.character_sheet, ...(loaded.preset.assets?.style_refs ?? [])])].filter(
-    (u): u is string => typeof u === "string"
-  );
-  const images: { type: "input_image"; image_url: string }[] = [];
-  for (const uri of uris) {
+  // 첨부 라벨(애셋 URI 또는 cover-N) → input_image. 표지 첨부는 생성 화면(referenceAssetsOf)과
+  // 같은 [시트, ...style_refs], 컷 첨부는 위 attachOf(모드별 generateCut 재현)를 따른다.
+  const imageByLabel = new Map<string, { type: "input_image"; image_url: string }>();
+  for (const uri of coverAttach) {
     const buf = await loaded.readAsset(uri);
     if (!buf) {
       console.error(`reference 애셋을 읽지 못했습니다: ${uri}`);
       continue;
     }
-    images.push({ type: "input_image", image_url: `data:image/png;base64,${buf.toString("base64")}` });
+    imageByLabel.set(uri, { type: "input_image", image_url: `data:image/png;base64,${buf.toString("base64")}` });
   }
-  if (images.length === 0) throw new Error("캐릭터 시트를 읽지 못해 생성하지 않습니다");
+  if (!sheetUri || !imageByLabel.has(sheetUri)) throw new Error("캐릭터 시트를 읽지 못해 생성하지 않습니다");
+  const imagesOf = (labels: string[]) =>
+    labels.flatMap((l) => {
+      const img = imageByLabel.get(l);
+      if (!img) throw new Error(`첨부 ${l} 를 준비하지 못했습니다`);
+      return [img];
+    });
   const qualityOpt = quality ? { quality } : {};
+
+  async function createImage(text: string, labels: string[], previous: string | undefined, file: string) {
+    const started = performance.now();
+    const response = await client.responses.create({
+      model: RESPONSES_MODEL,
+      ...(previous ? { previous_response_id: previous } : {}),
+      input: [{ role: "user", content: [{ type: "input_text", text }, ...imagesOf(labels)] }],
+      tools: [{ type: "image_generation", size: IMAGE_SIZE, ...qualityOpt }],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    const seconds = ((performance.now() - started) / 1000).toFixed(1);
+    const output = (response as { output?: { type?: string; result?: string }[] }).output ?? [];
+    const result = output.find((o) => o.type === "image_generation_call")?.result;
+    if (!result) throw new Error(`${file} 응답에 image_generation_call 결과가 없습니다`);
+    writeFileSync(path.join(out, file), Buffer.from(result, "base64"));
+    return { id: (response as { id: string }).id, base64: result, seconds };
+  }
 
   const rows: string[] = [];
   const coverIds: string[] = [];
   for (let i = 0; i < coverPrompts.length; i++) {
-    const started = performance.now();
-    const response = await client.responses.create({
-      model: RESPONSES_MODEL,
-      input: [{ role: "user", content: [{ type: "input_text", text: coverPrompts[i] }, ...images] }],
-      tools: [{ type: "image_generation", size: IMAGE_SIZE, ...qualityOpt }],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
-    const seconds = ((performance.now() - started) / 1000).toFixed(1);
-    const output = (response as { output?: { type?: string; result?: string }[] }).output ?? [];
-    const result = output.find((o) => o.type === "image_generation_call")?.result;
-    if (!result) throw new Error(`표지 ${i + 1}안 응답에 image_generation_call 결과가 없습니다`);
     const file = `cover-${i + 1}.png`;
-    writeFileSync(path.join(out, file), Buffer.from(result, "base64"));
-    coverIds.push((response as { id: string }).id);
-    rows.push(`| ${file} | 표지 ${i + 1}안(${pairs[i]}) | ${seconds}s | |`);
-    console.log(`[표지 ${i + 1}/3] ${file} ${seconds}s`);
+    const r = await createImage(coverPrompts[i], coverAttach, undefined, file);
+    coverIds.push(r.id);
+    imageByLabel.set(`cover-${i + 1}`, { type: "input_image", image_url: `data:image/png;base64,${r.base64}` });
+    rows.push(`| ${file} | 표지 ${i + 1}안(${pairs[i]}) | ${r.seconds}s | |`);
+    console.log(`[표지 ${i + 1}/3] ${file} ${r.seconds}s`);
   }
 
-  // 컷 2~4 — 실제와 같은 previous_response_id 체이닝. 표지 1안 응답에서 이어받는다.
-  let previous = coverIds[0];
-  for (let k = 0; k < cutPrompts.length; k++) {
-    const cutIndex = [2, 3, 4][k];
-    const started = performance.now();
-    const response = await client.responses.create({
-      model: RESPONSES_MODEL,
-      previous_response_id: previous,
-      input: [{ role: "user", content: [{ type: "input_text", text: cutPrompts[k] }, ...images] }],
-      tools: [{ type: "image_generation", size: IMAGE_SIZE, ...qualityOpt }],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
-    const seconds = ((performance.now() - started) / 1000).toFixed(1);
-    const output = (response as { output?: { type?: string; result?: string }[] }).output ?? [];
-    const result = output.find((o) => o.type === "image_generation_call")?.result;
-    if (!result) throw new Error(`컷 ${cutIndex} 응답에 image_generation_call 결과가 없습니다`);
-    const file = `cut-${cutIndex}.png`;
-    writeFileSync(path.join(out, file), Buffer.from(result, "base64"));
-    previous = (response as { id: string }).id;
-    const c = cuts[cutIndex as 2 | 3 | 4];
-    rows.push(`| ${file} | 컷 ${cutIndex}(${c.shot_type}·${c.camera_angle}) | ${seconds}s | |`);
-    console.log(`[컷 ${cutIndex}] ${file} ${seconds}s`);
+  const cutRow = (i: number, seconds: string) => {
+    const c = cutOf(i);
+    return `| cut-${i}.png | 컷 ${i}(${c.shot_type}·${c.camera_angle}) [${attachOf(i).join(", ")}] | ${seconds}s | |`;
+  };
+  if (coverRef) {
+    // C: 컷 1~4 — 이어받기 없이 [시트, 고른 표지]로 동시에 요청한다(화면 generateCoverRefCuts 와 같다).
+    const startedAll = performance.now();
+    const results = await Promise.all(
+      cutIndexes.map((i, k) => createImage(cutPrompts[k], attachOf(i), undefined, `cut-${i}.png`))
+    );
+    results.forEach((r, k) => {
+      rows.push(cutRow(cutIndexes[k], r.seconds));
+      console.log(`[컷 ${cutIndexes[k]}] cut-${cutIndexes[k]}.png ${r.seconds}s`);
+    });
+    console.log(`컷 1~4 동시 생성 전체 ${((performance.now() - startedAll) / 1000).toFixed(1)}s`);
+  } else {
+    // A·A': 컷 2~4 — 실제와 같은 previous_response_id 체이닝. 고른 표지(--cover-pick) 응답에서 이어받는다.
+    let previous = coverIds[args.coverPick - 1];
+    for (let k = 0; k < cutPrompts.length; k++) {
+      const i = cutIndexes[k];
+      const r = await createImage(cutPrompts[k], attachOf(i), previous, `cut-${i}.png`);
+      previous = r.id;
+      rows.push(cutRow(i, r.seconds));
+      console.log(`[컷 ${i}] cut-${i}.png ${r.seconds}s`);
+    }
   }
 
   writeFileSync(
     path.join(out, "result.md"),
     [
-      `# #325 연출 확인 (세션 ${args.session})`,
+      `# #325 연출 확인 (세션 ${args.session}, 모드 ${args.mode}, 기준 표지 ${args.coverPick}안)`,
       "",
       "- 판정: 연출(구도·앵글·메모)이 다르면 그림이 달라야 ✅",
       "",
-      "| 파일 | 요청 연출 | 걸린 시간 | 다르게 나왔나 | 메모 |",
+      "| 파일 | 요청 연출 [첨부] | 걸린 시간 | 다르게 나왔나 | 메모 |",
       "| --- | --- | --- | --- | --- |",
       ...rows,
       "",
