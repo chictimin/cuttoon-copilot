@@ -60,6 +60,7 @@ import {
   hasSuggestionContext,
 } from "./subject-suggestions";
 import type { Cut, Storyboard } from "./storyboard-types";
+import { apiErrorText } from "../../api-error";
 
 type Step = "subject" | "brainstorm" | "tone" | "assembling" | "captions" | "cover" | "generating" | "cuts" | "saved";
 
@@ -264,7 +265,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   // #259: 4컷을 만드는 중이거나 만든 뒤 저장 전이면, 새로고침·탭 닫기 때 브라우저 확인창을 띄운다.
   // 이미 저장된 세션을 다시 연 화면(isRestoredView)과 저장 완료(saved)는 잃을 것이 없다.
-  const hasUnsavedResult = step === "generating" || (step === "cuts" && !isRestoredView);
+  // #297: 표지 단계도 같다 — 3안을 만드는 중이거나 만든 뒤 고르기 전에 나가면 화면의 3안과
+  // 선택 기록이 사라져 다시 만들어야 한다(이미지 3장 재과금). 생성이 실패해 아무것도 없을 땐(genError) 제외한다.
+  const hasUnsavedResult =
+    step === "generating" || (step === "cover" && !genError) || (step === "cuts" && !isRestoredView);
   useEffect(() => {
     if (!hasUnsavedResult) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
@@ -789,6 +793,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       setGenError("데모 캐시를 불러오지 못했어요");
       return;
     }
+    // #307: 표지를 한 번 뽑은 뒤 전환해도 캐시 경로는 선택 기록을 남기지 않는다 — 쌓인 기록을 비운다.
+    selectionLogRef.current = createSelectionLog();
+    setSelectionNotice(null);
     setDemoMode(true);
     setCoverVariants(null);
     setCoverRequested(undefined);
@@ -896,7 +903,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     setSaveError(null);
     setSaveRecovery(false);
     setSaving(true);
-    const selections = toPayload(selectionLogRef.current);
+    // #307: 데모 캐시 모드에서는 선택 기록을 보내지 않는다(서버가 selectionsSaved를 안 넣어 안내도 안 뜬다).
+    const selections = demoMode ? [] : toPayload(selectionLogRef.current);
     try {
       const res = await fetch("/api/session", {
         method: "POST",
@@ -919,7 +927,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           setSaveError("소재 태그를 저장하지 못했어요");
           setSaveRecovery(true);
         } else {
-          setSaveError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+          setSaveError(apiErrorText(res.status, body, "저장에 실패했어요. 다시 시도해주세요"));
         }
         return;
       }
@@ -929,7 +937,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         selectionsSaved?: boolean;
       };
       // #207: 선택 기록만 실패해도 세션은 저장됐다 — 흐름을 막지 않고 알리기만 한다.
-      if (selectionsSaved === false) {
+      if (selectionsSaved === false && !demoMode) {
         setSelectionNotice("선택 기록은 저장되지 않았어요. 컷툰은 정상 저장됐습니다.");
       }
       // URL의 id는 세션이 생기기 전 임시값이었을 수 있으니 실제 id로 맞춘다 —
@@ -966,7 +974,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         setSaveError("먼저 온보딩에서 프로젝트를 만들어주세요");
         return;
       }
-      const selections = toPayload(selectionLogRef.current);
+      const selections = demoMode ? [] : toPayload(selectionLogRef.current);
       const res = await fetch("/api/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -980,7 +988,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setSaveError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+        setSaveError(apiErrorText(res.status, body, "저장에 실패했어요. 다시 시도해주세요"));
         return;
       }
 
@@ -988,7 +996,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         sessionId: string;
         selectionsSaved?: boolean;
       };
-      if (selectionsSaved === false) {
+      if (selectionsSaved === false && !demoMode) {
         setSelectionNotice("선택 기록은 저장되지 않았어요. 컷툰은 정상 저장됐습니다.");
       }
       if (savedId !== sessionId) {
@@ -1469,7 +1477,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 key={i}
                 type="button"
                 onClick={() => handleSelectCover(variant, i)}
-                disabled={demoMode && demoManifest != null && i !== demoManifest.cover_pick - 1}
+                disabled={demoMode && (demoManifest == null || i !== demoManifest.cover_pick - 1)}
                 className="overflow-hidden rounded-lg border border-zinc-200 hover:border-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-zinc-200"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- mock placeholder, next/image 불필요 */}

@@ -226,7 +226,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 `referenceUris`(`generate.ts`)가 호출부의 `referenceAssets` 에 `preset.assets.character_sheet` 를 합친다 — 호출부가 빼먹어도 시트가 들어간다. `toInputImages`(`generate.ts`)가 `readAsset` 으로 읽고, **못 읽은 것은 로그에 남기고**, 결과가 0장이면 **유료 호출 전에 던진다.** 시트 없이 만든 이미지는 P0 게이트를 통과할 수 없어 생성비만 버리는 것이기 때문이다.
 
-`style_refs` 는 일부러 넣지 않는다 — reference 이미지를 늘리면 시트의 비중이 묽어진다. 스타일은 프롬프트의 `Style:` 문장이 담당한다.
+화면(`app/(studio)/session/[id]/generate-client.ts` 의 `referenceAssetsOf`)은 시트와 `style_refs`(온보딩 참고 그림 원본)를 **함께** 보낸다 — 참고 그림을 올린 프로젝트는 표지·컷마다 둘 다 들어간다. `referenceUris` 는 받은 목록을 그대로 쓰고 시트가 빠졌을 때만 덧붙이며, 폴백으로 `style_refs` 를 읽지는 않는다. 그래서 참고 그림의 글자·로고가 결과에 따라 나올 수 있다. 참고 그림을 빼는 쪽으로 바꿀지는 발표 이후 과제다(#317). 스타일 서술은 프롬프트의 `Style:` 문장이 담당한다.
 
 **체이닝**
 
@@ -322,7 +322,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 - 폰트가 `Malgun Gothic`/`Apple SD Gothic Neo` 시스템 폰트에 의존한다(`compose.ts`의 `FONT_FAMILY`). 한글 폰트가 없는 리눅스 서버에 배포하면 글자가 깨질 수 있어, 배포 전 폰트 포함이 필요하다.
 - 글자 폭은 실제 폰트 측정이 아니라 추정치(한글 = 폰트 크기, 영문·숫자 = 0.55배)다.
-- 아주 긴 대사 경계·`center` 덮음은 #192로 해결. `center` 꼬리 방향(화자 쪽)은 #199(닫힘 2026-10-06) 후속으로 #235 함수·#299 Export 화자 연결(#285 좌우 배치 포함)이 머지됨.
+- 아주 긴 대사 경계·`center` 덮음은 #192로 해결. `center` 꼬리 방향(화자 쪽)은 #199(닫힘 2026-10-06) 후속으로 #235 함수 · #285 2인 컷 좌우 배치(이미지 프롬프트) · #299 Export 화자 연결이 머지됨.
 
 **프로젝트 폰트 (#209)** — 확인 API(`POST /api/preset/font/validate` → `validateFontUrl`(`lib/llm/font-probe.ts`))와 Export(`loadFont`(`lib/render/font.ts`))는 같은 공용 함수 `resolveFontSource`로 폰트를 고르고 읽는다. 정책은 호출하는 층이 정하고(둘 다 `httpsOnly`), 성공 응답의 `url`은 입력값 trim 그대로 둔다. 성공 보장은 검증 시점 기준이다 — 등록 뒤 원격 응답이 바뀌면 Export는 `loadFont`의 시스템 폰트 폴백으로 그린다.
 
