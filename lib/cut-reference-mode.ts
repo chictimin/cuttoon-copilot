@@ -23,3 +23,15 @@ export function cutReferenceMode(): CutReferenceMode {
   console.warn(`[cut-reference-mode] 모르는 값 "${raw}" — chain(A)으로 동작합니다`)
   return 'chain'
 }
+
+// #326 비교 실험(POC 한정): 기준 컷(레퍼런스 1장)에 참고 그림(style_refs)을 붙일지.
+// on(기본) = 지금처럼 [시트, ...style_refs], off = 시트만. 레퍼런스 생성 경로
+// (cover_variants count 1·kind reference)에만 걸린다 — 표지 3안·컷 첨부는 그대로.
+// 참고 그림 속 인물이 레퍼런스 인물로 끌려 들어오는지(#328) 따로 보려는 변수다.
+export function referenceStyleRefs(): boolean {
+  const raw = (process.env.NEXT_PUBLIC_REFERENCE_STYLE_REFS ?? '').trim().toLowerCase()
+  if (!raw || raw === 'on') return true
+  if (raw === 'off') return false
+  console.warn(`[cut-reference-mode] NEXT_PUBLIC_REFERENCE_STYLE_REFS 모르는 값 "${raw}" — on으로 동작합니다`)
+  return true
+}

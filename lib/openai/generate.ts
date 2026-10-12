@@ -16,7 +16,7 @@ import { readAsset, uploadAsset } from '../asset-store'
 import { elapsedSeconds, imageQuality, imageSetting, settingTag, timeImageCall, type ImageSetting } from './image-setting'
 import { generateWithComfyui } from './comfyui'
 import { projectForModel, type SubjectTag } from '../llm/subject-tags'
-import { cutReferenceMode } from '../cut-reference-mode'
+import { cutReferenceMode, referenceStyleRefs } from '../cut-reference-mode'
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -776,12 +776,21 @@ export function referenceCut(storyboard: MinimalStoryboard, regenNote?: string):
   }
 }
 
+// #326 실험 스위치(NEXT_PUBLIC_REFERENCE_STYLE_REFS): off 면 레퍼런스 첨부에서 style_refs 를
+// 빼고 시트만 남긴다. on(기본)이면 받은 목록 그대로라 기존과 같다.
+function referenceAttachments(referenceAssets: unknown[], preset: MinimalPreset): unknown[] {
+  if (referenceStyleRefs()) return referenceAssets
+  const styleRefs = preset.assets?.style_refs ?? []
+  return referenceAssets.filter((a) => !styleRefs.includes(a as string))
+}
+
 // 순수 함수로 내보낸다 — direction-check 스크립트(--dry-run)가 같은 프롬프트를 쓴다.
 export function buildReferencePrompt(storyboard: MinimalStoryboard, preset: MinimalPreset, regenNote?: string): string {
   return buildCutPrompt(storyboard, preset, referenceCut(storyboard, regenNote), { referencePanel: true })
 }
 
-// 첨부는 표지 3안과 같은 [시트, ...style_refs] — 레퍼런스는 그림체의 기준이기도 하다.
+// 첨부는 표지 3안과 같은 [시트, ...style_refs] — 레퍼런스는 그림체의 기준이기도 하다
+// (NEXT_PUBLIC_REFERENCE_STYLE_REFS=off 면 시트만, referenceAttachments).
 // 이어받기 없음(세션의 첫 그림). 돌려주는 continuationToken 은 C´에서 컷 1이 이어받을
 // 수 있게 둔다(쓸지는 화면이 정한다).
 export async function generateReference(input: {
@@ -796,7 +805,13 @@ export async function generateReference(input: {
   const regenNote =
     typeof input.regen_note === 'string' && input.regen_note.trim() ? input.regen_note : undefined
   const prompt = buildReferencePrompt(storyboard, preset, regenNote)
-  const { base64, responseId } = await callImageGeneration(prompt, input.referenceAssets, preset, setting, 'cover_variant')
+  const { base64, responseId } = await callImageGeneration(
+    prompt,
+    referenceAttachments(input.referenceAssets, preset),
+    preset,
+    setting,
+    'cover_variant'
+  )
   const { buffer, width, height } = await resizeToOutput(base64)
   const { assetUri } = await uploadAsset(buffer, 'image/png', 'reference.png')
   return { asset: assetUri, width, height, continuationToken: responseId, prompt, shot_type: 'bust', camera_angle: 'eye' }
@@ -910,6 +925,8 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
             : { shot_type: d.shot_type, camera_angle: d.camera_angle }
           return { ...d, prompt: buildCutPrompt(storyboard, preset, variantCut), zone: cut?.reserved_zone }
         })
+  // 레퍼런스(count 1)만 style_refs 스위치를 따른다. 3안은 받은 목록 그대로.
+  const variantRefs = input.count === 1 ? referenceAttachments(input.referenceAssets, preset) : input.referenceAssets
   // allSettled 안에서 읽으면 모르는 값이 "3안 모두 실패"로 뭉개진다 — 배치 전에 읽어
   // 설정 오류로 바로 던진다(#190).
   const setting = imageSetting()
@@ -946,7 +963,7 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
     // 프롬프트로 채우면 3안 비교가 깨진다.
     const settled = await Promise.allSettled(
       batch.map((i) =>
-        generateOneVariant(specs[i].prompt, input.referenceAssets, preset, setting, specs[i].zone)
+        generateOneVariant(specs[i].prompt, variantRefs, preset, setting, specs[i].zone)
       )
     )
 

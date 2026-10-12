@@ -30,7 +30,8 @@
  * 옵션: --session <id>(--run 필수, --dry-run은 생략 시 fake) · --cut1/--cut2/--cut3/--cut4 <shot,angle>
  *   (--cut1 생략 시 세션 값) · --note "<문장>" · --note-cut <2|3|4, 기본 3> · --out <폴더>(기본
  *   tmp/direction-check, 아래 시각 하위폴더) · --dry-run(기본) · --run ·
- *   --mode <아래, 기본 chain> · --cover-pick <1|2|3, 기본 1 — 표지 3안이 있는 모드에서 컷 1로 고를 안>
+ *   --mode <아래, 기본 chain> · --cover-pick <1|2|3, 기본 1 — 표지 3안이 있는 모드에서 컷 1로 고를 안> ·
+ *   --ref-style <on|off, 기본 on — 레퍼런스(C·C´)에 참고 그림을 붙일지. 제품은 NEXT_PUBLIC_REFERENCE_STYLE_REFS>
  *
  * --mode(lib/cut-reference-mode.ts 와 같은 값, 제품은 NEXT_PUBLIC_CUT_REFERENCE_MODE):
  * - chain(A): 표지 3안(S5 배정) → 고른 표지가 컷 1, 컷 2~4 이어받기, 첨부 [시트, ...style_refs]. 6장.
@@ -73,6 +74,7 @@ interface Args {
   run: boolean;
   mode: Mode;
   coverPick: 1 | 2 | 3;
+  refStyle: boolean;
 }
 
 type CastMember = { character_id?: string; role?: string; description?: string };
@@ -135,10 +137,15 @@ function parseArgs(argv: string[]): Args {
   if (pickRaw !== "1" && pickRaw !== "2" && pickRaw !== "3") {
     throw new Error(`--cover-pick 은 1|2|3 중 하나여야 합니다(받음: ${pickRaw})`);
   }
+  const refStyleRaw = get("--ref-style") ?? "on";
+  if (refStyleRaw !== "on" && refStyleRaw !== "off") {
+    throw new Error(`--ref-style 은 on|off 중 하나여야 합니다(받음: ${refStyleRaw})`);
+  }
   const cut1Raw = get("--cut1");
   return {
     mode: modeRaw as Mode,
     coverPick: Number(pickRaw) as 1 | 2 | 3,
+    refStyle: refStyleRaw === "on",
     session,
     cut1: cut1Raw !== undefined ? parseCutSpec(cut1Raw, "--cut1") : undefined,
     cutSpecs: {
@@ -269,6 +276,7 @@ async function main(): Promise<void> {
   }
   // 제품 코드와 같은 스위치 값을 깔아 둔다 — coverDirectionsForMode 가 이 값으로 표지 구도를 정한다.
   process.env.NEXT_PUBLIC_CUT_REFERENCE_MODE = args.mode;
+  process.env.NEXT_PUBLIC_REFERENCE_STYLE_REFS = args.refStyle ? "on" : "off";
   const { OUTPUT_SIZE, buildCutPrompt, buildReferencePrompt, coverDirectionsForMode } = await import("../lib/openai/generate");
   if (`${OUTPUT_SIZE.width}x${OUTPUT_SIZE.height}` !== IMAGE_SIZE) throw new Error("OUTPUT_SIZE 가 바뀌었습니다 — 이 스크립트의 IMAGE_SIZE 를 맞추세요");
 
@@ -290,8 +298,10 @@ async function main(): Promise<void> {
 
   if (refMode) {
     // C·C´: 레퍼런스 1장(첨부 [시트, ...style_refs], 이어받기 없음) → 컷 1~4는 [시트, 레퍼런스].
+    // 첨부는 [시트, ...style_refs], --ref-style off 면 시트만(generate.ts referenceAttachments 와 같다).
+    const refAttach = args.refStyle ? firstAttach : firstAttach.filter((u) => u === sheetUri);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    reqs.push({ file: "reference", kind: "reference", prompt: buildReferencePrompt(storyboard as any, loaded.preset as any), attach: firstAttach, prev: null, note: "레퍼런스(bust·eye)" });
+    reqs.push({ file: "reference", kind: "reference", prompt: buildReferencePrompt(storyboard as any, loaded.preset as any), attach: refAttach, prev: null, note: `레퍼런스(bust·eye, 참고 그림 ${args.refStyle ? "on" : "off"})` });
     for (const i of [1, 2, 3, 4]) {
       // C´: 화면(13986bc)과 같이 레퍼런스 응답에서 시작해 컷 1→4로 이어받는다.
       const chained = args.mode === "cover-ref-chain";
@@ -373,6 +383,7 @@ async function main(): Promise<void> {
   const manifest = {
     session: args.session,
     mode: args.mode,
+    refStyle: args.refStyle ? "on" : "off",
     ...(refMode ? {} : { coverPick: args.coverPick }),
     dryRun: !args.run,
     model: RESPONSES_MODEL,
