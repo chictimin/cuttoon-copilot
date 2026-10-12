@@ -16,6 +16,7 @@ import { readAsset, uploadAsset } from '../asset-store'
 import { elapsedSeconds, imageQuality, imageSetting, settingTag, timeImageCall, type ImageSetting } from './image-setting'
 import { generateWithComfyui } from './comfyui'
 import { projectForModel, type SubjectTag } from '../llm/subject-tags'
+import { cutReferenceMode } from '../cut-reference-mode'
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -64,6 +65,9 @@ interface MinimalCut {
   shot_type?: string
   camera_angle?: string
   time_of_day?: string
+  // #325 POC: 컷별 연출 메모(선택). 스키마는 바꾸지 않고 타입만 받는다 —
+  // storyboard.schema.json cuts 에 추가하지 않으므로 저장·검증 경로에 닿지 않는다.
+  direction_note?: string
   reserved_zone?: ReservedZone
   characters_in_frame?: MinimalCharacterInFrame[]
   generated_image?: string | null
@@ -132,6 +136,8 @@ interface MinimalPreset {
   // 시트의 비중이 그만큼 묽어진다. 스타일은 프롬프트의 Style 문장이 담당한다.
   assets?: {
     character_sheet?: string
+    // #326 C´: 컷 첨부에서 시트를 고를 때 참고 그림과 구분하는 데 쓴다(generateCut).
+    style_refs?: string[]
   }
   // #150: 프로젝트 고정 마스코트(preset.schema.json 최상위 선택 필드). 있으면 캐릭터
   // 시트가 이 인물을 그리고, 컷에서는 이 label 을 character_id 로 가진 인물만 시트와
@@ -171,6 +177,19 @@ function reservedZoneHint(zone: ReservedZone): string {
   )
 }
 
+// #325 POC: 연출 메모 정리. 줄바꿈·따옴표를 정리한다. 자릿수 상한은 여기서
+// 걸지 않는다 — 100자 제한은 브랜드 투영 "후" 최종 문자열에 거는 것이 호출부
+// 몫이다. 투영 전에 자르면 짧은 원문이 긴 category로 바뀌어 상한을 넘긴 채
+// 나가기 때문이다(예: 90자 입력이 투영 후 120자).
+// 따옴표를 걷는 이유: 메모는 사람이 쓰는 자유 문장이라 큰따옴표가 들어오면
+// 프롬프트 안의 다른 인용과 어긋나 모델이 문장 경계를 잘못 읽는다.
+function sanitizeDirectionNote(note: string): string {
+  return note
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/["“”]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 // enum 토큰을 그대로 넣으면 모델이 못 알아듣는다 — codex 4회 검증에서
 // "Shot type: closeup." 이 4/4 전신으로 나왔다. spec/vocabulary.json 의
 // prompt_hints 가 각 enum 값의 영어 서술문을 갖고 있으므로 그것을 쓴다.
@@ -221,7 +240,9 @@ export function buildCutPrompt(
   preset: MinimalPreset,
   cut?: MinimalCut,
   // 이 호출이 previous_response_id 로 앞 컷(표지 포함)을 이어받는가. generateCut 이 정한다.
-  opts: { continuesChain?: boolean } = {}
+  // referenceImage: #326 C´ — 기준 컷(컷 1) 그림을 시트 뒤에 첨부했는가.
+  // referencePanel: #326 기준 컷 자체를 그리는가(배경이 보이는 기준 그림 문장을 붙인다).
+  opts: { continuesChain?: boolean; referenceImage?: boolean; referencePanel?: boolean } = {}
 ): string {
   const s = preset.style
   // character_ratio 만 라벨이 뒤에 붙는 형태였다 — `${값} body proportions`. 힌트
@@ -284,19 +305,46 @@ export function buildCutPrompt(
     !!mascot && (cut?.characters_in_frame ?? []).some((c) => c.character_id === mascot.label)
   const mascotWho = mascot ? project(mascot.description).replace(/[.\s]+$/, '') : ''
   const sheetSentence = mascotInFrame
-    ? `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
-      `attached reference sheet. The sheet shows only the mascot (${mascotWho}) — draw the mascot ` +
-      `with the same face, hairstyle, outfit and body proportions as on the sheet. Everyone else ` +
-      `in this panel is a different person and must not take the sheet character's face, ` +
-      `hairstyle or outfit; ` +
-      (opts.continuesChain
-        ? `keep them looking exactly as they did in the earlier panels of this conversation ` +
-          `(same face, hairstyle and outfit) and follow the character descriptions below.`
-        : `follow the character descriptions below for who they are.`)
-    : `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
-      `attached reference sheet, but the person in this panel is a different character from ` +
-      `the one drawn on that sheet — follow the character description below for who they are.`
-  const parts = [sheetSentence, `Style: ${styleStr}.`]
+      ? `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
+        `attached reference sheet. The sheet shows only the mascot (${mascotWho}) — draw the mascot ` +
+        `with the same face, hairstyle, outfit and body proportions as on the sheet. Everyone else ` +
+        `in this panel is a different person and must not take the sheet character's face, ` +
+        `hairstyle or outfit; ` +
+        (opts.continuesChain
+          ? `keep them looking exactly as they did in the earlier panels of this conversation ` +
+            `(same face, hairstyle and outfit) and follow the character descriptions below.`
+          : `follow the character descriptions below for who they are.`)
+      : `Single webtoon/comic panel. Match the art style, line weight and coloring of the ` +
+        `attached reference sheet, but the person in this panel is a different character from ` +
+        `the one drawn on that sheet — follow the character description below for who they are.`
+  const parts = [sheetSentence]
+  // #326 C´: 첨부가 시트 + 기준 컷 두 장이면 모델이 어느 것이 무엇인지 모른다 —
+  // 순서로 짚어 준다. 기준 컷 구도는 따라 하지 말라고 적는다 — 이 컷의 구도는
+  // 아래 Framing 이 정한다.
+  // 이어받기가 있으면 아래 체인 문장("앞 컷과 똑같이")과 함께 나간다. 앞 컷들도 같은
+  // 기준 컷을 보고 그렸으므로 두 기준이 같은 인물을 가리켜 서로 어긋나지 않는다.
+  if (opts.referenceImage) {
+    parts.push(
+      `The second attached image is the reference panel of this same comic — draw the ` +
+        `same people (face, hair color, hairstyle, skin tone and outfit), the same setting and ` +
+        `the same color palette as in it, but compose this panel as described below, not as a ` +
+        `copy of the reference's framing.`
+    )
+  }
+  // #326 기준 컷: 이후 모든 컷이 인물·배경·색감을 여기서 가져간다. 그래서 인물만
+  // 크게 두지 말고 이야기 장소가 뒤에 보이게 한다(빈 배경이면 컷이 배경을 지어낸다).
+  // 예전 문장("This is the reference panel for the whole comic")은 기준 컷에만 검은 패널
+  // 테두리를 만들었다(세션 06f1a01d) — "panel" 을 그림 바깥 틀로 읽은 것으로 본다. 그래서
+  // panel 이라는 말을 빼고, 가장자리까지 채우고 테두리·틀을 그리지 말라고 명시한다.
+  if (opts.referencePanel) {
+    parts.push(
+      `The later images of this comic will copy the people, outfits, setting and colors from ` +
+        `this one, so show the setting of the story clearly behind the characters — a ` +
+        `recognizable, detailed background, not a plain or blurred one. Fill the whole image ` +
+        `edge to edge with no border, frame or outline around it.`
+    )
+  }
+  parts.push(`Style: ${styleStr}.`)
 
   // extract.ts(B②)의 캐릭터 시트 프롬프트와 같은 문구를 쓴다. 시트와 컷이 문자
   // 그대로 같은 지시를 받아야 스타일이 어긋나지 않는다.
@@ -384,6 +432,18 @@ export function buildCutPrompt(
     if (shot) parts.push(`Framing: ${shot}.`)
     const angle = hint('camera_angle', cut.camera_angle)
     if (angle) parts.push(`Camera: ${angle}.`)
+    // #325 POC: 연출 메모. Framing·Camera 문장 바로 뒤에 붙인다 — 구도·앵글
+    // 지시와 한 덩어리로 읽히게 하려는 자리다. 사람이 쓰는 자유 문장이라
+    // 소재 쪽과 같은 브랜드 투영(projectForModel)을 거친다. 100자 상한은
+    // 투영 후 최종 문자열에 건다(초과분 절단) — 투영 전에 자르면 짧은 원문이
+    // 긴 category로 바뀌어 상한을 넘긴 채 나간다. 고정 규칙(말풍선·
+    // 글자 금지, Do not include)은 그대로 맨 뒤에 둔다.
+    if (typeof cut.direction_note === 'string') {
+      const projected = project(sanitizeDirectionNote(cut.direction_note))
+      // 끝 마침표는 걷는다 — 아래에서 `.` 을 붙이므로 "웃기." 가 "웃기.." 로 나간다.
+      const note = Array.from(projected).slice(0, 100).join('').trim().replace(/[.。\s]+$/, '')
+      if (note) parts.push(`Director's note: ${note}.`)
+    }
     const time = hint('time_of_day', cut.time_of_day)
     if (time) parts.push(`Lighting: ${time}.`)
 
@@ -449,6 +509,16 @@ export function buildCutPrompt(
 // storyboard.cuts[].generated_image를 채운 뒤 다시 넘기는 방식으로 다음 컷을 요청한다.
 function nextUngeneratedCut(cuts?: MinimalCut[]): MinimalCut | undefined {
   return cuts?.find((c) => !c.generated_image)
+}
+
+// #326: 화면이 그릴 컷을 cut_index(target_cut_index)로 직접 짚는다. 있으면 그 컷을 쓰고,
+// 없거나 못 찾으면 기존 "그림 빈 첫 컷" 규칙.
+function targetCut(cuts: MinimalCut[] | undefined, cutIndex: unknown): MinimalCut | undefined {
+  if (typeof cutIndex === 'number') {
+    const hit = cuts?.find((c) => c.cut_index === cutIndex)
+    if (hit) return hit
+  }
+  return nextUngeneratedCut(cuts)
 }
 
 // 캐릭터 시트는 4컷 동일성(P0 게이트)의 유일한 방어선이다 — 스파이크 결론이
@@ -579,21 +649,50 @@ async function resizeToOutput(
 export const generateCut: ImageProvider['generateCut'] = async (input) => {
   const storyboard = (input.storyboard ?? {}) as MinimalStoryboard
   const preset = (input.preset ?? {}) as MinimalPreset
-  const cut = nextUngeneratedCut(storyboard.cuts)
+  const cut = targetCut(storyboard.cuts, input.target_cut_index)
   // 유료 호출 전에 읽어 모르는 값이면 여기서 멈춘다(#190).
   const setting = imageSetting()
 
+  // #326 컷 참조 방식(lib/cut-reference-mode.ts). 기본 C´(cover-ref-chain): reference_asset
+  // (확정한 기준 컷 = 컷 1)이 오면 첨부는 [시트, 기준 컷]만이고 continueFrom 이 오면 앞 컷을
+  // 이어받는다. reference_asset 이 없으면(또는 비상용 A=chain) main 과 같다 — 받은 첨부
+  // [시트, ...style_refs] + 앞 컷 이어받기.
+  const mode = cutReferenceMode()
+  const refAsset =
+    mode === 'cover-ref-chain' && typeof input.reference_asset === 'string' && input.reference_asset
+      ? input.reference_asset
+      : undefined
+  const continueFrom = input.continueFrom
+  const styleRefs = preset.assets?.style_refs ?? []
+  const referenceAssets = refAsset
+    ? [preset.assets?.character_sheet ?? input.referenceAssets.find((a) => !styleRefs.includes(a as string)), refAsset]
+        .filter((a): a is string => typeof a === 'string')
+    : input.referenceAssets
+
+  // #326 S9: 다시 그리기 자유 입력. 대상 컷(nextUngeneratedCut) 프롬프트의
+  // direction_note 자리에 덮어쓴다 — 정리·100자 상한·브랜드 투영은
+  // buildCutPrompt가 그대로 처리한다. 컷에 기존 direction_note가 있어도
+  // 이번 요청 값이 이긴다. 요청 복사본에만 싣고 저장하지 않는다.
+  // route가 문자열·비어 있지 않음을 걸러 오지만, 직접 호출도 있을 수 있어
+  // 여기서도 확인한다.
+  const regenNote =
+    typeof input.regen_note === 'string' && input.regen_note.trim()
+      ? input.regen_note
+      : undefined
+  const promptCut = regenNote !== undefined && cut ? { ...cut, direction_note: regenNote } : cut
+
   // ComfyUI 는 체이닝이 없어 앞 컷을 모른다(comfyui.ts 머리말) — 그때는 연속 문장을 넣지 않는다.
-  const prompt = buildCutPrompt(storyboard, preset, cut, {
-    continuesChain: !!input.continueFrom && setting !== 'comfyui',
+  const prompt = buildCutPrompt(storyboard, preset, promptCut, {
+    continuesChain: !!continueFrom && setting !== 'comfyui',
+    ...(refAsset && setting !== 'comfyui' ? { referenceImage: true } : {}),
   })
   const { base64, responseId } = await callImageGeneration(
     prompt,
-    input.referenceAssets,
+    referenceAssets,
     preset,
     setting,
     'cut',
-    input.continueFrom
+    continueFrom
   )
 
   const { buffer, width, height } = await resizeToOutput(base64, cut?.reserved_zone)
@@ -607,6 +706,25 @@ export const generateCut: ImageProvider['generateCut'] = async (input) => {
     continuationToken: responseId,
     prompt,
   }
+}
+
+// #326 POC: 기준 컷. 절충안(14f33ba)에서는 기준 컷이 곧 결과물 컷 1이다 —
+// 컷 1을 먼저 1장 그리고(cover_variants count 1), 컷 2~4가 이것을 참조한다(C´). 구도만 상반신(bust)·눈높이(eye)로
+// 고정한다. 인물·옷·배경·색감을 가장 많이 담는 구도라서다.
+//
+// 나머지는 컷 1 그대로다: 등장인물(characters_in_frame, 표정·포즈 포함 — 2인이면 #242 좌우
+// 규칙), narrative_beat(결과물 컷이라 이야기 역할도 실린다), time_of_day, reserved_zone(컷 1
+// 대사의 말풍선 자리, 명세 R1 — 크롭도 그 쪽 기준). 예전엔 cast 전원·대사 자리 없음으로 그려
+// 컷 1에 없는 조연이 나오고 말풍선 자리가 없었다(세션 06f1a01d).
+// 다시 생성 자유 입력은 화면이 컷 1 복사본의 direction_note 에 싣는다(그대로 따라온다).
+export function referenceCut(storyboard: MinimalStoryboard): MinimalCut {
+  const cut1 = storyboard.cuts?.[0]
+  return { ...(cut1 ?? { cut_index: 1 }), shot_type: 'bust', camera_angle: 'eye' }
+}
+
+// 순수 함수로 내보낸다 — direction-check 스크립트(--dry-run)가 같은 프롬프트를 쓴다.
+export function buildReferencePrompt(storyboard: MinimalStoryboard, preset: MinimalPreset): string {
+  return buildCutPrompt(storyboard, preset, referenceCut(storyboard), { referencePanel: true })
 }
 
 // #118: 부족분 재시도 on/off. 기본은 on 이다 — 정상 경로에서는 재시도가 아예
@@ -654,7 +772,11 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
   const storyboard = (input.storyboard ?? {}) as MinimalStoryboard
   const preset = (input.preset ?? {}) as MinimalPreset
   const cut = storyboard.cuts?.[0]
-  const prompt = buildCutPrompt(storyboard, preset, cut)
+  // #326: count 1 은 기준 컷(= 컷 1) 1장이다. 화면이 표지 3안 대신 보낸다. 기준 컷 프롬프트
+  // (buildReferencePrompt — 컷 1 그대로에 bust·eye 고정, 배경이 보이게, 테두리 금지)를 쓴다.
+  // 크롭·첨부는 3안과 같다(컷 1 reserved_zone, [시트, ...style_refs]).
+  const referenceShot = input.count === 1
+  const prompt = referenceShot ? buildReferencePrompt(storyboard, preset) : buildCutPrompt(storyboard, preset, cut)
   // allSettled 안에서 읽으면 모르는 값이 "3안 모두 실패"로 뭉개진다 — 배치 전에 읽어
   // 설정 오류로 바로 던진다(#190).
   const setting = imageSetting()
@@ -692,7 +814,8 @@ export const generateCoverVariants: ImageProvider['generateCoverVariants'] = asy
     let gained = 0
     for (const r of settled) {
       if (r.status === 'fulfilled') {
-        variants.push(r.value)
+        // 기준 컷은 실제로 쓴 구도를 함께 돌려준다(bust·eye 고정).
+        variants.push(referenceShot ? { ...r.value, shot_type: 'bust', camera_angle: 'eye' } : r.value)
         gained++
       } else {
         console.error('[generate] 표지 안 하나 실패', r.reason)
