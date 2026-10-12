@@ -1032,7 +1032,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       const manifest = await ensureDemoManifest();
       const src = manifest.covers[manifest.cover_pick - 1] ?? manifest.covers[0];
       if (!src) throw new Error("empty");
-      const candidate = { asset: src, image: src };
+      // 데모 후보도 같은 규칙 — 현재 컷1 값을 찍어 기존 동작(조립값 유지)과 같게 한다.
+      const candidate = { asset: src, image: src, time_of_day: storyboard.cuts[0]?.time_of_day };
       setRefCandidates([candidate]);
       setRefShown(0);
       applyCut1Candidate(candidate);
@@ -1079,9 +1080,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     try {
       const { variants, requested } = await generateCoverVariants(storyboard, preset, 1);
       if (variants.length === 0) throw new Error("empty");
-      setRefCandidates(variants);
+      // 상주 재확인: 최초 후보에도 요청 당시 실제 time_of_day를 찍는다.
+      // 없으면(미지정) undefined 그대로 — 복원도 그 값을 그대로 쓴다.
+      const stamped = { ...variants[0], time_of_day: storyboard.cuts[0]?.time_of_day };
+      setRefCandidates([stamped]);
       setRefShown(0);
-      applyCut1Candidate(variants[0]);
+      applyCut1Candidate(stamped);
       selectionLogRef.current = recordRound(selectionLogRef.current, variants, requested ?? variants.length);
     } catch {
       setGenError("기준 컷을 만드는 데 실패했어요. 다시 시도해주세요");
@@ -1089,7 +1093,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   }
 
   // #326 절충안: 후보 그림을 컷1에 입힌다(shot/camera는 bust/eye 고정).
-  // ③ 후보에 찍힌 시간대가 있으면 컷1 time_of_day도 함께 바꾼다. 없으면 기존값 유지.
+  // 상주 재확인: 후보 스냅샷 값을 그대로 복원한다 — "없으면 유지"에 기대지 않는다.
   function applyCut1Candidate(candidate: GeneratedCut) {
     const cutKey = storyboard?.cuts[0]?.cut_index;
     if (cutKey == null) return;
@@ -1104,7 +1108,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 generated_image: candidate.asset,
                 shot_type: "bust",
                 camera_angle: "eye",
-                ...(candidate.time_of_day ? { time_of_day: candidate.time_of_day } : {}),
+                time_of_day: candidate.time_of_day,
                 prompt_used: promptForCut(prev.subject, { ...c, shot_type: "bust", camera_angle: "eye" }),
               }
             : c
@@ -1383,13 +1387,11 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         note ? note : undefined
       );
       if (variants.length === 0) throw new Error("empty");
-      // ③ 이 후보를 만든 요청 시간대를 찍는다 — 서버가 돌려주지 않으므로 화면이
-      // 기억했다 확정·넘겨 보기 때 컷1에 함께 적용한다. auto면 요청 때 원본값이
-      // 그대로 쓰였으므로 찍지 않고 기존값을 유지한다.
-      const stamped = {
-        ...variants[0],
-        ...(refTimeOfDay !== "auto" ? { time_of_day: refTimeOfDay } : {}),
-      };
+      // 상주 재확인: auto 포함 모든 후보에 요청 당시 실제 time_of_day를 찍는다.
+      // auto면 요청 때 컷1 기존값이 그대로 쓰였으므로 그 값을 찍는다.
+      const actualTimeOfDay =
+        refTimeOfDay !== "auto" ? refTimeOfDay : storyboard.cuts[0]?.time_of_day;
+      const stamped = { ...variants[0], time_of_day: actualTimeOfDay };
       const list = [...refCandidates, stamped];
       setRefCandidates(list);
       setRefShown(list.length - 1);
