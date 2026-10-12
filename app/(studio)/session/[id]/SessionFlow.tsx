@@ -1697,6 +1697,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               disabled={redrawing}
               onChange={(e) => setRedrawForm({ ...form, note: e.target.value })}
               placeholder="예: 커피잔을 들고 있게"
+              maxLength={100}
               className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
             />
           </label>
@@ -1796,6 +1797,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               disabled={refGenerating}
               onChange={(e) => setRefNote(e.target.value)}
               placeholder="예: 커피잔을 들고 있게"
+              maxLength={100}
               className="flex-1 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
             />
           </label>
