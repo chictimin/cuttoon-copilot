@@ -1051,6 +1051,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // 캐시 그림은 정해 둔 소재 기준이라 소재가 다르면 바꾸지 않는다.
   async function switchToDemoCache() {
     if (!storyboard) return;
+    // #326 통합①: 캐시 전환 시 열려 있던 다시 그리기 모달을 닫는다(유료 호출 차단).
+    setRefModalOpen(false);
+    setRedrawCutIndex(null);
     try {
       const manifest = await fetchDemoManifest();
       if (storyboard.subject.trim() !== manifest.subject) {
@@ -1376,6 +1379,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
 
   // #326 구조변경: 레퍼런스 모달 열기. 컷 생성 시작 뒤에는 잠긴다(cover 단계에서만 연다).
   function openRefModal() {
+    // #326 통합①: 데모 모드에서는 기준컷 다시 만들기를 열 수 없다(유료 호출 차단).
+    if (demoMode) return;
     if (step !== "cover" || !storyboard) return;
     const cut1 = storyboard.cuts[0];
     setRefTimeOfDay(cut1?.time_of_day ?? "auto");
@@ -1388,6 +1393,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // 쓰되 구도·앵글은 bust·eye 고정, 인물 구성은 고정이다. 자유 입력은 요청
   // 복사본 컷1 direction_note + regen_note 키에만 싣고 저장하지 않는다.
   async function handleRefGenerate() {
+    if (demoMode) return;
     if (!storyboard || !preset) return;
     const note = refNote.trim();
     const refBoard: Board = {
@@ -1453,6 +1459,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // 대상 컷 generated_image만 비우고 모달 연출값을 덮어쓴다. 자유 입력은 이번
   // 요청에만 싣고 스토리보드에 저장하지 않는다. 만든 후보를 표시 후보로 둔다.
   async function handleRedrawGenerate() {
+    // #326 통합①: 데모 모드에서는 다시 그리기를 호출할 수 없다(유료 호출 차단).
+    if (demoMode) return;
     if (!storyboard || !preset || redrawCutIndex === null || !redrawForm) return;
     const cut = storyboard.cuts[redrawCutIndex];
     if (!cut) return;
@@ -2757,7 +2765,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   </button>
                 )}
                 {/* #326 절충안: 컷1=기준컷은 확정 뒤 잠금 — 다시 그리기 버튼 없음. 복원 뷰 제외. */}
-                {!isRestoredView && i !== 0 && redrawControls(i, cut.cut_index)}
+                {/* #326 통합①: 데모 모드에서는 다시 그리기를 숨긴다(유료 호출 차단). */}
+                {!isRestoredView && !demoMode && i !== 0 && redrawControls(i, cut.cut_index)}
               </div>
             ))}
           </div>
