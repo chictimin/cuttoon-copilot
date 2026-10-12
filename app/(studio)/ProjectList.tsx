@@ -64,13 +64,23 @@ export default function ProjectList() {
     <main className="flex min-h-screen flex-col items-center gap-6 p-8">
       <div className="flex w-full max-w-2xl items-center justify-between">
         <h1 className="text-2xl font-semibold">컷툰 코파일럿</h1>
-        <Link
-          href="/onboarding"
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-        >
-          새 프로젝트 만들기
-        </Link>
+        <div className="flex flex-col items-end gap-1">
+          <Link
+            href="/onboarding"
+            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+          >
+            새 프로젝트 만들기
+          </Link>
+          <span className="text-xs text-zinc-500">그림체부터 새로 정하기</span>
+        </div>
       </div>
+
+      {/* #316: 프로젝트가 1개 이상일 때만. 0개일 땐 아래 빈 화면 안내가 같은 역할을 한다. */}
+      {phase === "ready" && projects.length > 0 && (
+        <p className="w-full max-w-2xl text-sm text-zinc-500">
+          프로젝트는 그림체·마스코트·글꼴을 정해 둔 틀이에요. 한 번 만들면 매 편은 소재와 몇 가지 선택만 하면 돼요
+        </p>
+      )}
 
       {demoMode && (
         <div className="flex w-full max-w-2xl flex-wrap items-center justify-between gap-3 rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-800">
@@ -131,14 +141,21 @@ export default function ProjectList() {
                   {new Date(project.updatedAt).toLocaleDateString("ko-KR")}
                 </span>
               </Link>
-              <button
-                type="button"
-                onClick={() => handleStartSession(project)}
-                disabled={!project.presetId}
-                className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
-              >
-                새 컷툰 만들기
-              </button>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleStartSession(project)}
+                  disabled={!project.presetId}
+                  className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 disabled:opacity-40"
+                >
+                  새 컷툰 만들기
+                </button>
+                {project.presetId && (
+                  <span className="text-xs text-zinc-500">
+                    {project.sessionCount > 0 ? "이 그림체로 한 편 더" : "이 그림체로 첫 편 만들기"}
+                  </span>
+                )}
+              </div>
             </div>
           ))}
         </div>
