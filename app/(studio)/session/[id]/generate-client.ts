@@ -19,15 +19,32 @@ export interface GeneratedCut {
   image: string;
   /** 다음 컷 체이닝에 쓸 토큰(provider의 previous_response_id). 표지 3안엔 없다. */
   continuationToken?: string;
+  /**
+   * #326 S6: 표지 안의 실제 연출(서버가 결과에 실어 보낸 경우).
+   * 없으면(데모 캐시·이전 버전 결과) 컷1 값을 바꾸지 않는다.
+   */
+  shot_type?: string;
+  camera_angle?: string;
 }
 
 function referenceAssetsOf(preset: Preset): string[] {
   return [preset.assets.character_sheet, ...preset.assets.style_refs];
 }
 
-async function toGeneratedCut(result: { asset: string; continuationToken?: string }): Promise<GeneratedCut> {
+async function toGeneratedCut(result: {
+  asset: string;
+  continuationToken?: string;
+  shot_type?: string;
+  camera_angle?: string;
+}): Promise<GeneratedCut> {
   const image = await fetchAssetUrl(result.asset);
-  return { asset: result.asset, image, continuationToken: result.continuationToken };
+  return {
+    asset: result.asset,
+    image,
+    continuationToken: result.continuationToken,
+    ...(typeof result.shot_type === "string" ? { shot_type: result.shot_type } : {}),
+    ...(typeof result.camera_angle === "string" ? { camera_angle: result.camera_angle } : {}),
+  };
 }
 
 // URL 리졸브 없이 생성 결과(asset·continuationToken)만 받는다. #104: 리졸브
@@ -38,11 +55,25 @@ async function callGenerateCut(input: {
   preset: Preset;
   referenceAssets: string[];
   continueFrom?: string;
+  /** #326 S9: 다시 그리기 자유 입력. 요청에만 싣는다. */
+  regenNote?: string;
+  /** #326 구조변경: 확정 레퍼런스 asset. 있으면 reference_asset 키로 실어 보낸다. */
+  referenceAsset?: string;
+  /** #326 절충안: 그릴 컷 번호. 있으면 target_cut_index 키로 실어 보낸다. */
+  targetCutIndex?: number;
 }): Promise<{ asset: string; continuationToken?: string }> {
+  const { regenNote, referenceAsset, targetCutIndex, ...rest } = input;
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "cut", ...input }),
+    // 계약 키는 스네이크. 없으면 키를 빼고 보낸다.
+    body: JSON.stringify({
+      kind: "cut",
+      ...rest,
+      ...(regenNote ? { regen_note: regenNote } : {}),
+      ...(referenceAsset ? { reference_asset: referenceAsset } : {}),
+      ...(typeof targetCutIndex === "number" ? { target_cut_index: targetCutIndex } : {}),
+    }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -67,23 +98,32 @@ export interface CoverVariantsResult {
 
 // 표지 3안 — 독립 호출(PRD 6절: 체이닝하면 2안이 1안에 끌려가 서로 닮아버림).
 // storyboard는 cuts[0].generated_image가 아직 null인 상태로 넘겨야 한다.
-// count=3은 서버 계약이 리터럴로 고정하므로 여기서 따로 받지 않는다.
+// #326 구조변경: 레퍼런스 1장 용도로 count 1을 보낼 수 있다(1~3, 기본 3).
 export async function generateCoverVariants(
   storyboard: Storyboard,
-  preset: Preset
+  preset: Preset,
+  count: number = 3,
+  regenNote?: string
 ): Promise<CoverVariantsResult> {
   const referenceAssets = referenceAssetsOf(preset);
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "cover_variants", storyboard, preset, referenceAssets }),
+    body: JSON.stringify({
+      kind: "cover_variants",
+      storyboard,
+      preset,
+      referenceAssets,
+      count,
+      ...(regenNote ? { regen_note: regenNote } : {}),
+    }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error ?? "표지 생성에 실패했습니다");
   }
   const { result, requested } = (await res.json()) as {
-    result: Array<{ asset: string; continuationToken?: string }>;
+    result: Array<{ asset: string; continuationToken?: string; shot_type?: string; camera_angle?: string }>;
     requested?: number;
   };
 
@@ -115,34 +155,40 @@ export interface ChainedCutsCallbacks {
   onProgress?: (done: number, total: number) => void;
 }
 
-// 표지 선택 이후 나머지 3컷 — continuationToken(previous_response_id) 체이닝으로
-// 순차 생성한다. 매 호출 전 이전 컷까지 generated_image를 채운 storyboard를
-// 넘겨야 generateCut의 nextUngeneratedCut()이 다음 컷을 정확히 고른다.
+// #326 구조변경: 레퍼런스 확정 이후 전 컷(컷1 포함) —
+// continuationToken(previous_response_id) 체이닝으로 순차 생성한다.
+// 매 호출 전 이전 컷까지 generated_image를 채운 storyboard를 넘겨야
+// generateCut의 nextUngeneratedCut()이 다음 컷을 정확히 고른다.
 // 이미 generated_image가 채워진 컷은 건너뛰고 첫 미생성 컷부터 이어간다 — 중간
 // 실패 뒤 재시도가 이미 유료로 만든 컷을 다시 만들지 않게(#104).
 // onCut: 컷 하나가 끝날 때마다 호출 — 호출부가 즉시 저장해 두면 다음 컷이
-// 실패해도 앞 컷을 잃지 않는다. onProgress(done, total): "1/3" 표시용(#138).
+// 실패해도 앞 컷을 잃지 않는다. onProgress(done, total) 표시용(#138).
+// referenceAsset이 있으면 매 컷 요청에 reference_asset 키로 실어 보낸다.
 export async function generateChainedCuts(
   storyboard: Storyboard,
   preset: Preset,
   startContinueFrom: string,
-  { onCut, onProgress }: ChainedCutsCallbacks = {}
+  { onCut, onProgress }: ChainedCutsCallbacks = {},
+  referenceAsset?: string
 ): Promise<GeneratedCut[]> {
   const referenceAssets = referenceAssetsOf(preset);
   const cuts = storyboard.cuts.map((c) => ({ ...c }));
   const results: GeneratedCut[] = [];
   let continueFrom: string | undefined = startContinueFrom;
-  const total = cuts.length - 1;
-  let done = cuts.slice(1).filter((c) => c.generated_image).length;
+  // #326 절충안: 컷1=기준컷은 미리 만들어져 있어 건너뛴다. 진행 표시는 남은 컷 기준(n/3).
+  const total = cuts.filter((c) => !c.generated_image).length;
+  let done = 0;
   onProgress?.(done, total);
 
-  for (let i = 1; i < cuts.length; i++) {
+  for (let i = 0; i < cuts.length; i++) {
     if (cuts[i].generated_image) continue;
     const raw = await callGenerateCut({
       storyboard: { ...storyboard, cuts },
       preset,
       referenceAssets,
       continueFrom,
+      ...(referenceAsset ? { referenceAsset } : {}),
+      targetCutIndex: cuts[i].cut_index,
     });
     // 생성(유료 호출) 자체는 여기서 이미 끝났다 — asset과 다음 컷 체이닝
     // 토큰을 확보했으니 체이닝은 리졸브 결과와 무관하게 이어간다.
@@ -203,4 +249,28 @@ export function generateDemoCuts(
     onProgress?.(++done, total);
   }
   return results;
+}
+
+// #326 S9: 한 컷만 다시 그리기. 호출부는 요청용 storyboard 복사본(대상 컷의
+// generated_image만 비우고 모달 연출값으로 덮어쓴 것)과 앞 컷 체이닝 토큰·
+// 자유 입력만 넘긴다. nextUngeneratedCut이 비워진 대상 컷을 고른다.
+export async function generateRedrawnCut(input: {
+  storyboard: Storyboard;
+  preset: Preset;
+  continueFrom?: string;
+  regenNote?: string;
+  referenceAsset?: string;
+  targetCutIndex?: number;
+}): Promise<GeneratedCut> {
+  const referenceAssets = referenceAssetsOf(input.preset);
+  const raw = await callGenerateCut({
+    storyboard: input.storyboard,
+    preset: input.preset,
+    referenceAssets,
+    ...(input.continueFrom ? { continueFrom: input.continueFrom } : {}),
+    ...(input.regenNote ? { regenNote: input.regenNote } : {}),
+    ...(input.referenceAsset ? { referenceAsset: input.referenceAsset } : {}),
+    ...(typeof input.targetCutIndex === "number" ? { targetCutIndex: input.targetCutIndex } : {}),
+  });
+  return toGeneratedCut(raw);
 }
