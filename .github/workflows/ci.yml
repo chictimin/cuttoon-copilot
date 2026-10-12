@@ -56,7 +56,8 @@ jobs:
             lib/render/compose.demo.ts \
             lib/render/font.demo.ts \
             lib/render/demo-cache.demo.ts \
-            "app/(studio)/session/[id]/demo-cache-client.demo.ts"
+            "app/(studio)/session/[id]/demo-cache-client.demo.ts" \
+            "app/(studio)/api-error.demo.ts"
           do
             echo "::group::$f"
             npx tsx "$f" || { echo "::error::$f 실패"; status=1; }

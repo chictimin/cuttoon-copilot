@@ -13,6 +13,7 @@ import { resolveImageUrl } from "../../asset-url";
 import { beatLabel } from "../../ui-labels";
 import { useProjectFont } from "./useProjectFont";
 import type { CaptionPosition, Storyboard } from "../../session/[id]/storyboard-types";
+import { apiErrorText } from "../../api-error";
 
 type Anchor = { x: number; y: number };
 
@@ -299,7 +300,11 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
           setActionError("소재 태그를 저장하지 못했어요");
           setSaveRecovery(true);
         } else {
-          setActionError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+          setActionError(
+            apiErrorText(res.status, body, "저장에 실패했어요. 다시 시도해주세요", {
+              version_conflict: "다른 저장이 먼저 반영되었어요",
+            })
+          );
         }
         return false;
       }
@@ -337,7 +342,11 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setActionError(body?.error ?? "저장에 실패했어요. 다시 시도해주세요");
+        setActionError(
+          apiErrorText(res.status, body, "저장에 실패했어요. 다시 시도해주세요", {
+            version_conflict: "다른 저장이 먼저 반영되었어요",
+          })
+        );
         return;
       }
 
@@ -372,7 +381,7 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
       }
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setActionError(body?.error ?? "되돌리기에 실패했어요. 다시 시도해주세요");
+        setActionError(apiErrorText(res.status, body, "되돌리기에 실패했어요. 다시 시도해주세요"));
         return;
       }
 
@@ -400,12 +409,12 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
 
       if (res.status === 409) {
         const body = await res.json().catch(() => null);
-        setActionError(body?.error ?? "내보낼 이미지가 없어요");
+        setActionError(apiErrorText(res.status, body, "내보낼 이미지가 없어요"));
         return;
       }
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setActionError(body?.error ?? "내보내기에 실패했어요. 다시 시도해주세요");
+        setActionError(apiErrorText(res.status, body, "내보내기에 실패했어요. 다시 시도해주세요"));
         return;
       }
 
