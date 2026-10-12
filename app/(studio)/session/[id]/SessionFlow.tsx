@@ -789,6 +789,9 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       setGenError("데모 캐시를 불러오지 못했어요");
       return;
     }
+    // #307: 표지를 한 번 뽑은 뒤 전환해도 캐시 경로는 선택 기록을 남기지 않는다 — 쌓인 기록을 비운다.
+    selectionLogRef.current = createSelectionLog();
+    setSelectionNotice(null);
     setDemoMode(true);
     setCoverVariants(null);
     setCoverRequested(undefined);
@@ -896,7 +899,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
     setSaveError(null);
     setSaveRecovery(false);
     setSaving(true);
-    const selections = toPayload(selectionLogRef.current);
+    // #307: 데모 캐시 모드에서는 선택 기록을 보내지 않는다(서버가 selectionsSaved를 안 넣어 안내도 안 뜬다).
+    const selections = demoMode ? [] : toPayload(selectionLogRef.current);
     try {
       const res = await fetch("/api/session", {
         method: "POST",
@@ -929,7 +933,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         selectionsSaved?: boolean;
       };
       // #207: 선택 기록만 실패해도 세션은 저장됐다 — 흐름을 막지 않고 알리기만 한다.
-      if (selectionsSaved === false) {
+      if (selectionsSaved === false && !demoMode) {
         setSelectionNotice("선택 기록은 저장되지 않았어요. 컷툰은 정상 저장됐습니다.");
       }
       // URL의 id는 세션이 생기기 전 임시값이었을 수 있으니 실제 id로 맞춘다 —
@@ -966,7 +970,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         setSaveError("먼저 온보딩에서 프로젝트를 만들어주세요");
         return;
       }
-      const selections = toPayload(selectionLogRef.current);
+      const selections = demoMode ? [] : toPayload(selectionLogRef.current);
       const res = await fetch("/api/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -988,7 +992,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         sessionId: string;
         selectionsSaved?: boolean;
       };
-      if (selectionsSaved === false) {
+      if (selectionsSaved === false && !demoMode) {
         setSelectionNotice("선택 기록은 저장되지 않았어요. 컷툰은 정상 저장됐습니다.");
       }
       if (savedId !== sessionId) {
@@ -1469,7 +1473,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 key={i}
                 type="button"
                 onClick={() => handleSelectCover(variant, i)}
-                disabled={demoMode && demoManifest != null && i !== demoManifest.cover_pick - 1}
+                disabled={demoMode && (demoManifest == null || i !== demoManifest.cover_pick - 1)}
                 className="overflow-hidden rounded-lg border border-zinc-200 hover:border-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-zinc-200"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- mock placeholder, next/image 불필요 */}
