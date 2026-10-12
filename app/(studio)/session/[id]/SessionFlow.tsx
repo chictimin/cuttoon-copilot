@@ -134,12 +134,14 @@ function ThreeStepHandle<T extends string>({
   options,
   value,
   onChange,
+  disabled = false,
 }: {
   id: string;
   label: string;
   options: { id: T; label: string }[];
   value: T;
   onChange: (id: T) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -155,7 +157,8 @@ function ThreeStepHandle<T extends string>({
         value={options.findIndex((s) => s.id === value)}
         onChange={(e) => onChange(options[Number(e.target.value)].id)}
         aria-valuetext={options.find((s) => s.id === value)?.label}
-        className="w-full"
+        disabled={disabled}
+        className="w-full disabled:opacity-40"
       />
       <div className="flex justify-between text-xs">
         {options.map((s) => (
@@ -163,12 +166,21 @@ function ThreeStepHandle<T extends string>({
             key={s.id}
             type="button"
             onClick={() => onChange(s.id)}
-            className={s.id === value ? "font-semibold text-zinc-900" : "text-zinc-400"}
+            disabled={disabled}
+            className={
+              s.id === value
+                ? "font-semibold text-zinc-900 disabled:opacity-40"
+                : "text-zinc-400 disabled:opacity-40"
+            }
           >
             {s.label}
           </button>
         ))}
       </div>
+      {/* #326 통합③ S7: 데모 캐시 모드에서는 연출 변경이 반영되지 않아요. */}
+      {disabled && (
+        <p className="text-xs text-amber-700">캐시 모드에서는 연출 변경이 반영되지 않아요</p>
+      )}
     </div>
   );
 }
@@ -2215,6 +2227,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               options={DIRECTION_VARIETIES}
               value={directionVariety}
               onChange={setDirectionVariety}
+              disabled={demoMode}
             />
             {/* #326 절충안: 구도 변화는 컷 1(기준컷)에는 적용되지 않아요. */}
             <p className="-mt-2 text-xs text-zinc-400">구도 변화는 컷 1(기준 컷)에는 적용되지 않아요</p>
@@ -2328,6 +2341,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 options={DIRECTION_VARIETIES}
                 value={directionVariety}
                 onChange={setDirectionVariety}
+                disabled={demoMode}
               />
               <CtaPurposeSelect
                 id="conti-cta-purpose"
@@ -2357,10 +2371,15 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             <input
               type="checkbox"
               checked={showDetailEdit}
+              disabled={demoMode}
               onChange={(e) => setShowDetailEdit(e.target.checked)}
             />
             디테일 수정
           </label>
+          )}
+          {/* #326 통합③ S7: 데모 캐시 모드에서는 연출 변경이 반영되지 않아요. */}
+          {captionStatus === "ready" && demoMode && (
+            <p className="text-xs text-amber-700">캐시 모드에서는 연출 변경이 반영되지 않아요</p>
           )}
           {captionStatus === "loading" && <Spinner text="대사를 만들고 있어요..." />}
           {captionError && (
@@ -2422,7 +2441,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                           구도
                           <select
                             value={cut.shot_type}
-                            disabled={i === 0}
+                            disabled={i === 0 || demoMode}
                             onChange={(e) =>
                               updateCutDirection(i, { shot_type: e.target.value as ShotType })
                             }
@@ -2439,7 +2458,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                           앵글
                           <select
                             value={cut.camera_angle}
-                            disabled={i === 0}
+                            disabled={i === 0 || demoMode}
                             onChange={(e) =>
                               updateCutDirection(i, { camera_angle: e.target.value as CameraAngle })
                             }
