@@ -2235,7 +2235,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           <h1 className="text-xl font-semibold">{turns[turnIndex].question}</h1>
 
           <div className="flex w-full flex-col gap-2">
-            {turns[turnIndex].options.map((option) => {
+            {turns[turnIndex].options.map((option, optionIndex) => {
               // #334: 되돌아왔을 때 지금 고른 값을 보여 준다.
               const selected = answers[turns[turnIndex].key] === option;
               return (
@@ -2244,10 +2244,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   type="button"
                   aria-pressed={selected}
                   onClick={() => recordAnswer(option)}
+                  // #341 ③: 등장 효과(불투명도·이동). 클릭은 처음부터 가능하고, 지연 합계는 0.4초 이내.
+                  style={{ transitionDelay: `${Math.min(optionIndex, 3) * 80}ms` }}
                   className={
                     selected
-                      ? "rounded-md border border-zinc-900 bg-zinc-100 px-4 py-2.5 text-sm font-medium hover:bg-zinc-100"
-                      : "rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+                      ? "rounded-md border border-zinc-900 bg-zinc-100 px-4 py-2.5 text-sm font-medium hover:bg-zinc-100 motion-safe:transition-[opacity,translate] motion-safe:duration-150 motion-safe:starting:translate-y-1 motion-safe:starting:opacity-0"
+                      : "rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50 motion-safe:transition-[opacity,translate] motion-safe:duration-150 motion-safe:starting:translate-y-1 motion-safe:starting:opacity-0"
                   }
                 >
                   {/* #205: "→ CTA"는 "→ 마무리"로 보여주기만 하고, 보내는 값은 원래 키 그대로. */}
@@ -2368,7 +2370,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             <p className="w-full text-left text-xs text-zinc-400">프로젝트 정보를 불러오는 중이에요</p>
           )}
           <div className="flex w-full flex-col gap-2">
-            {CAPTION_TONES.map((tone) => {
+            {CAPTION_TONES.map((tone, toneIndex) => {
               // #334: 되돌아왔을 때 지금 고른 말투를 보여 준다.
               const selected = toneId === tone.id;
               return (
@@ -2378,10 +2380,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   disabled={!preset}
                   aria-pressed={selected}
                   onClick={() => handleSelectTone(tone.id)}
+                  // #341 ③: 등장 효과(불투명도·이동). 클릭은 처음부터 가능하고, 지연 합계는 0.4초 이내.
+                  style={{ transitionDelay: `${Math.min(toneIndex, 3) * 80}ms` }}
                   className={
                     selected
-                      ? "rounded-md border border-zinc-900 bg-zinc-100 px-4 py-2.5 text-sm font-medium hover:bg-zinc-100 disabled:opacity-40"
-                      : "rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50 disabled:opacity-40"
+                      ? "rounded-md border border-zinc-900 bg-zinc-100 px-4 py-2.5 text-sm font-medium hover:bg-zinc-100 disabled:opacity-40 motion-safe:transition-[opacity,translate] motion-safe:duration-150 motion-safe:starting:translate-y-1 motion-safe:starting:opacity-0"
+                      : "rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50 disabled:opacity-40 motion-safe:transition-[opacity,translate] motion-safe:duration-150 motion-safe:starting:translate-y-1 motion-safe:starting:opacity-0"
                   }
                 >
                   {tone.label}
