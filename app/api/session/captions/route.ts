@@ -1,7 +1,9 @@
 import {
   generateCutCaptions,
   generateSingleCutCaption,
+  normalizeDirectionVariety,
   type CaptionContext,
+  type DirectionVariety,
 } from "@/lib/llm/captions";
 import { isValidToneId } from "@/lib/llm/caption-tones";
 import { isValidCtaId } from "@/lib/llm/cta-presets";
@@ -87,12 +89,41 @@ function parseSubjectTags(value: unknown): SubjectTag[] | undefined {
 }
 
 /**
+ * 현재 연출 선택 필드 (#326 S3). 형태가 어긋나면 undefined 취급한다(400 아님 —
+ * direction_variety와 같은 관대 처리). shot_type·camera_angle 둘 다 비어 있지
+ * 않은 문자열이어야 한다.
+ */
+function parseCurrentDirection(
+  value: unknown
+): { shot_type: string; camera_angle: string } | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const { shot_type, camera_angle } = record;
+  if (
+    typeof shot_type !== "string" ||
+    shot_type.trim().length === 0 ||
+    typeof camera_angle !== "string" ||
+    camera_angle.trim().length === 0
+  ) {
+    return undefined;
+  }
+  return { shot_type: shot_type.trim(), camera_angle: camera_angle.trim() };
+}
+
+/**
  * F2 컷 대사 + F4 컷 연출 생성. 이미지 호출 전에 화면이 부른다.
- * body: { subject, flow, beats(4개), cast(description 목록), tone_id, context, cut_index?, supporting_id?, cta?, subject_tags? }
+ * body: { subject, flow, beats(4개), cast(description 목록), tone_id, context, cut_index?, supporting_id?, cta?, subject_tags?, direction_variety?, current_direction? }
  * - cta: {strength:"none"}(purpose_id는 보내도 무시) 또는 {strength:"soft"|"clear", purpose_id: null|유효 id}.
  *   없으면 clear + 프로젝트 기본 목적(현행). 형식 오류는 400(보정 없음). 컷별 다시 뽑기도 같은 입력.
  * - supporting_id: 조연 character_id(마스코트 조연이면 mascot.label). 없으면 "supporting".
  * - subject_tags: 소재 태그 선택 필드(issue #206 S3). 형태가 어긋나면 undefined 취급.
+ * - direction_variety(#326 S1): "calm"·"normal"·"dynamic". 생략·무효값 → "normal"(400 아님).
+ *   화면이 최초 생성·재요청·컷별 다시 뽑기 요청에 모두 같은 값을 실어 보내고,
+ *   서버는 프롬프트 경향 안내에 쓴다.
+ * - current_direction(#326 S3): {shot_type, camera_angle} — 컷별 다시 뽑기(cut_index 있음)에만
+ *   쓰고 4컷 생성에서는 무시한다. 형태가 어긋나면 undefined 취급(400 아님).
  * - cut_index(1~4)가 있으면 그 컷의 대사와 연출을 함께 다시 뽑아
  *   {captions:[1개], directions:[1개]}로 돌려준다.
  * - 없으면 4컷 전체를 {captions:[4개], directions:[4개]}로 돌려준다.
@@ -119,6 +150,8 @@ export async function POST(request: Request) {
     supporting_id,
     cta,
     subject_tags,
+    direction_variety,
+    current_direction,
   } = (body ?? {}) as Record<string, unknown>;
 
   if (typeof subject !== "string" || subject.trim().length === 0) {
@@ -176,6 +209,11 @@ export async function POST(request: Request) {
     return Response.json({ error: "beats 4번이 cta여야 합니다" }, { status: 400 });
   }
 
+  const parsedVariety: DirectionVariety = normalizeDirectionVariety(direction_variety);
+  // current_direction은 컷별 다시 뽑기(cut_index 있음)에만 전달한다 — 4컷 생성에서는 무시(#326 S3).
+  // 파싱은 위에서 미리 하되 전달 여부로 범위를 가른다.
+  const parsedCurrentDirection = parseCurrentDirection(current_direction);
+
   const input = {
     subject: subject.trim(),
     flow: flow.trim(),
@@ -188,6 +226,7 @@ export async function POST(request: Request) {
     ...(parseSubjectTags(subject_tags) !== undefined
       ? { subject_tags: parseSubjectTags(subject_tags) as SubjectTag[] }
       : {}),
+    direction_variety: parsedVariety,
   };
 
   try {
@@ -196,7 +235,12 @@ export async function POST(request: Request) {
       if (cut_index !== 1 && cut_index !== 2 && cut_index !== 3 && cut_index !== 4) {
         return Response.json({ error: "cut_index는 1~4여야 합니다" }, { status: 400 });
       }
-      const result = await generateSingleCutCaption(input, cut_index);
+      const result = await generateSingleCutCaption(
+        parsedCurrentDirection !== undefined
+          ? { ...input, current_direction: parsedCurrentDirection }
+          : input,
+        cut_index
+      );
       return Response.json(result);
     }
 

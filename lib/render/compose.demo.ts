@@ -247,6 +247,31 @@ async function main() {
     console.error(`FAIL 화자 합성 — ${(err as Error).message}`);
   }
 
+  // #326: 인물 0명 컷(과거·외부 데이터 대비)은 꼬리 생략. rounded·rect·cloud 모두
+  // 꼬리 있는 경우와 그림이 다르고, 크래시 없이 그려져야 한다.
+  try {
+    const cap = (bubble_type: "rounded" | "rect" | "cloud"): Caption =>
+      ({ text: "빈 컷 대사", bubble_type, position: "top_left" });
+    const bad: string[] = [];
+    for (const bubble_type of ["rounded", "rect", "cloud"] as const) {
+      const c = cap(bubble_type);
+      const [withTail, noTail] = await Promise.all([
+        composeCut(img, [c], [undefined]),
+        composeCut(img, [c], [undefined], null, [true]),
+      ]);
+      if (Buffer.compare(withTail, noTail) === 0) bad.push(bubble_type);
+    }
+    if (bad.length === 0) {
+      console.log("ok   0명 컷 꼬리 생략 — rounded·rect·cloud 모두 꼬리 있음과 다름");
+    } else {
+      failed++;
+      console.error(`FAIL 0명 컷 꼬리 생략 — 그림이 안 바뀜: ${bad.join(", ")}`);
+    }
+  } catch (err) {
+    failed++;
+    console.error(`FAIL 0명 컷 꼬리 생략 — ${(err as Error).message}`);
+  }
+
   // #259-8 D: bottom_* 말풍선은 화면 아래(0.70 근처)에 그려지고, 긴 대사도 캔버스 아래로
   // 나가지 않는다. 검은 1024 캔버스에 합성한 뒤 흰 픽셀(말풍선 몸통)이 있는 행 범위를 잰다.
   {
@@ -375,7 +400,7 @@ async function main() {
     console.error(`\n${failed}건 실패`);
     process.exit(1);
   }
-  console.log("\n35건 통과");
+  console.log("\n36건 통과");
 }
 
 main();

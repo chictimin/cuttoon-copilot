@@ -71,6 +71,11 @@ export interface Cut {
   cta_override?: string | null;
   generated_image: string | null;
   prompt_used: string | null;
+  /**
+   * POC 한정(#326 구조변경). 다시 그리기 자유 입력 등 컷별 추가 지시.
+   * 요청 복사본에만 싣고 저장 스토리보드에는 남기지 않는다.
+   */
+  direction_note?: string;
 }
 
 export interface Storyboard {

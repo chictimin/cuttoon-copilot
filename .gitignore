@@ -50,3 +50,6 @@ CLAUDE.md
 # Playwright MCP 브라우저 세션 산출물 (스크린샷·트레이스)
 .playwright-mcp/
 .env
+
+# #325 POC 연출 확인 산출물 (유료 생성 PNG·프롬프트, 로컬 전용)
+tmp/
