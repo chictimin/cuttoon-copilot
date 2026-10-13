@@ -640,6 +640,10 @@ export default function EditorFlow({ sessionId }: { sessionId: string }) {
           <span className="text-xs text-zinc-400">{savedAt}에 저장됨</span>
         )}
       </div>
+      {/* #355: 내보내기(게시 직전) 자리에서 게시 책임을 알린다. 문구만 — 로직 변경 없음. */}
+      <p className="max-w-md text-center text-xs text-zinc-500">
+        내보내기 전에 대사 표현(효능·효과 주장, 상표 등)을 확인해 주세요. 게시 책임은 사용자에게 있어요.
+      </p>
     </main>
   );
 }
