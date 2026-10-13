@@ -69,7 +69,7 @@ function checkWiring() {
   const coverCase = src.slice(src.indexOf("case 'cover_variants'"), src.indexOf("case 'cut'"));
   assert.match(
     coverCase,
-    /requested:\s*3/,
+    /requested:\s*(3|typeof count)/, // #326 POC: count 1~3
     "cover_variants 응답에 requested가 없습니다 — 화면이 부족분을 알 수 없습니다 (#108)"
   );
 }

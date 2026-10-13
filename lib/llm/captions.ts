@@ -73,6 +73,14 @@ export interface CaptionContext {
   cta_format: string;
 }
 
+// #326 S1 공유 계약: 구도 변화 핸들 3단. 서버는 생략·무효값 → "normal"(400 아님).
+// export 지점 — 화면(B)은 타입만 import한다.
+export type DirectionVariety = "calm" | "normal" | "dynamic";
+
+export function normalizeDirectionVariety(v: unknown): DirectionVariety {
+  return v === "calm" || v === "normal" || v === "dynamic" ? v : "normal";
+}
+
 export interface CaptionsRequest {
   subject: string;
   /** 선택된 flow의 JSON 키 (narrative-flow.json 원문). */
@@ -93,6 +101,16 @@ export interface CaptionsRequest {
    * none이면 purpose_id를 보내도 무시한다.
    */
   cta?: CtaRequest;
+  /**
+   * 구도 변화 핸들 (#326 S1). 생략·무효값 → "normal".
+   * 최초 4컷 생성·검증 재요청·컷별 다시 뽑기 모두 같은 값을 싣는다.
+   */
+  direction_variety?: DirectionVariety;
+  /**
+   * 컷별 다시 뽑기 시 그 컷의 현재 연출 (#326 S3).
+   * 단일 컷 재생성에서만 프롬프트에 반영하고 4컷 생성에서는 무시한다.
+   */
+  current_direction?: { shot_type: string; camera_angle: string };
   /**
    * 소재 태그 (issue #206 S3). 선택 필드. 서버가 subject를 다시 파싱하고
    * category는 순서대로 대응시킨다. 형태가 어긋나면 route가 undefined로 둔다.
@@ -591,12 +609,20 @@ function resolvePurposeId(input: CaptionsRequest): string | undefined {
 /**
  * <맥락>의 CTA 형식 줄 (issue #205 K0). preset id를 그대로 넣지 않고 목적
  * 라벨·template 문장을 넣는다. id가 목록에 없으면 fallback_id 규칙 그대로.
+ * #339: template은 그대로 옮겨 쓸 문구가 아니라 예시다. 강도별로 나눔 —
+ * clear는 목적 이름의 핵심 행동 단어를 4번 컷 대사에 그대로 포함하고 권유
+ * 어미로, soft는 목적 암시만.
+ * none은 주입하지 않는다(호출부에서 이미 제외, 여기서는 빈 문자열).
  */
-function ctaContextLine(ctaFormat: string): string {
+function ctaContextLine(ctaFormat: string, strength: CtaStrength): string {
+  if (strength === "none") return "";
   const preset =
     getCtaPresetById(ctaFormat) ?? getCtaPresetById(getFallbackCtaId());
   if (!preset) return `CTA 형식: ${ctaFormat}`;
-  return `CTA 형식: ${preset.label}: ${preset.template}`;
+  if (strength === "soft") {
+    return `CTA 목적: ${preset.label} (예: "${preset.template}" — 이 문구를 그대로 쓰지 말고, 같은 목적을 자연스럽게 암시하는 표현으로 자유롭게 새로 쓰시오. 다른 목적으로 바꾸지 마시오)`;
+  }
+  return `CTA 목적: ${preset.label} (예: "${preset.template}" — 이 예시를 그대로 옮기지 말고, 4번 컷 대사에 목적 이름의 핵심 행동 단어(예: "상담 신청 유도"의 "상담·신청", "수강/모집 신청 유도"의 "신청·수강")를 반드시 그대로 포함해 권유 어미로 끝내는 한 줄을 앞 컷 맥락과 인물 말투에 맞게 새로 쓰시오)`;
 }
 
 /**
@@ -612,6 +638,37 @@ function strengthBlock(strength: CtaStrength): string {
     return `\n<CTA 강도: 은근>\n- 권유가 필요하면 앞 컷 맥락에 이어지는 인물의 자연스러운 한 줄로만 쓰시오. 명령형 광고 문구·링크·가격을 쓰지 마시오. 목적은 암시만 하시오.\n`;
   }
   return "";
+}
+
+/** 구도 변화 핸들을 정한다. 생략·무효값 → "normal"(#326 S1). */
+function resolveVariety(input: CaptionsRequest): DirectionVariety {
+  return normalizeDirectionVariety(input.direction_variety);
+}
+
+/**
+ * 구도 변화 단계별 경향 안내 (#326 S1, 명세 표 문구). 고정 규칙이 아니라
+ * 참고용 지시이며, 응답이 안내와 달라도 고치지 않는다(보정 없음).
+ */
+function varietyBlock(variety: DirectionVariety): string {
+  if (variety === "calm") {
+    return `\n<구도 변화: 차분하게>\n- 구도·앵글 변화를 적게, 눈높이 위주로 고르시오.\n`;
+  }
+  if (variety === "dynamic") {
+    return `\n<구도 변화: 다이내믹하게>\n- 컷마다 구도를 크게 바꾸고, 위·아래 앵글을 적극적으로 쓰시오.\n`;
+  }
+  return `\n<구도 변화: 보통>\n- 장면 흐름에 맞게 구도를 섞으시오.\n`;
+}
+
+/**
+ * 단일 컷 다시 뽑기용 현재 연출 지시 (#326 S3). 4컷 생성(wanted 4개)이나
+ * 연출 값 없음·빈 문자열이면 빈 문자열(무시)이다.
+ */
+function currentDirectionLine(input: CaptionsRequest, wanted: number[]): string {
+  if (wanted.length !== 1) return "";
+  const shot = normalizeModelString(input.current_direction?.shot_type);
+  const angle = normalizeModelString(input.current_direction?.camera_angle);
+  if (!shot || !angle) return "";
+  return `- cut ${wanted[0]}의 현재 연출은 구도 ${shot}·앵글 ${angle}이다. 이 연출(구도·앵글)에 맞는 대사를 쓰시오.\n`;
 }
 
 /** 재요청에도 강도별 대사 지시를 싣는다. clear는 빈 문자열(현행 그대로). */
@@ -676,7 +733,7 @@ function buildPrompt(input: CaptionsRequest, wanted: number[]): string {
   const ctaLine =
     strength === "none"
       ? ""
-      : `${ctaContextLine(resolvePurposeId(input) ?? input.context.cta_format)}\n`;
+      : `${ctaContextLine(resolvePurposeId(input) ?? input.context.cta_format, strength)}\n`;
   // S3: 모델에 보내는 소재·cast 서술은 서버가 받은 subject로 다시 파싱해 투영한다.
   const projectedSubject = projectForModel(input.subject, input.subject, input.subject_tags);
   const projectedFlow = projectForModel(input.flow, input.subject, input.subject_tags);
@@ -708,8 +765,7 @@ ${tone ? `${tone.label}: ${tone.description}` : input.tone_id}
 분야: ${input.context.industry.join(", ")}
 관심사: ${input.context.interests.join(", ")}
 ${ctaLine}</맥락>
-${strengthBlock(resolveStrength(input))}${tagInstruction}
-허용 목록(JSON 배열 그대로, 다른 값 금지):
+${strengthBlock(resolveStrength(input))}${tagInstruction}${varietyBlock(resolveVariety(input))}허용 목록(JSON 배열 그대로, 다른 값 금지):
 - shot_type: ${JSON.stringify(VOCAB.shot_type)}
 - camera_angle: ${JSON.stringify(VOCAB.camera_angle)}
 - time_of_day: ${JSON.stringify(VOCAB.time_of_day)} (또는 null)
@@ -722,7 +778,7 @@ ${strengthBlock(resolveStrength(input))}${tagInstruction}
 
 대상 컷:
 ${cutLines}
-
+${currentDirectionLine(input, wanted)}
   {
     "captions": [
       { "cut_index": 1, "text": "컷 대사", "speaker": "protagonist" }
@@ -730,8 +786,8 @@ ${cutLines}
   "directions": [
     {
       "cut_index": 1,
-      "shot_type": "closeup",
-      "camera_angle": "eye",
+      "shot_type": "waist",
+      "camera_angle": "low",
       "time_of_day": "morning",
       "characters": [
         { "character_id": "protagonist", "expression": "surprised", "pose": "stand" }
@@ -741,6 +797,8 @@ ${cutLines}
     }
   ]
 }
+
+위 예시는 JSON 형식만 보여준다. 구도·앵글 값은 예시일 뿐 <구도 변화> 안내에 따라 고르시오.
 
 요구사항:
 - 대상 컷마다 대사 1개·연출 1세트. cut_index는 대상 컷 번호 그대로.
@@ -785,15 +843,14 @@ function buildRetryPrompt(
 <소재>
 ${projectedRetrySubject}
 </소재>
-${retryTagInstruction}
-직전 응답은 아래 사유로 무효입니다. 해당 컷만 JSON으로 다시 반환하세요. 다른 텍스트는 없이 JSON만.
+${retryTagInstruction}${varietyBlock(resolveVariety(input))}직전 응답은 아래 사유로 무효입니다. 해당 컷만 JSON으로 다시 반환하세요. 다른 텍스트는 없이 JSON만.
 
 무효 사유:
 ${reasons.map((r) => `- ${r}`).join("\n")}
 
 대상 컷:
 ${cutLines}
-
+${currentDirectionLine(input, wanted)}
   {
     "captions": [
       { "cut_index": ${wanted[0] ?? 1}, "text": "컷 대사", "speaker": "protagonist" }
@@ -801,8 +858,8 @@ ${cutLines}
   "directions": [
     {
       "cut_index": ${wanted[0] ?? 1},
-      "shot_type": "closeup",
-      "camera_angle": "eye",
+      "shot_type": "bust",
+      "camera_angle": "high",
       "time_of_day": "morning",
       "characters": [
         { "character_id": "protagonist", "expression": "surprised", "pose": "stand" }
@@ -812,6 +869,8 @@ ${cutLines}
     }
   ]
 }
+
+위 예시는 JSON 형식만 보여준다. 구도·앵글 값은 예시일 뿐 <구도 변화> 안내에 따라 고르시오.
 
 요구사항:
 - 적힌 컷마다 필요한 쪽(대사·연출)만 정확히. cut_index는 대상 컷 번호 그대로.
