@@ -1,15 +1,16 @@
 /**
  * 발표용 데모 캐시(#239·#240) 만들기 도구.
  *
- * 골든패스를 한 바퀴 돈 세션 하나를 받아, 그 세션의 이미지 6장(표지 3안 + 컷 2·3·4)을
+ * 골든패스를 한 바퀴 돈 세션 하나를 받아, 그 세션의 저장본 이미지 4장(컷 1 = 기준 컷 + 컷 2·3·4)을
  * public/demo-cache/ 바로 아래 PNG 로 내려받고 manifest.json 을 쓴다. 읽는 쪽은
- * lib/render/demo-cache.ts(manifestImageRefs·readDemoCacheImage)다.
+ * lib/render/demo-cache.ts(manifestImageRefs·readDemoCacheImage)와 화면 데모 모드(demo-mode.ts)다.
  *
  * - 이미지를 만들지 않는다(생성 호출 0). 네트워크는 Supabase 읽기뿐이고 DB·Storage 에 쓰지 않는다.
- * - 표지 3안은 세션 저장본에 없다 — 저장본엔 고른 표지(컷 1)만 남는다. 3안은 표지 선택
- *   기록(selections 테이블, #207)의 candidate_assets 에 있다. 화면이 표지 후보를 보여줄 때
- *   recordRound 로 한 라운드를 열고, 고르면 markSelected 로 닫는다(lib/session/selection-log.ts,
- *   toPayload 가 cut_index 1 로 보낸다). 다시 뽑기를 했다면 마지막 selected 라운드가 최종 표지다.
+ * - #326 프리뷰 흐름: 표지 3안 대신 기준 컷 1장이 컷 1이다. 화면 데모 모드는 manifest
+ *   covers[cover_pick-1] 1장만 컷 1로 쓰므로 covers 는 저장본 컷 1 한 장(cover-1.png), cover_pick 1.
+ * - 선택 기록(selections, cut_index 1)은 교차 확인용이다. 기준 컷은 후보 1장 라운드로 기록되고
+ *   확정한 라운드가 selected 다. 마지막 selected 라운드의 selected_asset 이 컷 1과 다르면 점검 실패,
+ *   기록이 없으면 경고만 내고 진행한다.
  * - 점검이 하나라도 어긋나면 파일을 하나도 쓰지 않고 종료 코드 1 로 끝난다.
  *
  * 실행(실제 세션, Supabase 읽기에 .env 가 필요하다):
@@ -17,8 +18,11 @@
  * 가짜 데이터로 흐름만(네트워크·.env 없음, 임시 폴더에 씀):
  *   npx tsx --conditions=react-server scripts/demo-cache-build.ts --dry --session fake
  *   --dry-case two-person | pick-mismatch | bad-size  → 점검 실패 시나리오
+ *   --dry-case no-selection  → 선택 기록 없음(경고만, 통과)
  *
- * 옵션: --out <폴더>(기본 public/demo-cache, --dry 는 임시 폴더) · --cover-pick <1~3>(기본 1)
+ * 옵션: --out <폴더>(기본 public/demo-cache, --dry 는 임시 폴더)
+ *   · --image-provider <openai|openai-low|comfyui> — 세션을 실제로 그린 설정(manifest generated.image_provider).
+ *     안 주면 .env 의 IMAGE_PROVIDER 값을 쓰고 경고한다(서버를 다른 값으로 덮어써 생성했으면 어긋난다).
  */
 
 import { execSync } from "node:child_process";
@@ -30,16 +34,19 @@ import sharp from "sharp";
 // #240 확정 고정값. 소재는 sessions.subject(정본) 문자열과 글자 그대로 비교한다.
 const EXPECTED_SUBJECT = "[리브라이블리 앱]으로 퇴근 후 10분 무릎 스트레칭";
 const EXPECTED_SIZE = { width: 1024, height: 1024 } as const;
-const COVER_FILES = ["cover-1.png", "cover-2.png", "cover-3.png"] as const;
+const COVER_FILES = ["cover-1.png"] as const;
+const COVER_PICK = 1;
 const CUT_FILES = { "2": "cut-2.png", "3": "cut-3.png", "4": "cut-4.png" } as const;
 const MANIFEST_VERSION = 1;
+// lib/openai/image-setting.ts 의 SETTINGS 와 같은 값.
+const IMAGE_PROVIDERS = ["openai", "openai-low", "comfyui"] as const;
 
 interface Args {
   session: string;
   dry: boolean;
-  dryCase?: "two-person" | "pick-mismatch" | "bad-size";
+  dryCase?: "two-person" | "pick-mismatch" | "bad-size" | "no-selection";
   out?: string;
-  coverPick: number;
+  imageProvider?: string;
 }
 
 interface CutLike {
@@ -53,8 +60,8 @@ interface Loaded {
   subject: string;
   subjectTags: unknown;
   cuts: CutLike[];
-  /** 마지막 selected 표지 라운드. 없으면 null. */
-  cover: { candidateAssets: string[]; selectedAsset: string | null; variantIndex: number | null } | null;
+  /** 마지막 selected 기준 컷(cut_index 1) 라운드. 없으면 null. */
+  cover: { selectedAsset: string | null } | null;
   readAsset: (uri: string) => Promise<Buffer | null>;
 }
 
@@ -66,17 +73,19 @@ function parseArgs(argv: string[]): Args {
   const session = get("--session");
   if (!session) throw new Error("--session <세션 id> 가 필요합니다");
   const dryCase = get("--dry-case");
-  if (dryCase && !["two-person", "pick-mismatch", "bad-size"].includes(dryCase)) {
-    throw new Error(`--dry-case 는 two-person | pick-mismatch | bad-size 중 하나입니다: ${dryCase}`);
+  if (dryCase && !["two-person", "pick-mismatch", "bad-size", "no-selection"].includes(dryCase)) {
+    throw new Error(`--dry-case 는 two-person | pick-mismatch | bad-size | no-selection 중 하나입니다: ${dryCase}`);
   }
-  const coverPick = Number(get("--cover-pick") ?? "1");
-  if (![1, 2, 3].includes(coverPick)) throw new Error("--cover-pick 은 1·2·3 중 하나입니다");
+  const imageProvider = get("--image-provider");
+  if (imageProvider !== undefined && !(IMAGE_PROVIDERS as readonly string[]).includes(imageProvider)) {
+    throw new Error(`--image-provider 는 ${IMAGE_PROVIDERS.join(" | ")} 중 하나입니다: ${imageProvider}`);
+  }
   return {
     session,
     dry: argv.includes("--dry"),
     dryCase: dryCase as Args["dryCase"],
     out: get("--out"),
-    coverPick,
+    imageProvider,
   };
 }
 
@@ -93,14 +102,14 @@ async function loadReal(sessionId: string): Promise<Loaded> {
   // selections 를 읽는 함수가 lib/db 에 없어 여기서 한 번만 조회한다(읽기 전용 select).
   const { data, error } = await getDb()
     .from("selections")
-    .select("round, candidate_assets, selected_asset, variant_index, outcome")
+    .select("round, selected_asset, outcome")
     .eq("session_id", sessionId)
     .eq("cut_index", 1)
     .eq("outcome", "selected")
     .order("round", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) throw new Error(`표지 선택 기록 조회 실패: ${error.message}`);
+  if (error) throw new Error(`기준 컷 선택 기록 조회 실패: ${error.message}`);
 
   const sb = saved.storyboard as unknown as { cuts?: CutLike[]; subject_tags?: unknown };
   return {
@@ -108,13 +117,7 @@ async function loadReal(sessionId: string): Promise<Loaded> {
     subject: saved.storyboard.subject,
     subjectTags: sb.subject_tags ?? null,
     cuts: sb.cuts ?? [],
-    cover: data
-      ? {
-          candidateAssets: Array.isArray(data.candidate_assets) ? (data.candidate_assets as string[]) : [],
-          selectedAsset: (data.selected_asset as string | null) ?? null,
-          variantIndex: (data.variant_index as number | null) ?? null,
-        }
-      : null,
+    cover: data ? { selectedAsset: (data.selected_asset as string | null) ?? null } : null,
     readAsset,
   };
 }
@@ -124,39 +127,41 @@ async function loadDry(args: Args): Promise<Loaded> {
   const png = (w: number, h: number, color: string) =>
     sharp({ create: { width: w, height: h, channels: 3, background: color } }).png().toBuffer();
   const assets = new Map<string, Buffer>();
-  const colors = ["#f4a261", "#e9c46a", "#2a9d8f", "#264653", "#e76f51", "#8ab17d"];
+  const colors = ["#f4a261", "#2a9d8f", "#e76f51", "#8ab17d"];
   const uris = colors.map((_, i) => `asset://dry-${i + 1}`);
   for (let i = 0; i < uris.length; i++) {
-    const bad = args.dryCase === "bad-size" && i === 4;
+    const bad = args.dryCase === "bad-size" && i === 2;
     assets.set(uris[i], await png(bad ? 1536 : 1024, 1024, colors[i]));
   }
-  const covers = uris.slice(0, 3);
-  // 컷 1 = 고른 표지. pick-mismatch 면 2번째 안을 고른 세션으로 만든다(기대값 1과 어긋남).
-  const pickedIndex = args.dryCase === "pick-mismatch" ? 1 : args.coverPick - 1;
   const one = [{ character_id: "protagonist" }];
   const cuts: CutLike[] = [
-    { cut_index: 1, characters_in_frame: one, generated_image: covers[pickedIndex] },
-    { cut_index: 2, characters_in_frame: one, generated_image: uris[3] },
+    { cut_index: 1, characters_in_frame: one, generated_image: uris[0] },
+    { cut_index: 2, characters_in_frame: one, generated_image: uris[1] },
     {
       cut_index: 3,
       characters_in_frame: args.dryCase === "two-person" ? [...one, { character_id: "supporting" }] : one,
-      generated_image: uris[4],
+      generated_image: uris[2],
     },
-    { cut_index: 4, characters_in_frame: one, generated_image: uris[5] },
+    { cut_index: 4, characters_in_frame: one, generated_image: uris[3] },
   ];
+  // pick-mismatch: 선택 기록이 다른 후보(버린 기준 컷)를 확정한 것으로 남은 세션.
+  const selectedAsset = args.dryCase === "pick-mismatch" ? "asset://dry-discarded" : uris[0];
   return {
     projectId: "dry-project",
     subject: EXPECTED_SUBJECT,
     subjectTags: [{ raw: "리브라이블리 앱", category: "건강 관리 앱" }],
     cuts,
-    cover: { candidateAssets: covers, selectedAsset: covers[pickedIndex], variantIndex: pickedIndex },
+    cover: args.dryCase === "no-selection" ? null : { selectedAsset },
     readAsset: async (uri) => assets.get(uri) ?? null,
   };
 }
 
 // --- 점검 ---
-async function check(loaded: Loaded, coverPick: number): Promise<{ problems: string[]; files: Map<string, Buffer> }> {
+async function check(
+  loaded: Loaded
+): Promise<{ problems: string[]; warnings: string[]; files: Map<string, Buffer> }> {
   const problems: string[] = [];
+  const warnings: string[] = [];
   const files = new Map<string, Buffer>();
 
   if (loaded.subject !== EXPECTED_SUBJECT) problems.push("소재 문자열이 #240 고정값과 다릅니다");
@@ -168,19 +173,15 @@ async function check(loaded: Loaded, coverPick: number): Promise<{ problems: str
     if (n !== 1) problems.push(`컷 ${c.cut_index}: 등장 인물이 ${n}명입니다 — 조연 없음(1인)이어야 합니다`);
   });
 
-  const cover = loaded.cover;
-  if (!cover) {
-    problems.push("표지 선택 기록(selections, cut_index 1, selected)이 없습니다");
-  } else {
-    if (cover.candidateAssets.length !== 3) problems.push(`표지 후보가 3안이 아닙니다(${cover.candidateAssets.length})`);
-    const picked = cover.candidateAssets[coverPick - 1];
-    const cut1 = cuts.find((c) => c.cut_index === 1)?.generated_image;
-    if (!picked || picked !== cut1) problems.push(`컷 1 이미지가 표지 ${coverPick}번째 안과 다릅니다(cover_pick 불일치)`);
-    if (cover.selectedAsset !== cut1) problems.push("선택 기록의 selected_asset 이 컷 1 이미지와 다릅니다");
+  const cut1 = cuts.find((c) => c.cut_index === 1)?.generated_image;
+  if (!loaded.cover) {
+    warnings.push("기준 컷 선택 기록(selections, cut_index 1, selected)이 없습니다 — 저장본 컷 1을 그대로 씁니다");
+  } else if (loaded.cover.selectedAsset !== cut1) {
+    problems.push("선택 기록의 selected_asset 이 컷 1 이미지와 다릅니다(확정한 기준 컷이 아님)");
   }
 
   const wanted: [string, string | null | undefined][] = [
-    ...COVER_FILES.map((f, i): [string, string | undefined] => [f, cover?.candidateAssets[i]]),
+    [COVER_FILES[0], cut1],
     ...(Object.entries(CUT_FILES) as [keyof typeof CUT_FILES, string][]).map(
       ([idx, f]): [string, string | null | undefined] => [f, cuts.find((c) => String(c.cut_index) === idx)?.generated_image]
     ),
@@ -202,7 +203,7 @@ async function check(loaded: Loaded, coverPick: number): Promise<{ problems: str
     }
     files.set(file, buf);
   }
-  return { problems, files };
+  return { problems, warnings, files };
 }
 
 function kstDate(): string {
@@ -227,11 +228,21 @@ async function main(): Promise<void> {
   const outDir = args.out ?? (args.dry ? mkdtempSync(path.join(tmpdir(), "demo-cache-dry-")) : "public/demo-cache");
 
   const loaded = args.dry ? await loadDry(args) : await loadReal(args.session);
-  const { problems, files } = await check(loaded, args.coverPick);
+  const { problems, warnings, files } = await check(loaded);
+  for (const w of warnings) console.warn(`경고: ${w}`);
   if (problems.length) {
     console.error("점검 실패 — 파일을 쓰지 않았습니다:");
     for (const p of problems) console.error(`  - ${p}`);
     process.exit(1);
+  }
+
+  // 값만 읽는다(키는 읽지 않음). 옵션이 없으면 .env 값(비어 있으면 기본 설정 openai).
+  let imageProvider = args.imageProvider;
+  if (!imageProvider) {
+    imageProvider = process.env.IMAGE_PROVIDER?.trim() || "openai";
+    console.warn(
+      `경고: --image-provider 를 주지 않아 .env 값(${imageProvider})을 적습니다 — 실제 생성 설정과 다를 수 있음`
+    );
   }
 
   // 이미지 값을 고르는 manifestImageRefs 는 covers·cuts 만 본다 — generated 아래 추가 키는
@@ -239,13 +250,12 @@ async function main(): Promise<void> {
   const manifest = {
     version: MANIFEST_VERSION,
     subject: loaded.subject,
-    cover_pick: args.coverPick,
+    cover_pick: COVER_PICK,
     covers: COVER_FILES.map((f) => `/demo-cache/${f}`),
     cuts: Object.fromEntries(Object.entries(CUT_FILES).map(([k, f]) => [k, `/demo-cache/${f}`])),
     generated: {
       date: kstDate(),
-      // 값만 읽는다(키는 읽지 않음). 비어 있으면 기본 설정 openai.
-      image_provider: process.env.IMAGE_PROVIDER?.trim() || "openai",
+      image_provider: imageProvider,
       commit: gitCommit(),
       session_id: args.session,
       project_id: loaded.projectId,
@@ -261,7 +271,7 @@ async function main(): Promise<void> {
   console.log("--- PR 본문용 요약 ---");
   console.log(`- 세션: ${args.session} / 프로젝트: ${loaded.projectId}`);
   console.log(`- subject_tags: ${JSON.stringify(loaded.subjectTags)}`);
-  console.log(`- cover_pick: ${args.coverPick}, image_provider: ${manifest.generated.image_provider}, commit: ${manifest.generated.commit}`);
+  console.log(`- cover_pick: ${COVER_PICK}(기준 컷 = 저장본 컷 1), image_provider: ${manifest.generated.image_provider}, commit: ${manifest.generated.commit}`);
   for (const [file, buf] of files) console.log(`- ${file}: ${(buf.length / 1024).toFixed(0)} KB`);
 }
 
