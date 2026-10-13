@@ -200,14 +200,20 @@ function CtaPurposeSelect({
   preset,
   ctaStrength,
   value,
+  isProjectDefault = false,
   onChange,
 }: {
   id: string;
   preset: Preset | null;
   ctaStrength: CtaStrength;
   value: string;
+  /** #334: 따로 고르지 않아 프로젝트 기본 목적이 보이는 중이면 true. */
+  isProjectDefault?: boolean;
   onChange: (value: string) => void;
 }) {
+  const defaultLabel = isProjectDefault
+    ? preset && ctaPurposeOptions(preset).find((p) => p.id === value)?.label
+    : null;
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className="text-sm font-medium">
@@ -229,6 +235,9 @@ function CtaPurposeSelect({
       </select>
       {ctaStrength === "none" && (
         <p className="text-xs text-zinc-400">이야기만으로 끝내서 목적은 쓰지 않아요</p>
+      )}
+      {ctaStrength !== "none" && defaultLabel && (
+        <p className="text-xs text-zinc-400">프로젝트 기본값: {defaultLabel}</p>
       )}
     </div>
   );
@@ -1595,6 +1604,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       if (role === "protagonist") return "주인공";
       return "인물";
     };
+    // #334: 영문 character_id는 화면에 보이지 않게 한다. 같은 역할이 여럿이면 번호를 붙인다.
+    const characterLabel = (id: string) => {
+      const name = roleName(id);
+      const same = form.characters.filter((c) => roleName(c.character_id) === name);
+      return same.length > 1
+        ? `${name} ${same.findIndex((c) => c.character_id === id) + 1}`
+        : name;
+    };
     const currentTimeLabel =
       cut.time_of_day != null
         ? (TIME_OF_DAY_OPTIONS.find((o) => o.id === cut.time_of_day)?.label ?? cut.time_of_day)
@@ -1684,10 +1701,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           {form.characters.map((ch) => (
             <div key={ch.character_id} className="flex items-center gap-2">
               <span className="shrink-0 text-xs text-zinc-600">
-                {roleName(ch.character_id)} · {ch.character_id}
+                {characterLabel(ch.character_id)}
               </span>
               <select
-                aria-label={`${ch.character_id} 표정`}
+                aria-label={`${characterLabel(ch.character_id)} 표정`}
                 value={ch.expression}
                 disabled={redrawing}
                 onChange={(e) =>
@@ -1704,7 +1721,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 ))}
               </select>
               <select
-                aria-label={`${ch.character_id} 포즈`}
+                aria-label={`${characterLabel(ch.character_id)} 포즈`}
                 value={ch.pose}
                 disabled={redrawing}
                 onChange={(e) =>
@@ -2186,18 +2203,37 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           <h1 className="text-xl font-semibold">{turns[turnIndex].question}</h1>
 
           <div className="flex w-full flex-col gap-2">
-            {turns[turnIndex].options.map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => recordAnswer(option)}
-                className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
-              >
-                {/* #205: "→ CTA"는 "→ 마무리"로 보여주기만 하고, 보내는 값은 원래 키 그대로. */}
-                {displayFlowLabel(option)}
-              </button>
-            ))}
+            {turns[turnIndex].options.map((option) => {
+              // #334: 되돌아왔을 때 지금 고른 값을 보여 준다.
+              const selected = answers[turns[turnIndex].key] === option;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => recordAnswer(option)}
+                  className={
+                    selected
+                      ? "rounded-md border border-zinc-900 bg-zinc-100 px-4 py-2.5 text-sm font-medium hover:bg-zinc-100"
+                      : "rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+                  }
+                >
+                  {/* #205: "→ CTA"는 "→ 마무리"로 보여주기만 하고, 보내는 값은 원래 키 그대로. */}
+                  {displayFlowLabel(option)}
+                  {selected && <span className="ml-2 text-xs text-zinc-500">현재 선택</span>}
+                </button>
+              );
+            })}
           </div>
+          {/* #334: 지금 값이 선택지에 없으면(직접 쓴 값) 따로 보여 준다. */}
+          {(() => {
+            const current = answers[turns[turnIndex].key];
+            return current && !turns[turnIndex].options.includes(current) ? (
+              <p className="w-full text-left text-xs text-zinc-500">
+                현재 선택: {displayFlowLabel(current)}
+              </p>
+            ) : null;
+          })()}
 
           {answerError && (
             <p className="w-full rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">
@@ -2285,6 +2321,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               preset={preset}
               ctaStrength={ctaStrength}
               value={ctaPurposeChoice ?? preset?.rules.cta_format ?? ""}
+              isProjectDefault={ctaPurposeChoice === null}
               onChange={(v) =>
                 // 프로젝트 기본 목적으로 되돌리면 null(= 프로젝트 기본)로 둔다.
                 setCtaPurposeChoice(v === preset?.rules.cta_format ? null : v)
@@ -2299,17 +2336,27 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             <p className="w-full text-left text-xs text-zinc-400">프로젝트 정보를 불러오는 중이에요</p>
           )}
           <div className="flex w-full flex-col gap-2">
-            {CAPTION_TONES.map((tone) => (
-              <button
-                key={tone.id}
-                type="button"
-                disabled={!preset}
-                onClick={() => handleSelectTone(tone.id)}
-                className="rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50 disabled:opacity-40"
-              >
-                {tone.label}
-              </button>
-            ))}
+            {CAPTION_TONES.map((tone) => {
+              // #334: 되돌아왔을 때 지금 고른 말투를 보여 준다.
+              const selected = toneId === tone.id;
+              return (
+                <button
+                  key={tone.id}
+                  type="button"
+                  disabled={!preset}
+                  aria-pressed={selected}
+                  onClick={() => handleSelectTone(tone.id)}
+                  className={
+                    selected
+                      ? "rounded-md border border-zinc-900 bg-zinc-100 px-4 py-2.5 text-sm font-medium hover:bg-zinc-100 disabled:opacity-40"
+                      : "rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50 disabled:opacity-40"
+                  }
+                >
+                  {tone.label}
+                  {selected && <span className="ml-2 text-xs text-zinc-500">현재 선택</span>}
+                </button>
+              );
+            })}
           </div>
           {/* #186 지적 5(캡틴 확정): 톤 단계 알아서 해줘는 공감형(empathy) 고정 적용(통합 WIP 436ae7b hunk). */}
           <button
@@ -2350,7 +2397,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 되돌아가기 대상에서 뺀다. 서버가 빼먹어 직접 답한 턴(#247)은 기존 버튼 그대로. */}
             {resolvedSlots.some((slot) => slot.key === "protagonist") ? (
               <div className="rounded-md border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-500">
-                주인공: {answers.protagonist ?? ""} (소재에서 파악)
+                주인공: {answers.protagonist ?? ""}
+                <span className="ml-2 text-xs text-zinc-400">소재에서 파악</span>
               </div>
             ) : (
               <button
@@ -2363,7 +2411,8 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             )}
             {resolvedSlots.some((slot) => slot.key === "supporting") ? (
               <div className="rounded-md border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-500">
-                조연: {answers.supporting ?? ""} (소재에서 파악)
+                조연: {answers.supporting ?? ""}
+                <span className="ml-2 text-xs text-zinc-400">소재에서 파악</span>
               </div>
             ) : (
               <button
@@ -2410,6 +2459,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                 preset={preset}
                 ctaStrength={ctaStrength}
                 value={ctaPurposeChoice ?? preset?.rules.cta_format ?? ""}
+                isProjectDefault={ctaPurposeChoice === null}
                 onChange={handleContiCtaPurpose}
               />
             </div>
