@@ -193,6 +193,38 @@ function ThreeStepHandle<T extends string>({
   );
 }
 
+// #341 ②: 텍스트 LLM 대기 구간 표시. 스피너 대신 생각 중 점 세 개, skeleton이면
+// 질문·선택지 자리에 뼈대를 함께 보여 준다. 스타일만 — 상태·호출은 그대로다.
+// 움직임은 motion-safe에서만(prefers-reduced-motion이면 정지한 점·뼈대로 보인다).
+function ThinkingDots({ text, skeleton = false }: { text: string; skeleton?: boolean }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex w-full max-w-xl flex-col items-center gap-4 text-center"
+    >
+      <div aria-hidden="true" className="flex items-center gap-1.5">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="h-2.5 w-2.5 rounded-full bg-zinc-500 motion-safe:animate-bounce"
+            style={{ animationDelay: `${i * 150}ms` }}
+          />
+        ))}
+      </div>
+      <p className="text-base font-medium">{text}</p>
+      {skeleton && (
+        <div aria-hidden="true" className="flex w-full flex-col items-center gap-3">
+          <div className="h-6 w-2/3 rounded-md bg-zinc-200 motion-safe:animate-pulse" />
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-10 w-full rounded-md border border-zinc-200 bg-zinc-100 motion-safe:animate-pulse" />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // #326 POC 수정: 이번 편 목적 셀렉트(tone 화면·콘티 확인에서 재사용).
 // 말투 화면과 같은 비활성 규칙(none이면 비활성). 선택 뒤 처리는 onChange 호출부 몫이다.
 function CtaPurposeSelect({
@@ -2162,7 +2194,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       )}
 
       {step === "brainstorm" && !turns && !turnsError && (
-        <Spinner text="소재에 맞는 선택지를 고르고 있어요..." />
+        <ThinkingDots text="소재에 맞는 선택지를 고르고 있어요..." skeleton />
       )}
 
       {step === "brainstorm" && turnsError && (
@@ -2384,7 +2416,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
-      {step === "assembling" && !presetError && <Spinner text="이야기를 엮고 있어요..." />}
+      {step === "assembling" && !presetError && <ThinkingDots text="이야기를 엮고 있어요..." />}
 
       {/* #326 S4: 콘티 확인 단계. 조립 결과(고른 값·컷 흐름)를 보여 주고,
           항목을 누르면 해당 선택 단계로 돌아간다. 이 화면까지 대사 생성 호출 0회. */}
@@ -2489,7 +2521,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             디테일 수정
           </label>
           )}
-          {captionStatus === "loading" && <Spinner text="대사를 만들고 있어요..." />}
+          {captionStatus === "loading" && <ThinkingDots text="대사를 만들고 있어요..." />}
           {captionError && (
             <div className="flex w-full flex-col items-center gap-3 rounded-md bg-red-50 px-4 py-3 text-center">
               <p className="text-sm text-red-600">{captionError}</p>
