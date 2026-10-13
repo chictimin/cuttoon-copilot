@@ -1211,8 +1211,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   // 한 항목만 고르고 바로 재조립 → 콘티 확인으로 복귀한다(returnToConti).
   // 3턴 선택지는 1회 fetch로 고정되어 답변별로 재생성되지 않으므로, 한 턴만
   // 바꿔도 뒤 턴 선택이 어긋나지 않는다(loadTurns는 subject+context만 보낸다).
+  // 인덱스는 TURN_ORDER가 아니라 실제 turns 기준이다 — 소재에서 파악된 턴(#331)이
+  // 빠지면 두 배열의 위치가 어긋나 turns[turnIndex]가 undefined가 된다.
   function backToBrainstorm(key: BrainstormTurn["key"]) {
-    setTurnIndex(Math.max(0, TURN_ORDER.indexOf(key)));
+    setTurnIndex(Math.max(0, turns?.findIndex((turn) => turn.key === key) ?? 0));
     setReturnToConti(true);
     setStep("brainstorm");
   }
