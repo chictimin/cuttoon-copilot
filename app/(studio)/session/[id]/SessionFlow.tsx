@@ -193,6 +193,38 @@ function ThreeStepHandle<T extends string>({
   );
 }
 
+// #341 ②: 텍스트 LLM 대기 구간 표시. 스피너 대신 생각 중 점 세 개, skeleton이면
+// 질문·선택지 자리에 뼈대를 함께 보여 준다. 스타일만 — 상태·호출은 그대로다.
+// 움직임은 motion-safe에서만(prefers-reduced-motion이면 정지한 점·뼈대로 보인다).
+function ThinkingDots({ text, skeleton = false }: { text: string; skeleton?: boolean }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex w-full max-w-xl flex-col items-center gap-4 text-center"
+    >
+      <div aria-hidden="true" className="flex items-center gap-1.5">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="h-2.5 w-2.5 rounded-full bg-zinc-500 motion-safe:animate-bounce"
+            style={{ animationDelay: `${i * 150}ms` }}
+          />
+        ))}
+      </div>
+      <p className="text-base font-medium">{text}</p>
+      {skeleton && (
+        <div aria-hidden="true" className="flex w-full flex-col items-center gap-3">
+          <div className="h-6 w-2/3 rounded-md bg-zinc-200 motion-safe:animate-pulse" />
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-10 w-full rounded-md border border-zinc-200 bg-zinc-100 motion-safe:animate-pulse" />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // #326 POC 수정: 이번 편 목적 셀렉트(tone 화면·콘티 확인에서 재사용).
 // 말투 화면과 같은 비활성 규칙(none이면 비활성). 선택 뒤 처리는 onChange 호출부 몫이다.
 function CtaPurposeSelect({
@@ -2162,7 +2194,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       )}
 
       {step === "brainstorm" && !turns && !turnsError && (
-        <Spinner text="소재에 맞는 선택지를 고르고 있어요..." />
+        <ThinkingDots text="소재에 맞는 선택지를 고르고 있어요..." skeleton />
       )}
 
       {step === "brainstorm" && turnsError && (
@@ -2203,7 +2235,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           <h1 className="text-xl font-semibold">{turns[turnIndex].question}</h1>
 
           <div className="flex w-full flex-col gap-2">
-            {turns[turnIndex].options.map((option) => {
+            {turns[turnIndex].options.map((option, optionIndex) => {
               // #334: 되돌아왔을 때 지금 고른 값을 보여 준다.
               const selected = answers[turns[turnIndex].key] === option;
               return (
@@ -2212,10 +2244,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   type="button"
                   aria-pressed={selected}
                   onClick={() => recordAnswer(option)}
+                  // #341 ③: 등장 효과(불투명도·이동). 클릭은 처음부터 가능하고, 지연 합계는 0.4초 이내.
+                  style={{ transitionDelay: `${Math.min(optionIndex, 3) * 80}ms` }}
                   className={
                     selected
-                      ? "rounded-md border border-zinc-900 bg-zinc-100 px-4 py-2.5 text-sm font-medium hover:bg-zinc-100"
-                      : "rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50"
+                      ? "rounded-md border border-zinc-900 bg-zinc-100 px-4 py-2.5 text-sm font-medium hover:bg-zinc-100 motion-safe:transition-[opacity,translate] motion-safe:duration-150 motion-safe:starting:translate-y-1 motion-safe:starting:opacity-0"
+                      : "rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50 motion-safe:transition-[opacity,translate] motion-safe:duration-150 motion-safe:starting:translate-y-1 motion-safe:starting:opacity-0"
                   }
                 >
                   {/* #205: "→ CTA"는 "→ 마무리"로 보여주기만 하고, 보내는 값은 원래 키 그대로. */}
@@ -2336,7 +2370,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             <p className="w-full text-left text-xs text-zinc-400">프로젝트 정보를 불러오는 중이에요</p>
           )}
           <div className="flex w-full flex-col gap-2">
-            {CAPTION_TONES.map((tone) => {
+            {CAPTION_TONES.map((tone, toneIndex) => {
               // #334: 되돌아왔을 때 지금 고른 말투를 보여 준다.
               const selected = toneId === tone.id;
               return (
@@ -2346,10 +2380,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   disabled={!preset}
                   aria-pressed={selected}
                   onClick={() => handleSelectTone(tone.id)}
+                  // #341 ③: 등장 효과(불투명도·이동). 클릭은 처음부터 가능하고, 지연 합계는 0.4초 이내.
+                  style={{ transitionDelay: `${Math.min(toneIndex, 3) * 80}ms` }}
                   className={
                     selected
-                      ? "rounded-md border border-zinc-900 bg-zinc-100 px-4 py-2.5 text-sm font-medium hover:bg-zinc-100 disabled:opacity-40"
-                      : "rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50 disabled:opacity-40"
+                      ? "rounded-md border border-zinc-900 bg-zinc-100 px-4 py-2.5 text-sm font-medium hover:bg-zinc-100 disabled:opacity-40 motion-safe:transition-[opacity,translate] motion-safe:duration-150 motion-safe:starting:translate-y-1 motion-safe:starting:opacity-0"
+                      : "rounded-md border border-zinc-300 px-4 py-2.5 text-sm hover:bg-zinc-50 disabled:opacity-40 motion-safe:transition-[opacity,translate] motion-safe:duration-150 motion-safe:starting:translate-y-1 motion-safe:starting:opacity-0"
                   }
                 >
                   {tone.label}
@@ -2384,7 +2420,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
-      {step === "assembling" && !presetError && <Spinner text="이야기를 엮고 있어요..." />}
+      {step === "assembling" && !presetError && <ThinkingDots text="이야기를 엮고 있어요..." />}
 
       {/* #326 S4: 콘티 확인 단계. 조립 결과(고른 값·컷 흐름)를 보여 주고,
           항목을 누르면 해당 선택 단계로 돌아간다. 이 화면까지 대사 생성 호출 0회. */}
@@ -2489,7 +2525,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             디테일 수정
           </label>
           )}
-          {captionStatus === "loading" && <Spinner text="대사를 만들고 있어요..." />}
+          {captionStatus === "loading" && <ThinkingDots text="대사를 만들고 있어요..." />}
           {captionError && (
             <div className="flex w-full flex-col items-center gap-3 rounded-md bg-red-50 px-4 py-3 text-center">
               <p className="text-sm text-red-600">{captionError}</p>
@@ -2597,7 +2633,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         </div>
       )}
       {step === "cover" && !genError && refCandidates.length === 0 && (
-        <Spinner text={demoMode ? "데모 캐시를 불러오고 있어요..." : "기준 컷을 그리고 있어요..."} />
+        <Spinner
+          text={demoMode ? "데모 캐시를 불러오고 있어요..." : "기준 컷을 그리고 있어요..."}
+          bar
+        />
       )}
       {step === "generating" && !genError && (
         <Spinner
@@ -2607,6 +2646,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               : "컷을 만들고 있어요..."
           }
           progress={genProgress}
+          bar
         />
       )}
 
@@ -2774,7 +2814,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           )}
           <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
             {storyboard.cuts.map((cut, i) => (
-              <div key={cut.cut_index} className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
+              <div
+                key={cut.cut_index}
+                // #341 ④: 완성 컷 등장(불투명도·이동, 블러 없음). 컷마다 60ms씩 늦게 시작한다.
+                style={{ transitionDelay: `${Math.min(i, 3) * 60}ms` }}
+                className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3 motion-safe:transition-[opacity,translate] motion-safe:duration-300 motion-safe:starting:translate-y-2 motion-safe:starting:opacity-0"
+              >
                 <div className="relative">
                   {cutImageUrls[cut.cut_index] ? (
                     // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
@@ -2898,17 +2943,56 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   );
 }
 
-function Spinner({ text, progress }: { text: string; progress?: { done: number; total: number } | null }) {
+function Spinner({
+  text,
+  progress,
+  bar = false,
+}: {
+  text: string;
+  progress?: { done: number; total: number } | null;
+  /** #341 ①: true면 스피너 대신 진행 바를 보여 준다(컷 생성·기준 컷 대기 구간). */
+  bar?: boolean;
+}) {
+  const hasProgress = !!progress && progress.total > 0;
   return (
     <div className="flex flex-col items-center gap-4 text-center">
-      <div className="h-12 w-12 animate-spin rounded-full border-4 border-zinc-200 border-t-zinc-700" />
+      {!bar && (
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-zinc-200 border-t-zinc-700" />
+      )}
       <p className="text-base font-medium">{text}</p>
-      {progress && progress.total > 0 && (
-        <div className="h-2 w-48 overflow-hidden rounded-full bg-zinc-200">
-          <div
-            className="h-full bg-zinc-700 transition-all"
-            style={{ width: `${(progress.done / progress.total) * 100}%` }}
-          />
+      {bar && !hasProgress && (
+        <div
+          role="progressbar"
+          aria-busy="true"
+          aria-label={text}
+          className="progress-shimmer h-2 w-56 rounded-full bg-zinc-300"
+        />
+      )}
+      {hasProgress && progress && (
+        <div
+          role="progressbar"
+          aria-label={text}
+          aria-valuemin={0}
+          aria-valuemax={progress.total}
+          aria-valuenow={progress.done}
+          className="flex w-56 gap-1"
+        >
+          {Array.from({ length: progress.total }, (_, i) => {
+            // 끝난 칸은 진하게, 지금 만드는 칸은 빛이 지나가게, 남은 칸은 연하게.
+            const state = i < progress.done ? "done" : i === progress.done ? "active" : "pending";
+            return (
+              <div
+                key={i}
+                className={
+                  state === "done"
+                    ? "h-2 flex-1 rounded-full bg-zinc-700 transition-colors"
+                    : state === "active"
+                      ? "progress-shimmer h-2 flex-1 rounded-full bg-zinc-400 transition-colors"
+                      : "h-2 flex-1 rounded-full bg-zinc-200 transition-colors"
+                }
+              />
+            );
+          })}
         </div>
       )}
     </div>
