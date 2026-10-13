@@ -2814,7 +2814,12 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           )}
           <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
             {storyboard.cuts.map((cut, i) => (
-              <div key={cut.cut_index} className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3">
+              <div
+                key={cut.cut_index}
+                // #341 ④: 완성 컷 등장(불투명도·이동, 블러 없음). 컷마다 60ms씩 늦게 시작한다.
+                style={{ transitionDelay: `${Math.min(i, 3) * 60}ms` }}
+                className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3 motion-safe:transition-[opacity,translate] motion-safe:duration-300 motion-safe:starting:translate-y-2 motion-safe:starting:opacity-0"
+              >
                 <div className="relative">
                   {cutImageUrls[cut.cut_index] ? (
                     // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
