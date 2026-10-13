@@ -2634,20 +2634,39 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       )}
       {step === "cover" && !genError && refCandidates.length === 0 && (
         <Spinner
-          text={demoMode ? "데모 캐시를 불러오고 있어요..." : "기준 컷을 그리고 있어요..."}
+          text={
+            demoMode
+              ? "데모 캐시를 불러오고 있어요..."
+              : "첫 번째 컷을 그리고 있어요. 나머지 컷은 이 그림을 기준으로 그려요"
+          }
           bar
         />
       )}
       {step === "generating" && !genError && (
-        <Spinner
-          text={
-            genProgress
-              ? `컷을 만들고 있어요... (${genProgress.done}/${genProgress.total})`
-              : "컷을 만들고 있어요..."
-          }
-          progress={genProgress}
-          bar
-        />
+        <div className="flex flex-col items-center gap-6">
+          <Spinner
+            text={
+              genProgress
+                ? `컷을 만들고 있어요... (${genProgress.done}/${genProgress.total})`
+                : "컷을 만들고 있어요..."
+            }
+            progress={genProgress}
+            bar
+          />
+          {/* #341 ④: 아직 안 그려진 컷 자리. 끝난 칸은 진하게, 남은 칸은 연하게(움직임은 motion-safe). */}
+          <div aria-hidden="true" className="flex gap-3">
+            {Array.from({ length: genProgress?.total ?? 3 }, (_, i) => (
+              <div
+                key={i}
+                className={
+                  i < (genProgress?.done ?? 0)
+                    ? "h-20 w-20 rounded-md bg-zinc-300"
+                    : "h-20 w-20 rounded-md border border-zinc-200 bg-zinc-100 motion-safe:animate-pulse"
+                }
+              />
+            ))}
+          </div>
+        </div>
       )}
 
       {(step === "cover" || step === "generating") && genError && (
