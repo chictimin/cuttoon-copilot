@@ -12,7 +12,7 @@
   },
   "generated": {
     "date": "2026-10-13",
-    "image_provider": "comfyui",
+    "image_provider": "openai",
     "commit": "3acba8f",
     "session_id": "e04d9456-6ccc-44e7-b035-ec7150848054",
     "project_id": "176c1212-44e3-4c6b-b18e-4bf174540799",

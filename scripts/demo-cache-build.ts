@@ -21,6 +21,8 @@
  *   --dry-case no-selection  → 선택 기록 없음(경고만, 통과)
  *
  * 옵션: --out <폴더>(기본 public/demo-cache, --dry 는 임시 폴더)
+ *   · --image-provider <openai|openai-low|comfyui> — 세션을 실제로 그린 설정(manifest generated.image_provider).
+ *     안 주면 .env 의 IMAGE_PROVIDER 값을 쓰고 경고한다(서버를 다른 값으로 덮어써 생성했으면 어긋난다).
  */
 
 import { execSync } from "node:child_process";
@@ -36,12 +38,15 @@ const COVER_FILES = ["cover-1.png"] as const;
 const COVER_PICK = 1;
 const CUT_FILES = { "2": "cut-2.png", "3": "cut-3.png", "4": "cut-4.png" } as const;
 const MANIFEST_VERSION = 1;
+// lib/openai/image-setting.ts 의 SETTINGS 와 같은 값.
+const IMAGE_PROVIDERS = ["openai", "openai-low", "comfyui"] as const;
 
 interface Args {
   session: string;
   dry: boolean;
   dryCase?: "two-person" | "pick-mismatch" | "bad-size" | "no-selection";
   out?: string;
+  imageProvider?: string;
 }
 
 interface CutLike {
@@ -71,11 +76,16 @@ function parseArgs(argv: string[]): Args {
   if (dryCase && !["two-person", "pick-mismatch", "bad-size", "no-selection"].includes(dryCase)) {
     throw new Error(`--dry-case 는 two-person | pick-mismatch | bad-size | no-selection 중 하나입니다: ${dryCase}`);
   }
+  const imageProvider = get("--image-provider");
+  if (imageProvider !== undefined && !(IMAGE_PROVIDERS as readonly string[]).includes(imageProvider)) {
+    throw new Error(`--image-provider 는 ${IMAGE_PROVIDERS.join(" | ")} 중 하나입니다: ${imageProvider}`);
+  }
   return {
     session,
     dry: argv.includes("--dry"),
     dryCase: dryCase as Args["dryCase"],
     out: get("--out"),
+    imageProvider,
   };
 }
 
@@ -226,6 +236,15 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // 값만 읽는다(키는 읽지 않음). 옵션이 없으면 .env 값(비어 있으면 기본 설정 openai).
+  let imageProvider = args.imageProvider;
+  if (!imageProvider) {
+    imageProvider = process.env.IMAGE_PROVIDER?.trim() || "openai";
+    console.warn(
+      `경고: --image-provider 를 주지 않아 .env 값(${imageProvider})을 적습니다 — 실제 생성 설정과 다를 수 있음`
+    );
+  }
+
   // 이미지 값을 고르는 manifestImageRefs 는 covers·cuts 만 본다 — generated 아래 추가 키는
   // 읽는 쪽에 영향이 없다. smartman 요청(#240)으로 세션·프로젝트 id·subject_tags 를 남긴다.
   const manifest = {
@@ -236,8 +255,7 @@ async function main(): Promise<void> {
     cuts: Object.fromEntries(Object.entries(CUT_FILES).map(([k, f]) => [k, `/demo-cache/${f}`])),
     generated: {
       date: kstDate(),
-      // 값만 읽는다(키는 읽지 않음). 비어 있으면 기본 설정 openai.
-      image_provider: process.env.IMAGE_PROVIDER?.trim() || "openai",
+      image_provider: imageProvider,
       commit: gitCommit(),
       session_id: args.session,
       project_id: loaded.projectId,
