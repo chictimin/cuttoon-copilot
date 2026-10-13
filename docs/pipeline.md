@@ -172,7 +172,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 | 1 | `loadReference` | `SessionFlow.tsx` → `generateCoverVariants`(`generate-client.ts`, count 1) | `POST /api/generate {kind:"cover_variants"}` → **`generateCoverVariants`** ×1 (내부 1회) |
 | 2 | `handleConfirmReference` → `runChainedCuts` → `generateChainedCuts` | `SessionFlow.tsx` → `generate-client.ts` | `POST /api/generate {kind:"cut"}` ×3 (컷 2~4) → **`generateCut`** ×3 |
 
-`kind:'cover_variants'` 응답에는 `requested: 1`(호출부가 count 1 전달, 라우트가 그대로 반환)이 함께 실린다(`route.ts`, #108). count 1 흐름은 1장 성공 또는 실패 안내다 — 전부 실패하면 `generate.ts`가 던져 라우트 500이 되고, 화면 `generate-client.ts`·`SessionFlow.tsx`의 `loadReference`도 0개면 던져 실패 토스트를 띄운다. 빈 배열 응답·`result.length < requested` 부족분 판단은 일반 API(count 2~3) 부분 성공 설명으로만 쓴다(#117).
+`kind:'cover_variants'` 응답에는 `requested: 1`(호출부가 count 1 전달, 라우트가 그대로 반환)이 함께 실린다(`route.ts`, #108). count 1 흐름은 1장 성공 또는 실패 안내다 — 전부 실패하면 `generate.ts`가 던져 라우트 500이 되고, 화면 `generate-client.ts`·`SessionFlow.tsx`의 `loadReference`도 0개면 던져 실패 안내를 띄운다. `result.length < requested` 부족분 판단은 일반 API(count 2~3)에서 1개 이상·count 미만이 성공한 부분 성공에만 해당한다 — count와 무관하게 0개면 던진다(#117).
 
 **프롬프트 조립 — `buildCutPrompt`**
 
