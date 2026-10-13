@@ -2,13 +2,13 @@
 
 <!-- 기준점 id는 변경 금지 -->
 
-마지막 전체 대조: 2026-10-08 · `73395e2`. 그보다 오래된 절에만 절 기준을 남긴다.
+마지막 전체 대조: 2026-10-13 · `f60d4b2`. 그보다 오래된 절에만 절 기준을 남긴다.
 
 머지된 코드만 기준으로 한다. 열려 있는 PR·이슈의 계획은 넣지 않는다. 함수명·파일명이 식별자다 — 라인 번호는 붙이지 않는다.
 
 상태 표기의 뜻은 `docs/operations.md` 구현 현황표와 같다 — 완료(쓸 수 있음) · 부분(일부만 동작, 비고·관련 이슈 참고) · 미완.
 
-5줄 요약: 온보딩(레퍼런스→스타일→마스코트→시트→저장) → 세션(소재→3턴→말투·대사→표지 3안→3컷→저장) → 에디터(수정·되돌리기→Export). 유료 호출은 시트 1 + 표지 3 + 컷 3. 저장은 세션 `POST /api/session`과 에디터 버전 저장 2곳. 대사는 Export 때만 그림에 굽는다.
+5줄 요약: 온보딩(레퍼런스→스타일→마스코트→시트→저장) → 세션(소재→3턴→말투·콘티 확인·대사→첫 번째 컷→컷 2~4→저장) → 에디터(수정·되돌리기→Export). 유료 호출은 시트 1 + 첫 번째 컷 1 + 컷 3. 저장은 세션 `POST /api/session`과 에디터 버전 저장 2곳. 대사는 Export 때만 그림에 굽는다.
 
 **범위**: 화면(`app/(studio)/`), 스키마·LLM(`lib/llm/`, `spec/`, `app/api/brainstorm/`), 백엔드·저장(`lib/db/`, `app/api/preset/`, `app/api/session/`, `app/api/upload/`) 위주로 채웠다. 이미지 생성·추출 영역(`lib/openai/`, `app/api/generate/`, `app/api/extract/`)과 렌더링 영역(`lib/render/`)은 내부를 전부 적지 않고, 화면·백엔드 쪽이 그 경계를 어떻게 호출하는지(계약)까지만 적었다. 이미지 생성(5-1)·추출·시트(5-1b)·합성·Export(5-2) 절은 모두 작성됐다. 영역별 담당자는 `docs/operations.md` 소유권 표를 본다.
 
@@ -31,10 +31,11 @@ flowchart TD
     B3 --> B4[recordAnswer 반복]
     B4 --> B4t[말투 선택]
     B4t --> B5[assembleStoryboard]
-    B5 --> B5c["대사 생성 loadCaptions → POST /api/session/captions"]
-    B5c --> B6["POST /api/generate kind=cover_variants (이미지 생성)"]
-    B6 --> B7[handleSelectCover]
-    B7 --> B8["POST /api/generate kind=cut ×3 (이미지 생성)"]
+    B5 --> B5t["콘티 확인·확정 handleConfirmConti"]
+    B5t --> B5c["대사 생성 loadCaptions → POST /api/session/captions"]
+    B5c --> B6["POST /api/generate kind=cover_variants: 첫 번째 컷 1장 (이미지 생성)"]
+    B6 --> B7[handleConfirmReference]
+    B7 --> B8["POST /api/generate kind=cut ×3 — 컷 2~4 (이미지 생성)"]
     B8 --> B9[handleSave → POST /api/session]
   end
 
@@ -77,22 +78,23 @@ flowchart TD
 | 4 | 응답의 `resolved` | `SessionFlow.tsx` `loadTurns` | `setAnswers`로 선반영 (#154) |
 | 5 | `recordAnswer` 반복 | `SessionFlow.tsx` | 3턴(또는 축소된 턴) 완료 시 말투(`tone`) 단계로 |
 | 6 | `handleSelectTone` | `SessionFlow.tsx` | 말투 선택 → `assembling`으로 전이 |
-| 7 | assembling effect | `SessionFlow.tsx` | `assembleStoryboard`(`storyboard-assembly.ts`) |
+| 7 | assembling effect | `SessionFlow.tsx` | `assembleStoryboard`(`storyboard-assembly.ts`) 후 콘티 단계로 전이 |
 | 8 | `assembleStoryboard` 내부 | `storyboard-assembly.ts` | `buildSessionCast`(`session-cast.ts`, #150), `getBeatsForFlow`/`getFlowOptions`(`narrative-flow.ts`, #153) |
-| 9 | 대사 생성(F2) | `loadCaptions`(`SessionFlow.tsx`) | `POST /api/session/captions` — tone 단계 선택값 + subject·flow·beats·cast·context를 보내 4컷 대사와 연출(F4)을 받고 `applyCaptions`·`applyDirections`로 조립 컷에 반영. 컷별 다시 뽑기 `regenCutCaption`은 같은 경로에 `cut_index`를 함께 보냄 |
-| 10 | `loadCoverVariants` | `SessionFlow.tsx` | `POST /api/generate { kind:'cover_variants', storyboard, preset, referenceAssets }` — 이미지 생성 경계 |
-| 11 | `handleSelectCover` | `SessionFlow.tsx` | `generateChainedCuts`(`generate-client.ts`, 화면) → `POST /api/generate { kind:'cut', ... }` × 3 — 이미지 생성 경계 |
-| 12 | `handleSave` | `SessionFlow.tsx` | `POST /api/session` (백엔드·저장, `lib/db/sessions.ts`에 저장) + `selections` 동봉(#207 — 표지 표시 때 `recordRound`·선택 때 `markSelected`, 저장 때 `toPayload`, 기록 실패 시 `selectionsSaved:false` 토스트) |
+| 9 | 콘티 확인·확정 | `handleConfirmConti`(`SessionFlow.tsx`) | 조립 결과를 콘티 화면에서 확인하고 "이대로 만들기"로 확정 → `captions` 단계로 전이. 대사 생성은 확정 뒤 1회 호출된다 |
+| 10 | 대사 생성(F2) | `loadCaptions`(`SessionFlow.tsx`) | `POST /api/session/captions` — tone 단계 선택값 + subject·flow·beats·cast·context를 보내 4컷 대사와 연출(F4)을 받고 `applyCaptions`·`applyDirections`로 조립 컷에 반영. 컷별 다시 뽑기 `regenCutCaption`은 같은 경로에 `cut_index`를 함께 보냄 |
+| 11 | `loadReference` | `SessionFlow.tsx` | `POST /api/generate { kind:'cover_variants', storyboard, preset, referenceAssets, count: 1 }` — 첫 번째 컷 1장 (이미지 생성 경계, kind 이름 `cover_variants` 유지) |
+| 12 | `handleConfirmReference` | `SessionFlow.tsx` | `runChainedCuts` → `generateChainedCuts`(`generate-client.ts`, 화면) → `POST /api/generate { kind:'cut', ... }` × 3 — 첫 번째 컷 확정 뒤 컷 2~4 시작(컷 1 잠금), 이미지 생성 경계 |
+| 13 | `handleSave` | `SessionFlow.tsx` | `POST /api/session` (백엔드·저장, `lib/db/sessions.ts`에 저장) + `selections` 동봉(#207 — 첫 번째 컷 후보 표시 때 `recordRound`·선택 때 `markSelected`, 저장 때 `toPayload`, 기록 실패 시 `selectionsSaved:false` 토스트) |
 
 ### 대사 화자·말풍선 좌표 (#242)
 
 대사 생성(`POST /api/session/captions`, `generateCutCaptions`)이 2인 컷 대사 항목에 화자 id(`speaker`)를 싣고, 화면(`SessionFlow.tsx` `applyCaptions`·`regenCutCaption`)이 `setCaptionSpeaker`로 `caption.speaker_index`(0|1, `characters_in_frame` 순번)로 바꿔 저장한다. 저장 검사(`storyboardContractProblems` SPK·ANC 규칙)가 1인 컷 키 금지·범위·좌표 형식을 보고, Export는 화자·좌표가 없어도 `position` 기본 위치로 그린다(관대 읽기). 인물 배열 순서·구성은 컷 다시 뽑기(그림 재생성)로만 바꾼다 — 저장된 순서가 그림 좌우와 같다는 보장은 이 변경에서 두지 않는다(공개 한계).
 
-### 표지 선택 기록 저장 계약 (#207)
+### 선택 기록 저장 계약(첫 번째 컷 후보 라운드) (#207)
 
-`selections` 테이블에 "보여 준 후보 묶음(라운드)" 단위로 쌓는다 — 한 행 = 화면에 보여준 후보 한 묶음. `variant_index`는 고른 위치(다시 뽑기로 버린 라운드면 null), `(session_id, cut_index, round)`은 유일하다. 화면이 모아 두었다가 `handleSave` → `POST /api/session`의 `selections`로 함께 보내면, `createSession` 성공 뒤에 `insertSelections`(`lib/db/selections.ts`)가 저장한다. 일시적 DB 오류에만 전체 예산 3초 안에서 재시도하고(시도별 최대 1초·백오프 200·400ms·남은 예산 300ms 미만이면 포기), 그래도 실패하면 세션 저장은 200 + `selectionsSaved: false`로 응답한다(사용자 작업 보존 우선). 화면 쪽 기록 헬퍼 4개는 `lib/session/selection-log.ts`다 — `createSelectionLog`, `recordRound`, `markRegenerated`, `markSelected`, 전송용으로 바꾸는 `toPayload`. 화면 연결(#213): 표지 표시 때마다 `recordRound`, 선택 때 `markSelected`, 저장 때 `toPayload`로 동봉하고, `selectionsSaved:false`면 실패 토스트(비차단). 읽는 쪽(프로젝트별 선호·프리셋 승격 규칙)은 이번에 만들지 않고, 나중에 `sessions.preset_id`로 묶어 읽는다(#202).
+`selections` 테이블에 "보여 준 후보 묶음(라운드)" 단위로 쌓는다 — 한 행 = 화면에 보여준 후보 한 묶음. `variant_index`는 고른 위치(다시 뽑기로 버린 라운드면 null), `(session_id, cut_index, round)`은 유일하다. 화면이 모아 두었다가 `handleSave` → `POST /api/session`의 `selections`로 함께 보내면, `createSession` 성공 뒤에 `insertSelections`(`lib/db/selections.ts`)가 저장한다. 일시적 DB 오류에만 전체 예산 3초 안에서 재시도하고(시도별 최대 1초·백오프 200·400ms·남은 예산 300ms 미만이면 포기), 그래도 실패하면 세션 저장은 200 + `selectionsSaved: false`로 응답한다(사용자 작업 보존 우선). 화면 쪽 기록 헬퍼 4개는 `lib/session/selection-log.ts`다 — `createSelectionLog`, `recordRound`, `markRegenerated`, `markSelected`, 전송용으로 바꾸는 `toPayload`. 화면 연결(#213): 첫 번째 컷 후보 표시 때마다 `recordRound`, 선택 때 `markSelected`, 저장 때 `toPayload`로 동봉하고, `selectionsSaved:false`면 실패 토스트(비차단). 읽는 쪽(프로젝트별 선호·프리셋 승격 규칙)은 이번에 만들지 않고, 나중에 `sessions.preset_id`로 묶어 읽는다(#202).
 
-**선택 기록 0행의 판정 한계** — 세션이 완성(4컷 `generated_image` 모두 값)인데 `selections`가 0행이면, 직접 POST인지 저장 실패(당시 토스트)인지 D3 이전 전 라운드 탈락인지 저장본만으로는 구분할 수 없다. D3 이후 생성분도 응답값(`selectionsSaved`)이 저장되지 않으므로 같은 한계다. 데모 캐시 도구(`scripts/demo-cache-build.ts`)는 선택 기록이 필요하므로 이 경우를 만날 수 있다(도구 코드 분기는 하지 않음).
+**선택 기록 0행의 판정 한계** — 세션이 완성(4컷 `generated_image` 모두 값)인데 `selections`가 0행이면, 직접 POST인지 저장 실패(당시 토스트)인지 D3 이전 전 라운드 탈락인지 저장본만으로는 구분할 수 없다. D3 이후 생성분도 응답값(`selectionsSaved`)이 저장되지 않으므로 같은 한계다. 데모 캐시 도구(`scripts/demo-cache-build.ts`)는 `selections`의 `round`·`selected_asset`·`outcome`만 조회해 `selected_asset`과 저장본 컷 1 `generated_image`를 비교하므로, 기록이 없어도 경고만 내고 저장본 컷 1을 쓴다.
 
 <a id="pipe-editor"></a>
 ## 4. 에디터 (화면)
@@ -117,9 +119,9 @@ flowchart TD
 | export | 위치 | 용도 |
 |---|---|---|
 | `generateCut` | `generate.ts` | 컷 1장 생성 |
-| `generateCoverVariants` | `generate.ts` | 표지 3안 생성 |
+| `generateCoverVariants` | `generate.ts` | 첫 번째 컷 1장 생성(count 1) |
 | `activeMascot` | `generate.ts` | 마스코트 참조 결정 (#150) |
-| `buildCutPrompt` | `generate.ts` | 표지·컷 공통 프롬프트 조립 |
+| `buildCutPrompt` | `generate.ts` | 첫 번째 컷·컷 공통 프롬프트 조립 |
 | `OUTPUT_SIZE` | `generate.ts` | `{width:1024,height:1024}`. `extract.ts` 가 시트 크기로 가져간다 |
 | `promptHint` | `generate.ts` | `prompt_hints` 조회. 없으면 `undefined` — 힌트 유무를 구분해야 하는 자리를 위해 `hint()`와 나눠 뒀다 |
 | `ratioClause` | `generate.ts` | `character_ratio` 절. **폴백 규칙까지** 한 곳에 둔다 — 아래 참고 |
@@ -147,19 +149,19 @@ return promptHint('character_ratio', v) ?? `${v} body proportions`
 
 | 단계 | 호출 | 비고 |
 |---|---|---|
-| 표지 3안 | **3회** (병렬) | `Promise.allSettled` — 한 안이 실패해도 성공분을 버리지 않는다 (#104) |
-| 나머지 3컷 | **3회** (순차) | 체이닝이라 병렬 불가 |
-| **골든 패스 합계** | **6회** | 캐릭터 시트 1회는 온보딩 소관(5-1b) |
+| 첫 번째 컷 | **1회** | `generateCoverVariants`에 count 1 — 다시 만들기는 `handleRefGenerate`로 +1 |
+| 나머지 3컷(컷 2~4) | **3회** (순차) | 체이닝이라 병렬 불가 |
+| **세션 합계** | **4회** | 캐릭터 시트 1회는 온보딩 소관(5-1b) — 한 바퀴(시트 포함) 5회 |
 
-표지 3안에는 **부족분 재시도**가 있다(#108·#118). 상한은 `count * 2 = 6` 회이고, 한 배치가 통째로 실패하면 그 자리에서 멈춘다(`gained === 0`) — 남은 실패 원인이 업로드 계열, 즉 환경 문제라 재시도해도 같이 실패하기 때문이다(#67 이 그 상황이었다).
+첫 번째 컷에는 **부족분 재시도**가 있다(#108·#118). 상한은 count 1 기준 2회이고, 한 배치가 통째로 실패하면 그 자리에서 멈춘다(`gained === 0`) — 남은 실패 원인이 업로드 계열, 즉 환경 문제라 재시도해도 같이 실패하기 때문이다(#67 이 그 상황이었다).
 
 ```bash
 COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 ```
 
-**판정·측정 때는 끄는 것을 권한다.** 재시도가 부족분을 채워버리면 "3안 중 2안" 이라는 수치가 보이지 않는다. 부족분이 생기면 원인이 세 갈래로 찍힌다 — `재시도 꺼짐` / `재시도 한도 소진` / `배치 전멸로 중단`.
+**판정·측정 때는 끄는 것을 권한다.** 재시도가 부족분을 채워버리면 구 API(count 2~3)의 "3안 중 2안" 같은 수치가 보이지 않는다. 부족분이 생기면 원인이 세 갈래로 찍힌다 — `재시도 꺼짐` / `재시도 한도 소진` / `배치 전멸로 중단`.
 
-**호출 시간 로그** — 이미지 호출마다 `[image] <kind> <설정> ok|fail <초>s [사유]` 한 줄을 남긴다(`timeImageCall`, `lib/openai/image-setting.ts`). kind는 `character_sheet`·`cover_variant`·`cut`·`style_extract`다. 설정 표기는 `settingTag`(`IMAGE_PROVIDER=<값>`, `style_extract`는 모델명)다. 실패 사유는 숫자 status와 허용 목록 코드·이름만 찍는다 — 키·URL·메시지는 기록하지 않는다. 표지 묶음 끝에는 `cover_variants done x/3 attempts=n` 요약을 남긴다(attempts는 SDK 자동 재시도 미포함, #274).
+**호출 시간 로그** — 이미지 호출마다 `[image] <kind> <설정> ok|fail <초>s [사유]` 한 줄을 남긴다(`timeImageCall`, `lib/openai/image-setting.ts`). kind는 `character_sheet`·`cover_variant`·`cut`·`style_extract`다. 설정 표기는 `settingTag`(`IMAGE_PROVIDER=<값>`, `style_extract`는 모델명)다. 실패 사유는 숫자 status와 허용 목록 코드·이름만 찍는다 — 키·URL·메시지는 기록하지 않는다. 표지 묶음 끝에는 `cover_variants done x/count attempts=n` 요약을 남긴다(현재 화면 count 1이므로 `x/1`, attempts는 SDK 자동 재시도 미포함, #274).
 
 **호출 순서 (세션 1회, 재시도 없는 골든 패스)**
 
@@ -167,14 +169,14 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 | 순서 | 함수 | 위치 | 호출 대상 |
 |---|---|---|---|
-| 1 | `loadCoverVariants` | `SessionFlow.tsx` → `generateCoverVariants`(`generate-client.ts`) | `POST /api/generate {kind:"cover_variants"}` → **`generateCoverVariants`** ×1 (내부 3회) |
-| 2 | `handleSelectCover` → `generateChainedCuts` | `generate-client.ts` | `POST /api/generate {kind:"cut"}` ×3 → **`generateCut`** ×3 |
+| 1 | `loadReference` | `SessionFlow.tsx` → `generateCoverVariants`(`generate-client.ts`, count 1) | `POST /api/generate {kind:"cover_variants"}` → **`generateCoverVariants`** ×1 (내부 1회) |
+| 2 | `handleConfirmReference` → `runChainedCuts` → `generateChainedCuts` | `SessionFlow.tsx` → `generate-client.ts` | `POST /api/generate {kind:"cut"}` ×3 (컷 2~4) → **`generateCut`** ×3 |
 
-`kind:'cover_variants'` 응답에는 `requested: 3` 이 함께 실린다(`route.ts`, #108). `allSettled` 라 배열이 1~3 개일 수 있어서, 화면이 `result.length < requested` 로 부족분을 판단한다(#117).
+`kind:'cover_variants'` 응답에는 `requested: 1`(호출부가 count 1 전달, 라우트가 그대로 반환)이 함께 실린다(`route.ts`, #108). count 1 흐름은 1장 성공 또는 실패 안내다 — 전부 실패하면 `generate.ts`가 던져 라우트 500이 되고, 화면 `generate-client.ts`·`SessionFlow.tsx`의 `loadReference`도 0개면 던져 실패 안내를 띄운다. `result.length < requested` 부족분 판단은 일반 API(count 2~3)에서 1개 이상·count 미만이 성공한 부분 성공에만 해당한다 — count와 무관하게 0개면 던진다(#117).
 
 **프롬프트 조립 — `buildCutPrompt`**
 
-표지 3안과 4컷이 **같은 함수**를 쓴다. 표지는 `cuts[0]`, 컷은 `nextUngeneratedCut`이 고른 컷을 넘긴다.
+첫 번째 컷과 나머지 컷이 **같은 함수**를 쓴다. 첫 번째 컷은 `cuts[0]` 기준(`referenceCut`), 컷은 `target_cut_index`가 가리킨 컷을 우선하고 없거나 못 찾으면 `nextUngeneratedCut`이 고른 컷을 넘긴다.
 
 넣는 순서는 이렇다.
 
@@ -186,12 +188,12 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 | 4 | 소재 + **설명 장치 금지** | 차트·그래프·화살표·아이콘·라벨·해부 도해 금지, 숫자는 캡션 레이어 몫 (#146). 효과선은 허용 (#133 결정 6) |
 | 5 | 타깃 독자 (`Who this comic is made for — not who appears in the panel`) | 타깃과 등장 인물이 다를 수 있다 |
 | 6 | `narrative_beat` · `shot_type` · `camera_angle` · `time_of_day` | 전부 `hint()` 경유 — enum 토큰을 그대로 넣으면 모델이 못 알아듣는다 |
-| 7 | `Character:` — `cast[].description` + 표정·포즈 | 서술을 앞세운다. 없으면 나이·성별이 컷마다 바뀐다. 체이닝 컷은 앞 컷과 같게 명시해 머리색·헤어스타일·얼굴·나이·복장을 유지한다(#258, 표지·첫 컷 제외) |
+| 7 | `Character:` — `cast[].description` + 표정·포즈 | 서술을 앞세운다. 없으면 나이·성별이 컷마다 바뀐다. 체이닝 컷은 앞 컷과 같게 명시해 머리색·헤어스타일·얼굴·나이·복장을 유지한다(#258, 첫 번째 컷 제외) |
 | 8 | `reserved_zone` 지시 | 프레임 **안**을 비운다 — 흰 띠를 붙이는 것이 아니다 |
 | 9 | `rules.forbidden` → `Do not include:` | 사용자가 적은 금지 요소 |
 | 10 | 말풍선·글자 억제 | P0 게이트 2 |
 
-**2인 컷 좌우 배치** — `buildCutPrompt`는 `characters_in_frame`이 **정확히 2명**일 때만 인물 문장 머리를 `Character on the left/right side of the panel:`로 바꾼다([0] 왼쪽, [1] 오른쪽). `speaker_index`는 읽지 않고 조립 순서만 쓴다 — 순서는 `storyboard-assembly.ts` 한 곳에서 정해지고(주인공이 [0]) 이후 바뀌지 않는다. 1명·0명·3명 이상은 그대로 둔다. 표지 3안도 같은 함수를 타므로 첫 컷이 2인이면 표지에도 들어간다(#285, 유료 3장 3/3 확인).
+**2인 컷 좌우 배치** — `buildCutPrompt`는 `characters_in_frame`이 **정확히 2명**일 때만 인물 문장 머리를 `Character on the left/right side of the panel:`로 바꾼다([0] 왼쪽, [1] 오른쪽). `speaker_index`는 읽지 않고 조립 순서만 쓴다 — 순서는 `storyboard-assembly.ts` 한 곳에서 정해지고(주인공이 [0]) 이후 바뀌지 않는다. 1명·0명·3명 이상은 그대로 둔다. 첫 번째 컷도 같은 함수를 타므로 컷 1이 2인이면 첫 번째 컷 그림에도 들어간다(#285).
 
 4번 소재 문장과 7번 `cast[].description`은 `projectForModel(text, subject, subject_tags)`로 투영해 넣는다 — 소재의 `[브랜드]` 원문 대신 category가 들어가고, `subject_tags`가 없거나 형태가 어긋나면 "제품"이다. 대괄호가 없는 소재는 그대로다(#206·#237). 캐릭터 시트는 소재를 받지 않아 해당되지 않는다.
 
@@ -226,15 +228,15 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 `referenceUris`(`generate.ts`)가 호출부의 `referenceAssets` 에 `preset.assets.character_sheet` 를 합친다 — 호출부가 빼먹어도 시트가 들어간다. `toInputImages`(`generate.ts`)가 `readAsset` 으로 읽고, **못 읽은 것은 로그에 남기고**, 결과가 0장이면 **유료 호출 전에 던진다.** 시트 없이 만든 이미지는 P0 게이트를 통과할 수 없어 생성비만 버리는 것이기 때문이다.
 
-화면(`app/(studio)/session/[id]/generate-client.ts` 의 `referenceAssetsOf`)은 시트와 `style_refs`(온보딩 참고 그림 원본)를 **함께** 보낸다 — 참고 그림을 올린 프로젝트는 표지·컷마다 둘 다 들어간다. `referenceUris` 는 받은 목록을 그대로 쓰고 시트가 빠졌을 때만 덧붙이며, 폴백으로 `style_refs` 를 읽지는 않는다. 그래서 참고 그림의 글자·로고가 결과에 따라 나올 수 있다. 참고 그림을 빼는 쪽으로 바꿀지는 발표 이후 과제다(#317). 스타일 서술은 프롬프트의 `Style:` 문장이 담당한다.
+화면(`app/(studio)/session/[id]/generate-client.ts` 의 `referenceAssetsOf`)은 시트와 `style_refs`(온보딩 참고 그림 원본)를 **함께** 보낸다. 다만 서버 `generateCut`의 기본 C´ 방식(`lib/cut-reference-mode.ts`)은 `reference_asset`(확정한 첫 번째 컷)이 있으면 첨부를 [시트, 첫 번째 컷]으로 교체해 원본 `style_refs`를 제외한다 — 컷 2~4는 시트 + 첫 번째 컷만 들어간다. 첫 번째 컷(`cover_variants` count 1)과 비상용 A 방식(`reference_asset` 없음)은 받은 [시트, `style_refs`] 그대로 쓴다. `referenceUris` 는 받은 목록을 그대로 쓰고 시트가 빠졌을 때만 덧붙이며, 폴백으로 `style_refs` 를 읽지는 않는다. 그래서 참고 그림의 글자·로고가 결과에 따라 나올 수 있다. 참고 그림을 빼는 쪽으로 바꿀지는 발표 이후 과제다(#317). 스타일 서술은 프롬프트의 `Style:` 문장이 담당한다.
 
 **체이닝**
 
 `GeneratedImageResult.continuationToken` ↔ `previous_response_id`. PRD 6절이 프로바이더 중립을 요구해서 `chatSession`·`previous_response_id` 를 계약에 노출하지 않는다.
 
-**표지 3안은 체이닝하지 않는다** — 세션에 누적하면 2안이 1안에 끌려가 서로 닮는다. `generateCoverVariants` 시그니처가 `continueFrom` 을 받지 않는 것으로 그 독립성을 타입에 드러낸다(#50).
+**첫 번째 컷이 체이닝 출발점이다** — 컷 2~4는 시트 + 첫 번째 컷 참조(`reference_asset`) + 앞 컷 이어받기(`continueFrom`)로 그린다(C´, `lib/cut-reference-mode.ts`). `generateCoverVariants` 자체는 `continueFrom` 을 받지 않는다 — 첫 번째 컷 1장은 독립 호출이다(#50).
 
-"몇 번째 컷인지" 를 별도 파라미터로 받지 않는다. 호출부가 `storyboard.cuts[].generated_image` 를 채워 다시 넘기면 `nextUngeneratedCut` 이 다음 컷을 고른다 — 그래서 리졸브가 실패해도 **raw `asset` 으로 그 필드를 채우면** 체이닝이 끊기지 않는다(#104, PR #135). 같은 필드가 세션 목록의 완료 판정 근거이기도 하다(#136·#137).
+"몇 번째 컷인지"는 `target_cut_index`(화면 `targetCutIndex` → 라우트 `target_cut_index` → `generate.ts`의 `targetCut`이 해당 인덱스 우선)로 지정한다. 파라미터가 없거나 못 찾으면 `nextUngeneratedCut`(빈 첫 컷)이 폴백이다 — 그래서 호출부가 `storyboard.cuts[].generated_image` 를 채워 다시 넘기면 지정 없이도 다음 컷이 골라지고, 리졸브가 실패해도 **raw `asset` 으로 그 필드를 채우면** 체이닝이 끊기지 않는다(#104, PR #135). 같은 필드가 세션 목록의 완료 판정 근거이기도 하다(#136·#137).
 
 **출력 크기**
 
@@ -254,7 +256,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 프롬프트 문구 품질은 정적 검사로 잡히지 않는다. **codex 환경에서 같은 프롬프트를 4회씩 돌려 육안 판정**하는 방식으로 검증했고, 결과는 #121 · #146 · #113 에 기록돼 있다.
 
-**데모 캐시 만들기 도구** — `scripts/demo-cache-build.ts --session <id>`: 세션·`selections`·이미지를 읽기만 해서 `public/demo-cache/`에 PNG 6장(표지 3안 + 컷 2·3·4) + `manifest.json`을 쓴다. 이미지를 만들지 않는다(생성 호출 0). 점검(소재 #240 고정값·컷 4장·전 컷 1인·표지 후보 3안 및 선택 일치·1024×1024 PNG)이 하나라도 어긋나면 파일을 하나도 쓰지 않고 종료 코드 1로 끝난다. 표지 3안은 `selections`의 `candidate_assets`에서 읽으므로 **선택 기록이 없으면 만들 수 없다**(#286).
+**데모 캐시 만들기 도구** — `scripts/demo-cache-build.ts --session <id>`: 세션·`selections`·이미지를 읽기만 해서 `public/demo-cache/`에 PNG 4장(첫 번째 컷 1(`cover-1.png`) + 컷 2·3·4) + `manifest.json`을 쓴다. 이미지를 만들지 않는다(생성 호출 0). 점검(소재 #240 고정값·컷 4장·전 컷 1인·기준 컷 선택 일치·1024×1024 PNG)이 하나라도 어긋나면 파일을 하나도 쓰지 않고 종료 코드 1로 끝난다. 첫 번째 컷은 `selections`의 `round`·`selected_asset`·`outcome`(선택된 1행)에서 `selected_asset`을 읽어 저장본 컷 1 `generated_image`와 비교하며(`candidate_assets`는 읽지 않음), 기록이 없어도 경고만 내고 저장본 컷 1을 쓴다(#286).
 
 ### 5-1b. 스타일 분석 · 캐릭터 시트 생성 (추출·시트)
 
@@ -280,7 +282,7 @@ COVER_VARIANT_RETRY=off   # 재시도를 끈다. 기본값은 on
 
 - 이미지 생성(유료) 호출: `generateCharacterSheet`는 프로젝트 생성 시 **정확히 1회**뿐이다 — 재시도 버튼이 없다(#19 결정: 세션마다 다시 만들지 않음). 그 프로젝트로 세션을 몇 개 만들거나 몇 번 재방문해도 추가 호출은 없다.
 - 텍스트 호출: `extractStyle`은 `ResultStep`(`OnboardingFlow.tsx`)의 "다시 뽑기"를 누를 때마다 추가로 1회씩 늘어난다 — 상한이 없어 사용자가 원하는 만큼 반복 가능하다. 같은 클릭이 같은 파일을 `/api/upload`에 재업로드하므로, 재시도 1회당 업로드 N회 + 추출 1회가 함께 늘어난다.
-- 참고: `generateCoverVariants`(이미지 생성)에도 별도 "다시 뽑기"가 있다(`SessionFlow.tsx`). 이건 `extract.ts` 소관이 아니라 혼동 방지로만 적는다.
+- 참고: `generateCoverVariants`(이미지 생성)에도 별도 "첫 번째 컷 다시 만들기"가 있다(`SessionFlow.tsx` `handleRefGenerate`). 이건 `extract.ts` 소관이 아니라 혼동 방지로만 적는다.
 
 **`spec/vocabulary.json` 소비 방식**
 
