@@ -2601,7 +2601,10 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         </div>
       )}
       {step === "cover" && !genError && refCandidates.length === 0 && (
-        <Spinner text={demoMode ? "데모 캐시를 불러오고 있어요..." : "기준 컷을 그리고 있어요..."} />
+        <Spinner
+          text={demoMode ? "데모 캐시를 불러오고 있어요..." : "기준 컷을 그리고 있어요..."}
+          bar
+        />
       )}
       {step === "generating" && !genError && (
         <Spinner
@@ -2611,6 +2614,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               : "컷을 만들고 있어요..."
           }
           progress={genProgress}
+          bar
         />
       )}
 
@@ -2904,17 +2908,56 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
   );
 }
 
-function Spinner({ text, progress }: { text: string; progress?: { done: number; total: number } | null }) {
+function Spinner({
+  text,
+  progress,
+  bar = false,
+}: {
+  text: string;
+  progress?: { done: number; total: number } | null;
+  /** #341 ①: true면 스피너 대신 진행 바를 보여 준다(컷 생성·기준 컷 대기 구간). */
+  bar?: boolean;
+}) {
+  const hasProgress = !!progress && progress.total > 0;
   return (
     <div className="flex flex-col items-center gap-4 text-center">
-      <div className="h-12 w-12 animate-spin rounded-full border-4 border-zinc-200 border-t-zinc-700" />
+      {!bar && (
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-zinc-200 border-t-zinc-700" />
+      )}
       <p className="text-base font-medium">{text}</p>
-      {progress && progress.total > 0 && (
-        <div className="h-2 w-48 overflow-hidden rounded-full bg-zinc-200">
-          <div
-            className="h-full bg-zinc-700 transition-all"
-            style={{ width: `${(progress.done / progress.total) * 100}%` }}
-          />
+      {bar && !hasProgress && (
+        <div
+          role="progressbar"
+          aria-busy="true"
+          aria-label={text}
+          className="progress-shimmer h-2 w-56 rounded-full bg-zinc-300"
+        />
+      )}
+      {hasProgress && progress && (
+        <div
+          role="progressbar"
+          aria-label={text}
+          aria-valuemin={0}
+          aria-valuemax={progress.total}
+          aria-valuenow={progress.done}
+          className="flex w-56 gap-1"
+        >
+          {Array.from({ length: progress.total }, (_, i) => {
+            // 끝난 칸은 진하게, 지금 만드는 칸은 빛이 지나가게, 남은 칸은 연하게.
+            const state = i < progress.done ? "done" : i === progress.done ? "active" : "pending";
+            return (
+              <div
+                key={i}
+                className={
+                  state === "done"
+                    ? "h-2 flex-1 rounded-full bg-zinc-700 transition-colors"
+                    : state === "active"
+                      ? "progress-shimmer h-2 flex-1 rounded-full bg-zinc-400 transition-colors"
+                      : "h-2 flex-1 rounded-full bg-zinc-200 transition-colors"
+                }
+              />
+            );
+          })}
         </div>
       )}
     </div>
