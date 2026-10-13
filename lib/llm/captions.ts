@@ -609,12 +609,20 @@ function resolvePurposeId(input: CaptionsRequest): string | undefined {
 /**
  * <맥락>의 CTA 형식 줄 (issue #205 K0). preset id를 그대로 넣지 않고 목적
  * 라벨·template 문장을 넣는다. id가 목록에 없으면 fallback_id 규칙 그대로.
+ * #339: template은 그대로 옮겨 쓸 문구가 아니라 예시다. 강도별로 나눔 —
+ * clear는 목적 이름의 핵심 행동 단어를 4번 컷 대사에 그대로 포함하고 권유
+ * 어미로, soft는 목적 암시만.
+ * none은 주입하지 않는다(호출부에서 이미 제외, 여기서는 빈 문자열).
  */
-function ctaContextLine(ctaFormat: string): string {
+function ctaContextLine(ctaFormat: string, strength: CtaStrength): string {
+  if (strength === "none") return "";
   const preset =
     getCtaPresetById(ctaFormat) ?? getCtaPresetById(getFallbackCtaId());
   if (!preset) return `CTA 형식: ${ctaFormat}`;
-  return `CTA 형식: ${preset.label}: ${preset.template}`;
+  if (strength === "soft") {
+    return `CTA 목적: ${preset.label} (예: "${preset.template}" — 이 문구를 그대로 쓰지 말고, 같은 목적을 자연스럽게 암시하는 표현으로 자유롭게 새로 쓰시오. 다른 목적으로 바꾸지 마시오)`;
+  }
+  return `CTA 목적: ${preset.label} (예: "${preset.template}" — 이 예시를 그대로 옮기지 말고, 4번 컷 대사에 목적 이름의 핵심 행동 단어(예: "상담 신청 유도"의 "상담·신청", "수강/모집 신청 유도"의 "신청·수강")를 반드시 그대로 포함해 권유 어미로 끝내는 한 줄을 앞 컷 맥락과 인물 말투에 맞게 새로 쓰시오)`;
 }
 
 /**
@@ -725,7 +733,7 @@ function buildPrompt(input: CaptionsRequest, wanted: number[]): string {
   const ctaLine =
     strength === "none"
       ? ""
-      : `${ctaContextLine(resolvePurposeId(input) ?? input.context.cta_format)}\n`;
+      : `${ctaContextLine(resolvePurposeId(input) ?? input.context.cta_format, strength)}\n`;
   // S3: 모델에 보내는 소재·cast 서술은 서버가 받은 subject로 다시 파싱해 투영한다.
   const projectedSubject = projectForModel(input.subject, input.subject, input.subject_tags);
   const projectedFlow = projectForModel(input.flow, input.subject, input.subject_tags);
