@@ -1104,7 +1104,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       applyCut1Candidate(stamped);
       selectionLogRef.current = recordRound(selectionLogRef.current, variants, requested ?? variants.length);
     } catch {
-      setGenError("기준 컷을 만드는 데 실패했어요. 다시 시도해주세요");
+      setGenError("첫 번째 컷을 그리지 못했어요. 다시 시도해주세요");
     }
   }
 
@@ -1421,7 +1421,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
         selectionLogRef.current = recordRound(selectionLogRef.current, [variants[0]], 1);
       }
     } catch {
-      setRefError("기준 컷을 다시 만들지 못했어요. 다시 시도해주세요");
+      setRefError("첫 번째 컷을 다시 그리지 못했어요. 다시 시도해주세요");
     } finally {
       setRefGenerating(false);
     }
@@ -1796,7 +1796,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="컷 1 다시 만들기"
+        aria-label="첫 번째 컷 다시 만들기"
         onClick={() => {
           if (!refGenerating) setRefModalOpen(false);
         }}
@@ -1807,7 +1807,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
           className="relative flex max-h-full w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-lg bg-white p-4 text-left"
         >
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold">컷 1을 다시 만들어볼까요?</h2>
+            <h2 className="text-base font-semibold">첫 번째 컷을 다시 만들어볼까요?</h2>
             <button
               type="button"
               aria-label="닫기"
@@ -1855,7 +1855,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
             <img
               src={shown.image}
-              alt="다시 만든 컷 1"
+              alt="다시 만든 첫 번째 컷"
               className="aspect-square w-full rounded-md object-cover"
             />
           )}
@@ -2314,7 +2314,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               disabled={demoMode}
             />
             {/* #326 절충안: 구도 변화는 컷 1(기준컷)에는 적용되지 않아요. */}
-            <p className="-mt-2 text-xs text-zinc-400">구도 변화는 컷 1(기준 컷)에는 적용되지 않아요</p>
+            <p className="-mt-2 text-xs text-zinc-400">구도 변화는 2~4번째 컷에만 적용돼요</p>
 
             <CtaPurposeSelect
               id="cta-purpose"
@@ -2542,7 +2542,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                       <div className="flex w-full gap-2">
                         {i === 0 && (
                           <span className="shrink-0 rounded bg-zinc-100 px-2 py-1.5 text-xs text-zinc-500">
-                            기준 컷
+                            첫 번째 컷
                           </span>
                         )}
                         <label className="flex flex-1 items-center gap-2 text-xs text-zinc-600">
@@ -2654,13 +2654,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       {/* #326 통합②: 데모 모드도 기준컷 확정 화면 — cover_pick 1장이 컷 1이다. */}
       {step === "cover" && demoMode && refCandidates.length > 0 && storyboard && !genError && (
         <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
-          <h1 className="text-xl font-semibold">컷 1(기준 컷)입니다. 나머지 컷을 만들까요?</h1>
-          <p className="text-sm text-amber-700">데모 캐시 1장 확정 — 이 그림이 컷 1이 돼요</p>
+          <h1 className="text-xl font-semibold">첫 번째 컷을 이 그림으로 정할까요?</h1>
+          <p className="text-sm text-zinc-500">정하면 2~4번째 컷이 이 그림의 인물·그림체를 따라 그려져요</p>
+          <p className="text-sm text-amber-700">데모 캐시 1장 확정 — 이 그림이 첫 번째 컷이 돼요</p>
           {refCandidates[refShown]?.image ? (
             // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
             <img
               src={refCandidates[refShown].image}
-              alt="컷 1 기준 컷"
+              alt="첫 번째 컷"
               className="aspect-square w-full max-w-md rounded-md object-cover"
             />
           ) : (
@@ -2674,7 +2675,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               onClick={handleConfirmReference}
               className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
             >
-              이 컷 1로 진행
+              이 그림으로 정하고 진행
             </button>
           </div>
         </div>
@@ -2683,15 +2684,14 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       {/* #326 절충안: 컷 1(기준컷) 확정 단계. 표시 중인 후보가 곧 컷1이다. */}
       {step === "cover" && !demoMode && refCandidates.length > 0 && storyboard && !genError && (
         <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">
-          <h1 className="text-xl font-semibold">컷 1(기준 컷)입니다. 나머지 컷을 만들까요?</h1>
+          <h1 className="text-xl font-semibold">첫 번째 컷을 이 그림으로 정할까요?</h1>
           {/* #326 통합④ JEON 1번: 부제 수정 + 명세 R1 문구를 함께 둔다. */}
-          <p className="text-sm text-zinc-500">확정하면 컷 2부터 순서대로 만들어요. 확정한 그림이 기준 그림이에요</p>
-          <p className="text-sm text-zinc-500">이 그림이 컷 1이 돼요. 이 그림의 인물·배경·색감으로 나머지 컷을 그려요.</p>
+          <p className="text-sm text-zinc-500">정하면 2~4번째 컷이 이 그림의 인물·그림체를 따라 순서대로 그려져요</p>
           {refCandidates[refShown]?.image ? (
             // eslint-disable-next-line @next/next/no-img-element -- 생성된 이미지의 리졸브 URL, next/image 불필요
             <img
               src={refCandidates[refShown].image}
-              alt="컷 1 기준 컷"
+              alt="첫 번째 컷"
               className="aspect-square w-full max-w-md rounded-md object-cover"
             />
           ) : (
@@ -2703,7 +2703,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                aria-label="이전 기준 컷"
+                aria-label="이전 그림"
                 disabled={refShown === 0}
                 onClick={() => showRefCandidate(refShown - 1)}
                 className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-40"
@@ -2715,7 +2715,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               </span>
               <button
                 type="button"
-                aria-label="다음 기준 컷"
+                aria-label="다음 그림"
                 disabled={refShown === refCandidates.length - 1}
                 onClick={() => showRefCandidate(refShown + 1)}
                 className="rounded-md border border-zinc-300 px-2 py-1 text-xs hover:bg-zinc-50 disabled:opacity-40"
@@ -2737,7 +2737,7 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
               onClick={handleConfirmReference}
               className="rounded-md bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-700"
             >
-              이 컷 1로 진행
+              이 그림으로 정하고 진행
             </button>
           </div>
         </div>
@@ -2794,8 +2794,6 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
                   )}
                   <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
                     {cut.cut_index}컷 · {beatLabel(cut.narrative_beat)}
-                    {/* #326 통합④ JEON 3번: 완료 화면 컷 1에 "기준 컷" 배지. */}
-                    {i === 0 && " · 기준 컷"}
                   </span>
                 </div>
                 {/* 복원 뷰에는 저장 수단(handleSave)이 없어 여기서 고치면 그냥
