@@ -2477,21 +2477,17 @@ export default function SessionFlow({ sessionId }: { sessionId: string }) {
       {step === "captions" && storyboard && (
         <div className="flex w-full max-w-2xl flex-col items-center gap-4">
           <h1 className="text-xl font-semibold">대사를 확인하고 다듬어주세요</h1>
-          {/* #326 S2 수정: "디테일 수정"은 대사 생성 완료 뒤에만 보인다. 생성 중·실패에는 숨김. */}
-          {captionStatus === "ready" && (
+          {/* #326 S2 수정: "디테일 수정"은 대사 생성 완료 뒤에만 보인다. 생성 중·실패에는 숨김.
+              #333: 데모 캐시 모드에서는 연출 변경이 반영되지 않으므로 체크박스 자체를 보이지 않는다. */}
+          {captionStatus === "ready" && !demoMode && (
           <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-600">
             <input
               type="checkbox"
               checked={showDetailEdit}
-              disabled={demoMode}
               onChange={(e) => setShowDetailEdit(e.target.checked)}
             />
             디테일 수정
           </label>
-          )}
-          {/* #326 통합③ S7: 데모 캐시 모드에서는 연출 변경이 반영되지 않아요. */}
-          {captionStatus === "ready" && demoMode && (
-            <p className="text-xs text-amber-700">캐시 모드에서는 연출 변경이 반영되지 않아요</p>
           )}
           {captionStatus === "loading" && <Spinner text="대사를 만들고 있어요..." />}
           {captionError && (
