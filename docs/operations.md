@@ -38,7 +38,7 @@ cuttoon-copilot/
 │  ├─ (studio)/                화면 전체                      JEON-DAEJIN
 │  │   ├─ page.tsx             프로젝트 목록
 │  │   ├─ onboarding/          온보딩 + 프리셋 생성
-│  │   ├─ session/[id]/        소재 입력 → 3턴·말투·대사 → 표지 3안 → 4컷 완성
+│  │   ├─ session/[id]/        소재 입력 → 3턴·말투·콘티·대사 → 첫 번째 컷 → 컷 2~4 완성
 │  │   ├─ editor/[id]/         대사 수정 · 드래그 · 되돌리기
 │  │   └─ projects/            세션 목록
 │  └─ api/
@@ -55,7 +55,7 @@ cuttoon-copilot/
 │  ├─ llm/                     브레인스토밍 3턴 · 캡션         chictimin
 │  │   ├─ caption-tones.ts       컷 대사 톤 목록                chictimin
 │  │   └─ font-probe.ts          폰트 URL 확인                  chictimin
-│  ├─ session/                  표지 선택 기록                 chictimin
+│  ├─ session/                  선택 기록(첫 번째 컷 후보 라운드)  chictimin
 │  │   └─ selection-log.ts       라운드 기록 헬퍼 (#207)        chictimin
 │  ├─ openai/
 │  │   ├─ generate.ts          컷 생성 (멀티턴 세션 관리)      joniverse-ai
@@ -75,7 +75,7 @@ cuttoon-copilot/
 │  ├─ data/                    값 목록 데이터
 │  └─ samples/                 샘플 응답 JSON + 이미지
 └─ public/
-   └─ demo-cache/              발표용 캐시 폴백 (PNG 6장 + manifest.json, #310)
+   └─ demo-cache/              발표용 캐시 폴백 (PNG 4장(첫 번째 컷 1 + 컷 2·3·4) + manifest.json, #310·#352)
 ```
 
 | 담당 | 폴더 · 파일 | 역할 |
@@ -86,7 +86,7 @@ cuttoon-copilot/
 | smartman3514-commits | `lib/render/` | 렌더링 버그 수정(#105, #169, #170) + QA 검증 |
 | (지정 없음) | `scripts/`(`p0-storyboard-scan`·`demo-cache-build`·`two-person-check`) | 작업용 스크립트 |
 
-1차에는 A①~B③ 6파트 체제였다. `pipeline.md`는 각자 자기 영역 절을 고친다. `public/demo-cache/`는 joniverse-ai가 만들었다(#310, `scripts/demo-cache-build`).
+1차에는 A①~B③ 6파트 체제였다. `pipeline.md`는 각자 자기 영역 절을 고친다. `public/demo-cache/`는 joniverse-ai가 만들었다(#310, `scripts/demo-cache-build` — #352에서 재생성).
 
 <a id="ops-git"></a>
 ## 브랜치 · git 규칙
@@ -130,7 +130,7 @@ npm run spec:docs        # 문서 생성 — 검사 아님
 | 6. 프로젝트 목록 | `GET /api/preset` (id 없이) · 세션 목록 | 연결됨 | 완료 | #136 |
 | 7. 소재 입력 | — | 있음 | 부분 | #206(서버 PR #231 · 이미지 PR #237 · 태그 검사 PR #244 · 화면 배선 PR #251 · 복원 표식 PR #256 머지, #247 닫힘 — #206 닫힘 10-08, 남은 것: 사람 QA 확인(#217·#240·#307로 이월)) |
 | 8. 브레인스토밍 3턴 | `POST /api/brainstorm` · `lib/llm/brainstorm.ts` (업종 주입 · 질문 문구 단일화 PR #204) | 연결됨 | 완료 | #119(턴 건너뛰기 PR #154로 완료. 흐름 턴은 #157 종료 — 3종 유지) |
-| 9. 표지컷 3안 | `kind: 'cover_variants'` | 연결됨 | 완료 | #102(닫힘) |
+| 9. 첫 번째 컷 1장 | `kind: 'cover_variants'`(count 1) | 연결됨 | 완료 | #102(닫힘) |
 | 10. 4컷 생성 | `POST /api/generate` 체이닝 | 연결됨 | 완료 | #103(닫힘) · #104(`generateChainedCuts` 중간 실패 시 만든 컷 보존·이어서 만들기 — 2차 작업 10번) · #138(나머지 3컷 진행률 "n/3" — 2차 작업 5번) |
 | 11. 대사 수정 · 드래그 | — | 있음 | 완료 | PR #302 (에디터 드래그 저장, 10-08 머지) |
 | 12. v2 저장 · 되돌리기 | `/api/session`(선택 기록 `selections` 동봉 · #207) `/version` `/revert` · 재진입 복원 | 연결됨 | 완료 | #143 · #207(PR #210 · #213 머지) |
@@ -164,7 +164,7 @@ npm run spec:docs        # 문서 생성 — 검사 아님
 | 15 | 기능 | 소재 [브랜드·제품명] 표기 (서버 PR #231 · 이미지 투영 PR #237 · 태그 저장 검사 PR #244 · 화면 배선 PR #251 · 복원 표식 PR #256 머지, #247 닫힘 — #206 닫힘 10-08, 남은 것: 사람 QA 확인(#217·#240·#307로 이월)) | 품질 | 미정 | chictimin | #206 |
 | 16 | 기능 | 표지 선택 기록 (**완료** — 서버 PR #210 · 화면 PR #213 머지, #207 · #216 닫힘) | 품질 | 미정 | chictimin · JEON-DAEJIN | #207 |
 | 17 | 기능 | 미매핑 단어 안내 (**완료** — PR #255 · #257 머지: 한 줄 안내 + 확정 시 확인 팝업(다시 보지 않기)) | 품질 | 미정 | JEON-DAEJIN | #238 |
-| 18 | 기능 | 데모 캐시 (발표용 고정 결과물 — #239 닫힘 10-08, 후속 #307 10-08~10-12: 캐시 생성 joniverse-ai · Export 읽기 smartman3514-commits · 화면 연결 JEON-DAEJIN) | 발표 필수 | 10-10 | joniverse-ai · smartman3514-commits · JEON-DAEJIN | #307 (구 #239) |
+| 18 | 기능 | 데모 캐시 (발표용 고정 결과물 — #239 닫힘 10-08, 후속 #307 10-08~10-12: 캐시 생성 joniverse-ai · Export 읽기 smartman3514-commits · 화면 연결 JEON-DAEJIN) | 발표 필수 | 10-14 오전(#349 항목 3) | joniverse-ai · smartman3514-commits · JEON-DAEJIN | #307 (구 #239) |
 | 19 | 기능 | 골든 패스 2분 리허설 (P4, 10-13 사전 · 10-14 최종) | 발표 필수 | 10-13 사전 · 10-14 최종 | smartman3514-commits · joniverse-ai | #240 |
 | 20 | 버그 | 브레인스토밍 선택지 0개 턴에서 "알아서 해줘" 숨김 — 타이핑 강제 (**완료** — PR #251 머지, #247 닫힘) | 발표 필수 | 10-13 | chictimin | #247 |
 | 21 | 기능 | 프로젝트 폰트 에셋화 (스키마 PR #241 · 합성·Export PR #236 · 확인 API PR #245 · 온보딩 입력 PR #250 · 에디터 PR #246 머지 — #209 닫힘 10-08, 남은 것: 사람 QA 확인(#217·#240·#307로 이월)) | 품질 | 미정 | chictimin · smartman3514-commits · JEON-DAEJIN | #209 |
