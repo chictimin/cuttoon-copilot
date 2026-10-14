@@ -133,7 +133,7 @@ export default function ProjectList() {
   return (
     <main className="flex min-h-screen flex-col items-center gap-6 p-8">
       <div className="flex w-full max-w-2xl items-center justify-between">
-        <h1 className="text-2xl font-semibold">컷툰 코파일럿</h1>
+        <h1 className="text-2xl font-semibold">컷파일럿</h1>
         <div className="flex flex-col items-end gap-1">
           <Link
             href="/onboarding"

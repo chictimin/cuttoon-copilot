@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "컷툰 제작 AI 코파일럿",
-  description: "컷툰 제작 AI 코파일럿",
+  title: "컷파일럿",
+  description: "컷파일럿 — 컷툰 제작 AI",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
